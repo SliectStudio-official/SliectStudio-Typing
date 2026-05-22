@@ -1,0 +1,40 @@
+# 自动生成的配置文件（包含敏感信息）
+launcher.config.ps1
+
+# 依赖
+node_modules/
+
+# 数据库
+data/
+*.db
+*.db-journal
+
+# 日志
+logs/
+*.log
+
+# 环境变量
+.env
+.env.local
+.env.production
+
+# 上传文件
+uploads/
+public/avatars/
+
+# 部署产物
+Typing-*/
+Typing-*.zip
+
+# Trae 本地配置
+.trae/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

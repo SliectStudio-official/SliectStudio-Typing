@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打字练习</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="theme-toggle.js"></script>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <nav>
+    <div class="logo">Typing</div>
+    <ul class="nav-links">
+      <li><a href="index.html" class="active">练习</a></li>
+      <li id="admin-nav-item" style="display:none"><a href="admin.html">管理</a></li>
+      <li id="profile-nav-item" style="display:none"><a href="profile.html">个人中心</a></li>
+    </ul>
+    <div class="nav-right">
+      <button class="theme-toggle" id="theme-toggle" aria-label="切换主题" title="切换亮色/暗色模式">
+        <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        <svg class="theme-icon moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+      </button>
+      <button class="nav-btn" id="submit-article-btn" style="display:none">投稿</button>
+      <div id="auth-area">
+        <button class="nav-btn" id="login-btn" style="margin-right:10px">登录</button>
+        <button class="nav-btn" id="register-btn">注册</button>
+      </div>
+      <div id="user-area" style="display:none">
+        <span class="user-info"><span class="username" id="display-username" style="margin-right:10px"></span></span>
+        <button class="nav-btn" id="logout-btn">退出</button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="sub-nav">
+    <div class="section-name">打字练习</div>
+  </div>
+
+  <div class="announcement-bar" id="announcement-bar" style="display:none" role="banner" aria-label="站点公告">
+    <span class="announcement-level-badge" id="announcement-badge"></span>
+    <span class="announcement-title" id="announcement-title"></span>
+    <span class="announcement-text" id="announcement-text"></span>
+    <button class="announcement-close" id="announcement-close" aria-label="关闭公告">&times;</button>
+  </div>
+
+  <div class="container">
+    <div class="section-card">
+      <div class="section-card-title">选择文章</div>
+      <div class="filter-row">
+        <div class="filter-group">
+          <label for="category-filter">分类筛选</label>
+          <select id="category-filter" class="custom-select">
+            <option value="">全部分类</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="difficulty-filter">难度筛选</label>
+          <select id="difficulty-filter" class="custom-select">
+            <option value="">全部难度</option>
+            <option value="1">简单</option>
+            <option value="2">中等</option>
+            <option value="3">困难</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label for="article-select">选择文章</label>
+          <select id="article-select" class="custom-select">
+            <option value="">-- 请选择 --</option>
+          </select>
+        </div>
+      </div>
+      <p class="note" id="article-info"></p>
+    </div>
+
+    <div class="section-card" id="private-articles-card" style="display:none">
+      <div class="section-card-title">我的私人文章</div>
+      <select id="private-article-select" class="custom-select">
+        <option value="">-- 选择私人文章 --</option>
+      </select>
+      <div id="private-article-list" class="private-article-list"></div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-title">练习设置</div>
+      <div class="mode-options">
+        <label><input type="radio" name="mode" value="timed" checked> 限时模式</label>
+        <input type="number" id="time-limit" value="90" min="10" max="600" style="width:80px;display:inline-block;margin-left:8px"> 秒
+        <label style="margin-left:16px"><input type="radio" name="mode" value="full"> 完成全文</label>
+      </div>
+      <div class="btn-group">
+        <button class="btn-primary" id="start-btn">开始练习</button>
+        <button class="btn-secondary" id="reset-btn" disabled>重置</button>
+      </div>
+    </div>
+
+    <div class="section-card" id="stats-card" style="display:none">
+      <div class="section-card-title">实时统计</div>
+      <div class="stats-bar">
+        <div class="stat-item">
+          <div class="stat-label">已打字数</div>
+          <div class="stat-value" id="stat-typed">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">正确字数</div>
+          <div class="stat-value" id="stat-correct">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">错误字数</div>
+          <div class="stat-value" id="stat-wrong">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">速度（字/分）</div>
+          <div class="stat-value" id="stat-speed">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">准确率</div>
+          <div class="stat-value" id="stat-accuracy">100%</div>
+        </div>
+      </div>
+      <div id="timer-row" style="display:none">
+        <div class="timer-display" id="timer-display">90</div>
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar" id="timer-progress"></div>
+        </div>
+      </div>
+      <div class="progress-bar-wrapper" id="text-progress-wrap" style="display:none">
+        <div class="progress-bar" id="text-progress"></div>
+      </div>
+      <p class="note">统计方式：速度 = 正确字符数 ÷ 用时分钟数（字符/分钟）；准确率 = 正确字符数 ÷ 总击键数</p>
+    </div>
+
+    <div class="section-card" id="typing-card" style="display:none">
+      <div class="section-card-title">打字区域</div>
+      <div class="typing-layout">
+        <div class="typing-left">
+          <div class="typing-label">原文
+            <button class="speech-toggle" id="speech-toggle" title="英文朗读" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button>
+          </div>
+          <div class="text-display" id="text-display"></div>
+        </div>
+        <div class="typing-right">
+          <div class="typing-label">输入</div>
+          <textarea id="typing-input" placeholder="点击"开始练习"后在此打字..." disabled></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-card" id="result-card" style="display:none">
+      <div class="result-panel">
+        <div class="result-title">练习完成</div>
+        <div class="result-stats">
+          <div class="result-stat">
+            <div class="label">速度</div>
+            <div class="value" id="result-speed">0 字/分</div>
+          </div>
+          <div class="result-stat">
+            <div class="label">准确率</div>
+            <div class="value" id="result-accuracy">100%</div>
+          </div>
+          <div class="result-stat">
+            <div class="label">用时</div>
+            <div class="value" id="result-time">0秒</div>
+          </div>
+        </div>
+        <div class="nickname-form">
+          <input type="text" id="nickname-input" placeholder="输入昵称" maxlength="20">
+          <button class="btn-primary" id="submit-score-btn">提交成绩</button>
+        </div>
+        <p class="note" id="submit-msg" style="margin-top:8px"></p>
+      </div>
+    </div>
+
+    <div class="section-card" id="history-card" style="display:none">
+      <div class="section-card-title">我的成绩</div>
+      <div class="history-list" id="history-list"></div>
+      <div class="empty-msg" id="history-empty">暂无历史记录</div>
+    </div>
+  </div>
+
+  <button class="leaderboard-btn" id="lb-btn">排行榜</button>
+
+  <div class="sidebar-overlay" id="lb-overlay"></div>
+  <div class="sidebar" id="lb-sidebar">
+    <div class="sidebar-header">
+      <h3>排行榜</h3>
+      <button class="sidebar-close" id="lb-close">关闭</button>
+    </div>
+    <div class="sidebar-body">
+      <div class="lb-tabs">
+        <button class="lb-tab active" data-period="all">总榜</button>
+        <button class="lb-tab" data-period="week">本周</button>
+        <button class="lb-tab" data-period="today">今日</button>
+        <button class="lb-tab" data-period="guest">游客榜</button>
+      </div>
+      <div class="lb-filter-row">
+        <select id="lb-category-filter" class="custom-select">
+          <option value="">全部分类</option>
+        </select>
+      </div>
+      <table class="lb-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>昵称</th>
+            <th>速度</th>
+            <th>准确率</th>
+            <th>文章</th>
+            <th>日期</th>
+          </tr>
+        </thead>
+        <tbody id="lb-tbody"></tbody>
+      </table>
+      <div class="empty-msg" id="lb-empty">暂无记录</div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="auth-modal" style="display:none">
+    <div class="auth-modal">
+      <h3 id="auth-modal-title">登录</h3>
+      <div id="auth-login-form">
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="login-username" placeholder="请输入用户名">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="password" id="login-password" placeholder="请输入密码">
+        </div>
+        <div class="auth-error" id="login-error"></div>
+        <div class="btn-group">
+          <button class="btn-primary" id="login-submit">登录</button>
+        </div>
+        <div class="auth-switch">还没有账号？<a id="switch-to-register">注册</a></div>
+      </div>
+      <div id="auth-register-form" style="display:none">
+        <div class="form-group">
+          <label>用户名</label>
+          <input type="text" id="reg-username" placeholder="2-20字符">
+        </div>
+        <div class="form-group">
+          <label>邮箱（选填）</label>
+          <input type="text" id="reg-email" placeholder="example@mail.com">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="password" id="reg-password" placeholder="至少6位">
+        </div>
+        <div class="form-group">
+          <label>确认密码</label>
+          <input type="password" id="reg-password-confirm" placeholder="再次输入密码">
+        </div>
+        <div class="auth-error" id="register-error"></div>
+        <div class="btn-group">
+          <button class="btn-primary" id="register-submit">注册</button>
+        </div>
+        <div class="auth-switch">已有账号？<a id="switch-to-login">登录</a></div>
+      </div>
+    </div>
+  </div>
+
+
+
+  <div class="modal-overlay" id="submit-article-modal" style="display:none">
+    <div class="auth-modal">
+      <h3>投稿文章</h3>
+      <div class="form-group">
+        <label>标题</label>
+        <input type="text" id="submit-title" placeholder="文章标题">
+      </div>
+      <div class="form-group">
+        <label>分类</label>
+        <select id="submit-category" class="custom-select"></select>
+      </div>
+      <div class="form-group">
+        <label>正文</label>
+        <textarea id="submit-content" placeholder="输入文章正文" style="min-height:150px"></textarea>
+      </div>
+      <div class="auth-error" id="submit-error"></div>
+      <div class="btn-group">
+        <button class="btn-secondary" id="submit-article-cancel">取消</button>
+        <button class="btn-primary" id="submit-article-confirm">提交审核</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer" id="site-footer">Loading...</footer>
+  <script src="custom-select.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

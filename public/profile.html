@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人中心</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="theme-toggle.js"></script>
+</head>
+<body>
+  <nav>
+    <div class="logo">Typing</div>
+    <ul class="nav-links">
+      <li><a href="index.html">练习</a></li>
+      <li id="admin-nav-item" style="display:none"><a href="admin.html">管理</a></li>
+      <li><a href="profile.html" class="active">个人中心</a></li>
+    </ul>
+    <div class="nav-right">
+      <button class="theme-toggle" id="theme-toggle" aria-label="切换主题" title="切换亮色/暗色模式">
+        <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+        <svg class="theme-icon moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+      </button>
+      <span class="user-info"><span class="username" id="nav-username"></span></span>
+      <button class="nav-btn" id="logout-btn">退出</button>
+    </div>
+  </nav>
+
+  <div class="sub-nav">
+    <div class="section-name">个人中心</div>
+  </div>
+
+  <div class="container" id="profile-container">
+    <div class="profile-access-denied" id="access-denied" style="display:none">
+      <div style="font-size:48px;margin-bottom:16px"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></div>
+      <h2 style="margin-bottom:12px;color:var(--ink)">未登录</h2>
+      <p style="color:var(--muted);margin-bottom:24px">请先登录后查看个人中心</p>
+      <a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none">返回首页</a>
+    </div>
+
+    <div id="profile-content" style="display:none">
+      <div class="announcement-bar" id="announcement-bar" style="display:none" role="banner" aria-label="站点公告">
+        <span class="announcement-level-badge" id="announcement-badge"></span>
+        <span class="announcement-title" id="announcement-title"></span>
+        <span class="announcement-text" id="announcement-text"></span>
+        <button class="announcement-close" id="announcement-close" aria-label="关闭公告">&times;</button>
+      </div>
+
+      <div class="profile-header">
+        <div class="avatar-wrapper">
+          <img id="avatar-img" src="" alt="头像" class="avatar-img">
+          <div class="avatar-overlay" id="avatar-overlay">
+            <span>更换</span>
+          </div>
+          <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.gif" style="display:none">
+        </div>
+        <div class="profile-meta">
+          <div class="profile-nickname" id="profile-nickname"></div>
+          <div class="profile-username">@<span id="profile-username"></span></div>
+          <div class="profile-email" id="profile-email"></div>
+          <div class="profile-role" id="profile-role"></div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">练习统计</div>
+        <div class="stats-bar" id="stats-summary">
+          <div class="stat-item">
+            <div class="stat-label">总练习次数</div>
+            <div class="stat-value" id="stat-total-practices">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">总击键数</div>
+            <div class="stat-value" id="stat-total-keystrokes">0</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-label">总用时</div>
+            <div class="stat-value" id="stat-total-time">0分钟</div>
+          </div>
+        </div>
+        <div class="day-range-selector" style="margin-bottom:16px;display:flex;gap:8px">
+          <button class="btn-secondary day-range-btn active" data-days="7">近7天</button>
+          <button class="btn-secondary day-range-btn" data-days="30">近30天</button>
+        </div>
+        <div style="position:relative;height:300px">
+          <canvas id="stats-chart"></canvas>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">修改昵称</div>
+        <div class="profile-form-row">
+          <input type="text" id="nickname-input" placeholder="输入新昵称" maxlength="30">
+          <button class="btn-primary" id="save-nickname-btn">保存</button>
+        </div>
+        <p class="note" id="nickname-msg"></p>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">修改密码</div>
+        <div class="profile-form-col">
+          <div class="form-group">
+            <label>旧密码</label>
+            <input type="password" id="old-password" placeholder="输入旧密码">
+          </div>
+          <div class="form-group">
+            <label>新密码</label>
+            <input type="password" id="new-password" placeholder="至少6位">
+          </div>
+          <div class="form-group">
+            <label>确认新密码</label>
+            <input type="password" id="confirm-password" placeholder="再次输入新密码">
+          </div>
+        </div>
+        <button class="btn-primary" id="change-password-btn">修改密码</button>
+        <p class="note" id="password-msg"></p>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">错字本</div>
+        <table class="history-table" id="error-log-table">
+          <thead>
+            <tr>
+              <th>期望字符</th>
+              <th>实际输入</th>
+              <th>错误次数</th>
+            </tr>
+          </thead>
+          <tbody id="error-log-tbody"></tbody>
+        </table>
+        <div class="empty-msg" id="error-log-empty" style="display:none">暂无错误记录</div>
+        <div class="btn-group" id="error-log-actions" style="display:none">
+          <button class="btn-primary" id="generate-error-practice-btn">生成针对性练习</button>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">练习历史</div>
+        <table class="history-table" id="history-table">
+          <thead>
+            <tr>
+              <th>文章</th>
+              <th>速度</th>
+              <th>准确率</th>
+              <th>用时</th>
+              <th>日期</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody"></tbody>
+        </table>
+        <div class="empty-msg" id="history-empty" style="display:none">暂无练习记录</div>
+        <div class="pagination" id="pagination"></div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">我的投稿</div>
+        <table class="history-table" id="submitted-articles-table">
+          <thead>
+            <tr>
+              <th>标题</th>
+              <th>状态</th>
+              <th>审核备注</th>
+              <th>日期</th>
+            </tr>
+          </thead>
+          <tbody id="submitted-articles-tbody"></tbody>
+        </table>
+        <div class="empty-msg" id="submitted-articles-empty" style="display:none">暂无投稿记录</div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">私人文章</div>
+        <div class="profile-form-col" style="margin-bottom:16px">
+          <div class="form-group">
+            <label>标题</label>
+            <input type="text" id="private-title-input" placeholder="输入文章标题">
+          </div>
+          <div class="form-group">
+            <label>内容</label>
+            <textarea id="private-content-input" placeholder="输入文章内容" rows="4"></textarea>
+          </div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <button class="btn-primary" id="add-private-article-btn">添加</button>
+            <span style="color:var(--muted);font-size:14px">或</span>
+            <input type="file" id="private-file-input" accept=".txt" style="font-size:14px">
+            <button class="btn-secondary" id="upload-private-article-btn">上传TXT</button>
+          </div>
+        </div>
+        <div id="private-articles-list"></div>
+        <div class="empty-msg" id="private-articles-empty" style="display:none">暂无私人文章</div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer" id="site-footer">Loading...</footer>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="profile.js"></script>
+</body>
+</html>

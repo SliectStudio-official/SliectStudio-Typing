@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统初始化 - 打字练习</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="theme-toggle.js"></script>
+  <style>
+    .setup-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .setup-card {
+      max-width: 480px;
+      width: 100%;
+      background: var(--surface-card);
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+      border: 1px solid var(--glass-border);
+      border-radius: var(--glass-radius);
+      padding: 40px;
+      box-shadow: var(--glass-shadow);
+    }
+    .setup-header {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+    .setup-header h1 {
+      font-family: 'Poppins', 'Inter', system-ui, sans-serif;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+    .setup-header p {
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .setup-form .form-group {
+      margin-bottom: 20px;
+    }
+    .setup-form label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--body);
+      margin-bottom: 6px;
+    }
+    .setup-form input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid var(--hairline);
+      border-radius: 12px;
+      font-size: 14px;
+      background: var(--glass-bg);
+      color: var(--ink);
+      outline: none;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .setup-form input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+    .setup-form .hint {
+      font-size: 12px;
+      color: var(--muted-soft);
+      margin-top: 4px;
+    }
+    .setup-form .error {
+      font-size: 12px;
+      color: var(--semantic-error);
+      margin-top: 4px;
+      display: none;
+    }
+    .setup-form .error.show {
+      display: block;
+    }
+    .setup-form button[type="submit"] {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--on-primary);
+      background: var(--primary);
+      cursor: pointer;
+      transition: background 0.3s ease, transform 0.2s ease;
+      margin-top: 8px;
+    }
+    .setup-form button[type="submit"]:hover {
+      background: var(--primary-active);
+      transform: translateY(-1px);
+    }
+    .setup-form button[type="submit"]:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .setup-success {
+      text-align: center;
+      display: none;
+    }
+    .setup-success.show {
+      display: block;
+    }
+    .setup-success .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 20px;
+      background: var(--semantic-success);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .setup-success .icon svg {
+      width: 32px;
+      height: 32px;
+      color: #fff;
+    }
+    .setup-success h2 {
+      font-family: 'Poppins', 'Inter', system-ui, sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+    .setup-success p {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+    .setup-success a {
+      display: inline-block;
+      padding: 12px 32px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--on-primary);
+      background: var(--primary);
+      text-decoration: none;
+      transition: background 0.3s ease;
+    }
+    .setup-success a:hover {
+      background: var(--primary-active);
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-page">
+    <div class="setup-card">
+      <div id="setup-form-container">
+        <div class="setup-header">
+          <h1>欢迎使用打字练习</h1>
+          <p>首次使用，请创建管理员账户</p>
+        </div>
+        <form class="setup-form" id="setup-form">
+          <div class="form-group">
+            <label for="username">管理员用户名 *</label>
+            <input type="text" id="username" name="username" placeholder="请输入用户名" autocomplete="off" required>
+            <div class="hint">2-20 个字符</div>
+            <div class="error" id="username-error"></div>
+          </div>
+          <div class="form-group">
+            <label for="email">邮箱（可选）</label>
+            <input type="email" id="email" name="email" placeholder="请输入邮箱">
+            <div class="error" id="email-error"></div>
+          </div>
+          <div class="form-group">
+            <label for="password">密码 *</label>
+            <input type="password" id="password" name="password" placeholder="请输入密码" required>
+            <div class="hint">至少 6 位字符</div>
+            <div class="error" id="password-error"></div>
+          </div>
+          <div class="form-group">
+            <label for="password-confirm">确认密码 *</label>
+            <input type="password" id="password-confirm" name="passwordConfirm" placeholder="请再次输入密码" required>
+            <div class="error" id="password-confirm-error"></div>
+          </div>
+          <button type="submit" id="submit-btn">创建管理员账户</button>
+        </form>
+      </div>
+      <div class="setup-success" id="setup-success">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+        <h2>初始化完成</h2>
+        <p>管理员账户已创建成功，即将跳转到首页</p>
+        <a href="index.html">立即开始</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      var form = document.getElementById('setup-form');
+      var submitBtn = document.getElementById('submit-btn');
+      var successDiv = document.getElementById('setup-success');
+      var formContainer = document.getElementById('setup-form-container');
+
+      function showError(id, msg) {
+        var el = document.getElementById(id);
+        if (el) { el.textContent = msg; el.classList.add('show'); }
+      }
+      function clearErrors() {
+        document.querySelectorAll('.error').forEach(function(el) {
+          el.textContent = '';
+          el.classList.remove('show');
+        });
+      }
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        clearErrors();
+
+        var username = document.getElementById('username').value.trim();
+        var email = document.getElementById('email').value.trim();
+        var password = document.getElementById('password').value;
+        var passwordConfirm = document.getElementById('password-confirm').value;
+        var hasError = false;
+
+        if (!username || username.length < 2 || username.length > 20) {
+          showError('username-error', '用户名长度需为 2-20 个字符');
+          hasError = true;
+        }
+        if (!password || password.length < 6) {
+          showError('password-error', '密码至少 6 位');
+          hasError = true;
+        }
+        if (password !== passwordConfirm) {
+          showError('password-confirm-error', '两次输入的密码不一致');
+          hasError = true;
+        }
+        if (hasError) return;
+
+        submitBtn.disabled = true;
+        submitBtn.textContent = '创建中...';
+
+        fetch('/api/bootstrap/create-admin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: username, email: email, password: password, passwordConfirm: passwordConfirm })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (data.error) {
+            if (data.error.includes('用户名') || data.error.includes('存在')) {
+              showError('username-error', data.error);
+            } else if (data.error.includes('密码')) {
+              showError('password-error', data.error);
+            } else {
+              showError('password-confirm-error', data.error);
+            }
+            submitBtn.disabled = false;
+            submitBtn.textContent = '创建管理员账户';
+          } else if (data.token) {
+            localStorage.setItem('token', data.token);
+            localStorage.setItem('user', JSON.stringify(data.user));
+            formContainer.style.display = 'none';
+            successDiv.classList.add('show');
+            setTimeout(function() {
+              window.location.href = 'index.html';
+            }, 2000);
+          }
+        })
+        .catch(function(err) {
+          showError('password-confirm-error', '请求失败，请稍后重试');
+          submitBtn.disabled = false;
+          submitBtn.textContent = '创建管理员账户';
+        });
+      });
+
+      // 检查是否已完成初始化
+      fetch('/api/bootstrap/status')
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          if (!data.needsBootstrap) {
+            window.location.href = 'index.html';
+          }
+        })
+        .catch(function() {});
+    })();
+  </script>
+</body>
+</html>
