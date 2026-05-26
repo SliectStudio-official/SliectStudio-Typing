@@ -3,7 +3,7 @@
 ## Typing-260526.1708
 
 ### 新增功能
-- 🔌 **SQLite/MySQL 双数据库支持**：通过 [db-config.json](file:///e:/LanTest/db-config.json) 灵活切换
+- 🔌 **SQLite/MySQL 双数据库支持**：通过 db-config.json 灵活切换
 - 📡 **离线访问提醒**：橙色横幅提示当前处于离线状态
 - 🏷️ **版本号配置**：统一管理版本信息
 
