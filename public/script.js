@@ -263,6 +263,10 @@ registerSubmit.addEventListener('click', async () => {
     registerError.textContent = '请输入用户名和密码';
     return;
   }
+  if (password.length < 6) {
+    registerError.textContent = '密码至少6位';
+    return;
+  }
   if (password !== passwordConfirm) {
     registerError.textContent = '两次输入的密码不一致';
     return;

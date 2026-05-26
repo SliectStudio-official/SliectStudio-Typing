@@ -18,8 +18,8 @@ const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'typing-practi
 if (isProduction && !JWT_SECRET) {
   throw new Error('JWT_SECRET is required in production');
 }
-if (!process.env.JWT_SECRET && !isProduction) {
-  console.warn('JWT_SECRET is not set, using fallback secret for local development only.');
+if (!process.env.JWT_SECRET) {
+  console.warn('[安全警告] JWT_SECRET 未设置，使用硬编码密钥。生产环境请务必设置环境变量 JWT_SECRET。');
 }
 
 app.use(express.json());
@@ -219,8 +219,8 @@ app.post('/api/auth/register', async (req, res) => {
     if (existing) {
       return res.status(400).json({ error: '用户名已存在' });
     }
-    if (email) {
-      const emailExisting = await db.get('SELECT id FROM users WHERE email = ?', email);
+    if (email && email.trim()) {
+      const emailExisting = await db.get('SELECT id FROM users WHERE email = ?', email.trim());
       if (emailExisting) {
         return res.status(400).json({ error: '邮箱已被注册' });
       }
@@ -345,7 +345,7 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
     const params = [];
     if (username) { updates.push('username = ?'); params.push(username); updates.push('nickname = ?'); params.push(username); }
     if (email !== undefined) { updates.push('email = ?'); params.push(email); }
-    if (role) { updates.push('role = ?'); params.push(role); }
+    if (role !== undefined) { updates.push('role = ?'); params.push(role); }
     if (password) {
       if (password.length < 6) {
         return res.status(400).json({ error: '密码至少6位' });
@@ -424,6 +424,7 @@ app.put('/api/categories/:id', authMiddleware, adminMiddleware, async (req, res)
 
 app.delete('/api/categories/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    await db.run('UPDATE articles SET category_id = NULL WHERE category_id = ?', req.params.id);
     await db.run('DELETE FROM categories WHERE id = ?', req.params.id);
     res.json({ success: true });
   } catch (e) {
@@ -523,8 +524,10 @@ app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) =
 
 app.delete('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    await db.run('DELETE FROM articles WHERE id = ?', req.params.id);
-    await db.run('DELETE FROM scores WHERE article_id = ?', req.params.id);
+    await db.transaction(async (tdb) => {
+      await tdb.run('DELETE FROM articles WHERE id = ?', req.params.id);
+      await tdb.run('DELETE FROM scores WHERE article_id = ?', req.params.id);
+    })();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: '删除文章失败: ' + e.message });
@@ -612,7 +615,7 @@ app.get('/api/leaderboard', async (req, res) => {
 
     const whereStr = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
     const scores = await db.all(
-      `SELECT s.*, a.title as article_title, u.avatar, u.nickname FROM scores s LEFT JOIN articles a ON s.article_id = a.id LEFT JOIN users u ON s.user_id = u.id ${whereStr} ORDER BY s.speed DESC, s.accuracy DESC`,
+      `SELECT s.*, a.title as article_title, u.avatar, u.nickname FROM scores s LEFT JOIN articles a ON s.article_id = a.id LEFT JOIN users u ON s.user_id = u.id ${whereStr} ORDER BY s.speed DESC, s.accuracy DESC LIMIT 500`,
       ...params
     );
 
@@ -631,6 +634,15 @@ app.post('/api/leaderboard', async (req, res) => {
     const { nickname, speed, accuracy, time_seconds, article_id, source } = req.body;
     if (!nickname || speed === undefined || accuracy === undefined) {
       return res.status(400).json({ error: '昵称、速度和准确率不能为空' });
+    }
+    if (typeof speed !== 'number' || speed < 0 || speed > 1000) {
+      return res.status(400).json({ error: '速度数据异常' });
+    }
+    if (typeof accuracy !== 'number' || accuracy < 0 || accuracy > 100) {
+      return res.status(400).json({ error: '准确率数据异常' });
+    }
+    if (time_seconds !== undefined && (typeof time_seconds !== 'number' || time_seconds < 0 || time_seconds > 86400)) {
+      return res.status(400).json({ error: '时长数据异常' });
     }
 
     const sensitiveWord = await containsSensitiveWord(nickname);
@@ -1102,7 +1114,7 @@ app.get('/api/admin/sensitive-words', authMiddleware, adminMiddleware, async (re
   try {
     const row = await db.get("SELECT value FROM settings WHERE `key` = 'sensitive_words'");
     const words = row && row.value ? row.value.split(',').map(w => w.trim()).filter(w => w) : [];
-    res.json(words);
+    res.json({ words });
   } catch (e) {
     res.status(500).json({ error: '获取敏感词失败' });
   }

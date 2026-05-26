@@ -107,23 +107,6 @@ self.addEventListener('install', (event) => {
       try {
         const cache = await caches.open(CACHE_NAME);
         await cache.addAll(CRITICAL_ASSETS);
-
-        try {
-          const res = await fetch('/api/articles');
-          if (res.ok) {
-            const articles = await res.json();
-            const toCache = articles.slice(0, 20);
-            for (const article of toCache) {
-              const url = `/api/articles/${article.id || article._id}`;
-              try {
-                const articleRes = await fetch(url);
-                if (articleRes.ok) {
-                  await cache.put(url, articleRes);
-                }
-              } catch {}
-            }
-          }
-        } catch {}
       } catch (e) {
         console.error('SW install failed:', e);
       }
