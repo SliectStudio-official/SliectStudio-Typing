@@ -84,34 +84,82 @@ if ($nodePath) {
     exit $LASTEXITCODE
 }
 
-# 5. 未找到 Node.js — 尝试自动安装
+# 5. 未找到 Node.js — 全自动安装
 Write-Host ''
-Write-Host '[WARN] Node.js not found on this machine.'
-Write-Host ''
+Write-Host '[AUTO] Node.js not found — attempting automatic installation...'
 
-$autoInstall = Read-Host 'Attempt auto-install via winget? [Y/n]'
-if ($autoInstall -eq '' -or $autoInstall -eq 'y' -or $autoInstall -eq 'Y') {
-    $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
-    if ($hasWinget) {
-        Write-Host '[INSTALL] Running: winget install OpenJS.NodeJS.LTS --silent'
-        winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host '[OK] Node.js installed. Please re-run this script.'
-            Read-Host 'Press Enter to exit'
-            exit 0
-        }
-    }
-    Write-Host '[FAIL] winget not available. Please install Node.js manually:'
+function Refresh-SessionPath {
+    $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                [System.Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
+function Test-NodeReady {
+    $n = Get-Command node  -ErrorAction SilentlyContinue
+    $p = Get-Command npm   -ErrorAction SilentlyContinue
+    return ($n -and $p)
+}
+
+# 5a. 尝试 winget
+$hasWinget = Get-Command winget -ErrorAction SilentlyContinue
+if ($hasWinget) {
+    Write-Host '[INSTALL] winget install OpenJS.NodeJS.LTS ...'
+    winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements
+    Refresh-SessionPath
+    if (Test-NodeReady) {
+        Write-Host '[OK] Node.js installed via winget. Starting...'
+        Write-Host ''
+        & (Join-Path $root 'start.ps1')
+        exit $LASTEXITCODE
+    }
+    Write-Host '[WARN] winget install completed but node/npm not in PATH yet.'
+}
+
+# 5b. 尝试直接下载 Node.js MSI 安装器
+Write-Host '[INSTALL] Downloading Node.js LTS installer...'
+$nodeInstaller = Join-Path $env:TEMP 'node-lts-installer.msi'
+try {
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile $nodeInstaller -UseBasicParsing
+    Write-Host '[INSTALL] Running Node.js MSI installer (silent)...'
+    Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
+    Refresh-SessionPath
+    Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+    if (Test-NodeReady) {
+        Write-Host '[OK] Node.js installed via MSI. Starting...'
+        Write-Host ''
+        & (Join-Path $root 'start.ps1')
+        exit $LASTEXITCODE
+    }
+} catch {
+    Write-Host "[WARN] Download failed: $_"
+    Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+    # 5c. 换国内镜像再试
+    Write-Host '[INSTALL] Retrying via npmmirror (China mirror)...'
+    try {
+        Invoke-WebRequest -Uri 'https://npmmirror.com/mirrors/node/v22.14.0/node-v22.14.0-x64.msi' -OutFile $nodeInstaller -UseBasicParsing
+        Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
+        Refresh-SessionPath
+        Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+        if (Test-NodeReady) {
+            Write-Host '[OK] Node.js installed via mirror. Starting...'
+            Write-Host ''
+            & (Join-Path $root 'start.ps1')
+            exit $LASTEXITCODE
+        }
+    } catch {
+        Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# 5d. 全部失败 — 兜底提示
 Write-Host ''
 Write-Host '========================================'
-Write-Host '  Manual Installation Steps'
+Write-Host '  Auto-install failed — Manual Steps'
 Write-Host '========================================'
 Write-Host '1. Open: https://nodejs.org'
-Write-Host '2. Download LTS version (recommended)'
-Write-Host '3. Run the installer — check "Add to PATH"'
-Write-Host '4. Restart this script'
+Write-Host '2. Download LTS version'
+Write-Host '3. Run installer — check "Add to PATH"'
+Write-Host '4. Re-run fix-env.bat'
 Write-Host '========================================'
 Write-Host ''
 Read-Host 'Press Enter to exit'
