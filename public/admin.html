@@ -292,6 +292,30 @@
 
       <div class="section-card admin-section" id="section-database">
         <div class="section-card-title">数据库管理</div>
+        <div class="database-config-panel" id="database-config-panel">
+          <div class="database-config-row">
+            <div class="filter-group">
+              <label>数据库类型</label>
+              <div class="database-type-toggle">
+                <button class="btn-secondary db-type-btn active" id="db-type-sqlite" data-type="sqlite">SQLite</button>
+                <button class="btn-secondary db-type-btn" id="db-type-mysql" data-type="mysql">MySQL</button>
+              </div>
+            </div>
+            <div id="mysql-config-fields" style="display:none;flex-wrap:wrap;gap:10px;align-items:flex-end">
+              <div class="filter-group"><label for="mysql-host">主机</label><input type="text" id="mysql-host" value="localhost" placeholder="localhost"></div>
+              <div class="filter-group"><label for="mysql-port">端口</label><input type="number" id="mysql-port" value="3306" placeholder="3306" style="width:80px"></div>
+              <div class="filter-group"><label for="mysql-user">用户名</label><input type="text" id="mysql-user" value="root" placeholder="root"></div>
+              <div class="filter-group"><label for="mysql-password">密码</label><input type="password" id="mysql-password" placeholder="MySQL 密码"></div>
+              <div class="filter-group"><label for="mysql-database">数据库名</label><input type="text" id="mysql-database" value="typing" placeholder="typing"></div>
+              <div class="filter-group"><label for="mysql-charset">字符集</label><input type="text" id="mysql-charset" value="utf8mb4" placeholder="utf8mb4" style="width:100px"></div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <button class="btn-secondary" id="db-test-btn">测试连接</button>
+              <button class="btn-primary" id="db-save-config-btn">保存配置</button>
+            </div>
+          </div>
+          <p class="note" id="db-config-msg" style="margin-top:8px"></p>
+        </div>
         <p class="note" style="margin-bottom:12px">可在网页端查看、搜索、编辑和删除数据库记录。请谨慎操作，删除后无法恢复。</p>
         <div class="database-layout">
           <div class="database-sidebar">

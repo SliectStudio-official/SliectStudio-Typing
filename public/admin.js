@@ -108,6 +108,115 @@ let databaseTables = [];
 let currentDatabaseTable = '';
 let currentDatabasePage = 1;
 let currentDatabaseData = null;
+let currentDbType = 'sqlite';
+
+const dbTypeSqliteBtn = document.getElementById('db-type-sqlite');
+const dbTypeMysqlBtn = document.getElementById('db-type-mysql');
+const mysqlConfigFields = document.getElementById('mysql-config-fields');
+const dbTestBtn = document.getElementById('db-test-btn');
+const dbSaveConfigBtn = document.getElementById('db-save-config-btn');
+const dbConfigMsg = document.getElementById('db-config-msg');
+const mysqlHost = document.getElementById('mysql-host');
+const mysqlPort = document.getElementById('mysql-port');
+const mysqlUser = document.getElementById('mysql-user');
+const mysqlPassword = document.getElementById('mysql-password');
+const mysqlDatabase = document.getElementById('mysql-database');
+const mysqlCharset = document.getElementById('mysql-charset');
+
+async function loadDbConfig() {
+  try {
+    const res = await fetch('/api/admin/db-config', { headers: apiHeaders() });
+    if (!res.ok) return;
+    const config = await res.json();
+    currentDbType = config.type || 'sqlite';
+    updateDbTypeUI();
+    if (config.mysql) {
+      mysqlHost.value = config.mysql.host || 'localhost';
+      mysqlPort.value = config.mysql.port || 3306;
+      mysqlUser.value = config.mysql.user || 'root';
+      mysqlPassword.value = config.mysql.password ? '••••••' : '';
+      mysqlDatabase.value = config.mysql.database || 'typing';
+      mysqlCharset.value = config.mysql.charset || 'utf8mb4';
+    }
+  } catch (e) {}
+}
+
+function updateDbTypeUI() {
+  dbTypeSqliteBtn.classList.toggle('active', currentDbType === 'sqlite');
+  dbTypeMysqlBtn.classList.toggle('active', currentDbType === 'mysql');
+  mysqlConfigFields.style.display = currentDbType === 'mysql' ? 'flex' : 'none';
+}
+
+function getMysqlConfigFromForm() {
+  return {
+    host: mysqlHost.value.trim(),
+    port: parseInt(mysqlPort.value) || 3306,
+    user: mysqlUser.value.trim(),
+    password: mysqlPassword.value === '••••••' ? undefined : mysqlPassword.value,
+    database: mysqlDatabase.value.trim(),
+    charset: mysqlCharset.value.trim() || 'utf8mb4'
+  };
+}
+
+dbTypeSqliteBtn.addEventListener('click', () => { currentDbType = 'sqlite'; updateDbTypeUI(); });
+dbTypeMysqlBtn.addEventListener('click', () => { currentDbType = 'mysql'; updateDbTypeUI(); });
+
+dbTestBtn.addEventListener('click', async () => {
+  dbTestBtn.disabled = true;
+  dbTestBtn.textContent = '测试中...';
+  dbConfigMsg.textContent = '';
+  try {
+    const res = await fetch('/api/admin/db-config/test', {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ type: currentDbType, mysql: getMysqlConfigFromForm() })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      dbConfigMsg.textContent = data.message || '连接成功';
+      dbConfigMsg.style.color = 'var(--semantic-success)';
+    } else {
+      dbConfigMsg.textContent = data.error || '连接失败';
+      dbConfigMsg.style.color = 'var(--semantic-error)';
+    }
+  } catch (e) {
+    dbConfigMsg.textContent = '请求失败';
+    dbConfigMsg.style.color = 'var(--semantic-error)';
+  } finally {
+    dbTestBtn.disabled = false;
+    dbTestBtn.textContent = '测试连接';
+  }
+});
+
+dbSaveConfigBtn.addEventListener('click', async () => {
+  dbSaveConfigBtn.disabled = true;
+  dbSaveConfigBtn.textContent = '保存中...';
+  dbConfigMsg.textContent = '';
+  try {
+    const res = await fetch('/api/admin/db-config', {
+      method: 'PUT',
+      headers: apiHeaders(),
+      body: JSON.stringify({ type: currentDbType, mysql: getMysqlConfigFromForm() })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      dbConfigMsg.textContent = data.message || '配置已保存';
+      dbConfigMsg.style.color = 'var(--semantic-success)';
+      if (data.needsRestart) {
+        dbConfigMsg.textContent += ' 需要重启服务器后生效。';
+      }
+    } else {
+      dbConfigMsg.textContent = data.error || '保存失败';
+      dbConfigMsg.style.color = 'var(--semantic-error)';
+    }
+  } catch (e) {
+    dbConfigMsg.textContent = '请求失败';
+    dbConfigMsg.style.color = 'var(--semantic-error)';
+  } finally {
+    dbSaveConfigBtn.disabled = false;
+    dbSaveConfigBtn.textContent = '保存配置';
+  }
+});
 
 const userList = document.getElementById('user-list');
 const userEmpty = document.getElementById('user-empty');
@@ -1495,6 +1604,7 @@ async function init() {
     loadPendingArticles(),
     loadAnnouncements(),
     loadSensitiveWords(),
+    loadDbConfig(),
     loadDatabaseTables(),
     fetchCategories(),
     fetchArticles(),

@@ -105,6 +105,8 @@ const announcementTitle = document.getElementById('announcement-title');
 const announcementText = document.getElementById('announcement-text');
 const announcementClose = document.getElementById('announcement-close');
 
+const offlineBanner = document.getElementById('offline-banner');
+
 const privateArticlesCard = document.getElementById('private-articles-card');
 const privateArticleSelect = document.getElementById('private-article-select');
 const privateArticleList = document.getElementById('private-article-list');
@@ -1161,8 +1163,20 @@ async function loadVersion() {
   } catch (e) {}
 }
 
+function updateOfflineStatus() {
+  if (!navigator.onLine) {
+    offlineBanner.style.display = 'flex';
+  } else {
+    offlineBanner.style.display = 'none';
+  }
+}
+
+window.addEventListener('offline', updateOfflineStatus);
+window.addEventListener('online', updateOfflineStatus);
+
 async function init() {
   loadVersion();
+  updateOfflineStatus();
   const isBootstrapping = await loadBootstrapStatus();
   if (isBootstrapping) return;
   await checkAuth();

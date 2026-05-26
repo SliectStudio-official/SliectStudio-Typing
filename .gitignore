@@ -18,6 +18,9 @@ logs/
 .env.local
 .env.production
 
+# 数据库配置（含 MySQL 密码）
+db-config.json
+
 # 上传文件
 uploads/
 public/avatars/

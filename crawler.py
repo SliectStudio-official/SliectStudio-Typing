@@ -2,7 +2,6 @@ import argparse
 import json
 import sys
 import os
-import sqlite3
 import re
 
 if sys.stdout.encoding != 'utf-8':
@@ -178,6 +177,7 @@ def main():
     parser.add_argument('--url', required=True, help='目标URL')
     parser.add_argument('--category_id', type=int, default=0, help='分类ID')
     parser.add_argument('--db', default='', help='SQLite数据库路径')
+    parser.add_argument('--db-config', default='', help='db-config.json路径（MySQL支持）')
     parser.add_argument('--preview', action='store_true', help='仅预览不入库')
     args = parser.parse_args()
 
@@ -195,20 +195,92 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
         return
 
-    if args.db and args.category_id:
+    db_config_path = args.db_config
+    if not db_config_path and os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'db-config.json')):
+        db_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'db-config.json')
+
+    if db_config_path and os.path.exists(db_config_path):
         try:
+            with open(db_config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            db_type = config.get('type', 'sqlite')
+
+            if db_type == 'mysql':
+                try:
+                    import pymysql
+                except ImportError:
+                    try:
+                        import mysql.connector as pymysql
+                    except ImportError:
+                        result['saved'] = False
+                        result['db_error'] = '请安装 pymysql: pip install pymysql'
+                        print(json.dumps(result, ensure_ascii=False))
+                        return
+
+                mysql_cfg = config.get('mysql', {})
+                conn = pymysql.connect(
+                    host=mysql_cfg.get('host', 'localhost'),
+                    port=mysql_cfg.get('port', 3306),
+                    user=mysql_cfg.get('user', 'root'),
+                    password=mysql_cfg.get('password', ''),
+                    database=mysql_cfg.get('database', 'typing'),
+                    charset=mysql_cfg.get('charset', 'utf8mb4')
+                )
+                try:
+                    c = conn.cursor()
+                    c.execute('INSERT INTO articles (title, content, category_id, source) VALUES (%s, %s, %s, %s)',
+                              (result['title'], result['content'], args.category_id, args.url))
+                    conn.commit()
+                    article_id = c.lastrowid
+                    c.execute('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = %s', (article_id,))
+                    row = c.fetchone()
+                    cols = [desc[0] for desc in c.description] if c.description else []
+                    result['id'] = article_id
+                    if row and cols:
+                        cat_idx = cols.index('category_name') if 'category_name' in cols else -1
+                        result['category_name'] = row[cat_idx] if cat_idx >= 0 else ''
+                    result['saved'] = True
+                finally:
+                    conn.close()
+            else:
+                import sqlite3
+                db_path = config.get('sqlite', {}).get('path', './data/typing.db')
+                if not os.path.isabs(db_path):
+                    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), db_path)
+                conn = sqlite3.connect(db_path)
+                try:
+                    c = conn.cursor()
+                    c.execute('INSERT INTO articles (title, content, category_id, source) VALUES (?, ?, ?, ?)',
+                              (result['title'], result['content'], args.category_id, args.url))
+                    conn.commit()
+                    article_id = c.lastrowid
+                    c.execute('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', (article_id,))
+                    row = c.fetchone()
+                    result['id'] = article_id
+                    result['category_name'] = row[7] if row else ''
+                    result['saved'] = True
+                finally:
+                    conn.close()
+        except Exception as e:
+            result['saved'] = False
+            result['db_error'] = str(e)
+    elif args.db and args.category_id:
+        try:
+            import sqlite3
             conn = sqlite3.connect(args.db)
-            c = conn.cursor()
-            c.execute('INSERT INTO articles (title, content, category_id, source) VALUES (?, ?, ?, ?)',
-                      (result['title'], result['content'], args.category_id, args.url))
-            conn.commit()
-            article_id = c.lastrowid
-            c.execute('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', (article_id,))
-            row = c.fetchone()
-            conn.close()
-            result['id'] = article_id
-            result['category_name'] = row[7] if row else ''
-            result['saved'] = True
+            try:
+                c = conn.cursor()
+                c.execute('INSERT INTO articles (title, content, category_id, source) VALUES (?, ?, ?, ?)',
+                          (result['title'], result['content'], args.category_id, args.url))
+                conn.commit()
+                article_id = c.lastrowid
+                c.execute('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', (article_id,))
+                row = c.fetchone()
+                result['id'] = article_id
+                result['category_name'] = row[7] if row else ''
+                result['saved'] = True
+            finally:
+                conn.close()
         except Exception as e:
             result['saved'] = False
             result['db_error'] = str(e)
