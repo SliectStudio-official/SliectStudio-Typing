@@ -1,4 +1,4 @@
 @echo off
 setlocal
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0launcher.ps1"
 pause

@@ -41,3 +41,5 @@ Typing-*.zip
 # OS
 .DS_Store
 Thumbs.db
+__pycache__/
+*.msi
