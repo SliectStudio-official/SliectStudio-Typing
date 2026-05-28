@@ -1,3 +1,7 @@
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+chcp 65001 > $null 2>&1
+
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -30,9 +34,56 @@ function Start-App {
     exit $LASTEXITCODE
 }
 
+function Uninstall-CurrentNode {
+    $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $hasWinget) { return }
+
+    Write-Host '[UNINSTALL] Removing current Node.js via winget...'
+    $list = winget list --name 'Node.js' --source winget 2>$null
+    if ($list -match 'OpenJS.NodeJS') {
+        winget uninstall OpenJS.NodeJS.LTS --silent --accept-source-agreements 2>&1 | Out-Null
+        Start-Sleep -Seconds 2
+        Refresh-SessionPath
+        Write-Host '[OK] Uninstalled.'
+    }
+}
+
+function Download-WithRetry {
+    param([string[]]$Urls, [string]$OutFile)
+
+    foreach ($url in $Urls) {
+        $label = if ($url -match 'nodejs\.org') { 'Official' }
+                 elseif ($url -match 'npmmirror') { 'npmmirror' }
+                 elseif ($url -match 'registry\.nppa') { 'nppa mirror' }
+                 else { $url }
+        Write-Host "[DOWNLOAD] Trying $label ..."
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-WebRequest -Uri $url -OutFile $OutFile -UseBasicParsing -TimeoutSec 120
+                if (Test-Path $OutFile) {
+                    $size = (Get-Item $OutFile).Length
+                    if ($size -gt 1MB) {
+                        Write-Host "[OK] Downloaded ($([math]::Round($size/1MB, 1)) MB) from $label"
+                        return $true
+                    }
+                }
+                Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Host "[WARN] Attempt $attempt failed: $($_.Exception.Message)"
+            }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 3 }
+        }
+    }
+    Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
+    return $false
+}
+
 function AutoInstall-NodeV22 {
     Write-Host ''
-    Write-Host '[AUTO] Installing Node.js v22 LTS (compatible with better-sqlite3)...'
+    Write-Host '[AUTO] Installing Node.js v22 LTS ...'
+
+    Uninstall-CurrentNode
 
     $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
     if ($hasWinget) {
@@ -43,44 +94,51 @@ function AutoInstall-NodeV22 {
             $major = Get-NodeMajorVersion
             if ($major -lt 23) {
                 Write-Host "[OK] Node.js v$major installed via winget"
-                Start-App
+                return $true
+            }
+        }
+        Write-Host '[WARN] winget install did not produce v22. Trying MSI download...'
+    }
+
+    $nodeInstaller = Join-Path $env:TEMP 'node-v22.14.0-x64.msi'
+    $urls = @(
+        'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi',
+        'https://cdn.npmmirror.com/binaries/node/v22.14.0/node-v22.14.0-x64.msi',
+        'https://registry.npmmirror.com/-/binary/node/v22.14.0/node-v22.14.0-x64.msi',
+        'https://mirrors.huaweicloud.com/nodejs/v22.14.0/node-v22.14.0-x64.msi',
+        'https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v22.14.0/node-v22.14.0-x64.msi'
+    )
+
+    if (Download-WithRetry -Urls $urls -OutFile $nodeInstaller) {
+        Write-Host '[INSTALL] Running MSI installer (silent)...'
+        Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
+        Refresh-SessionPath
+        Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+
+        if (Test-NodeReady) {
+            $major = Get-NodeMajorVersion
+            if ($major -lt 23) {
+                Write-Host "[OK] Node.js v$major installed"
+                return $true
+            }
+        }
+        Write-Host '[WARN] Install completed but version still not v22.'
+    }
+
+    $localMsi = Join-Path $root 'node-v22.14.0-x64.msi'
+    if (Test-Path $localMsi) {
+        Write-Host '[INSTALL] Found local MSI in project folder. Installing...'
+        Start-Process msiexec.exe -ArgumentList "/i `"$localMsi`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
+        Refresh-SessionPath
+        if (Test-NodeReady) {
+            $major = Get-NodeMajorVersion
+            if ($major -lt 23) {
+                Write-Host "[OK] Node.js v$major installed from local MSI"
+                return $true
             }
         }
     }
 
-    Write-Host '[INSTALL] Downloading Node.js v22.14.0 MSI...'
-    $nodeInstaller = Join-Path $env:TEMP 'node-v22.14.0-x64.msi'
-    try {
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri 'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi' -OutFile $nodeInstaller -UseBasicParsing
-    } catch {
-        Write-Host "[WARN] Official download failed: $_"
-        Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
-
-        Write-Host '[INSTALL] Retrying via npmmirror (China mirror)...'
-        try {
-            Invoke-WebRequest -Uri 'https://npmmirror.com/mirrors/node/v22.14.0/node-v22.14.0-x64.msi' -OutFile $nodeInstaller -UseBasicParsing
-        } catch {
-            Write-Host "[FAIL] Mirror download also failed: $_"
-            Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
-            return $false
-        }
-    }
-
-    Write-Host '[INSTALL] Running installer (silent)...'
-    Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
-    Refresh-SessionPath
-    Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
-
-    if (Test-NodeReady) {
-        $major = Get-NodeMajorVersion
-        if ($major -lt 23) {
-            Write-Host "[OK] Node.js v$major installed"
-            return $true
-        }
-    }
-
-    Write-Host "[WARN] Install completed but version check failed."
     return $false
 }
 
@@ -93,11 +151,17 @@ function Show-ManualSteps {
     Write-Host 'IMPORTANT: Install Node.js v22 LTS (NOT v23/v24)'
     Write-Host 'v23+ causes better-sqlite3 native build failure'
     Write-Host ''
-    Write-Host '1. Open: https://nodejs.org/en/download/prebuilt-installer'
-    Write-Host '2. Choose: v22.14.0 LTS (64-bit .msi)'
-    Write-Host '3. Or mirror: https://npmmirror.com/mirrors/node/v22.14.0/'
-    Write-Host '4. Run installer - check "Add to PATH"'
-    Write-Host '5. Re-run fix-env.bat'
+    Write-Host 'Option A - Download MSI and place in project folder:'
+    Write-Host '  1. Download: https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi'
+    Write-Host '  2. Or mirror: https://cdn.npmmirror.com/binaries/node/v22.14.0/'
+    Write-Host '  3. Save as: <project>\node-v22.14.0-x64.msi'
+    Write-Host '  4. Re-run fix-env.bat (will auto-detect local MSI)'
+    Write-Host ''
+    Write-Host 'Option B - Uninstall v24 first, then install v22:'
+    Write-Host '  1. Control Panel > Uninstall Node.js'
+    Write-Host '  2. Download v22 LTS from https://nodejs.org'
+    Write-Host '  3. Install with "Add to PATH" checked'
+    Write-Host '  4. Re-run fix-env.bat'
     Write-Host '========================================'
     Write-Host ''
     Read-Host 'Press Enter to exit'
@@ -108,20 +172,18 @@ function Show-ManualSteps {
 # Main Logic
 # ============================================================
 
-# 1. 当前 PATH 已有 node/npm → 校验版本
 if (Test-NodeReady) {
     $major = Get-NodeMajorVersion
     Write-Host "[FOUND] Node.js v$major in PATH: $((Get-Command node).Source)"
     if ($major -ge 23) {
-        Write-Host "[WARN] Node.js v$major 不兼容 (better-sqlite3 无预编译包)"
-        Write-Host "[FIX] 需要 Node.js v22 LTS, 正在自动降级..."
+        Write-Host "[WARN] Node.js v$major is NOT compatible (better-sqlite3 needs v22)"
+        Write-Host "[FIX] Auto-downgrading to v22 LTS..."
         if (AutoInstall-NodeV22) { Start-App }
         Show-ManualSteps
     }
     Start-App
 }
 
-# 2-4. 搜索硬盘上的 Node.js
 $searchDirs = @(
     "${env:ProgramFiles}\nodejs",
     "${env:ProgramFiles(x86)}\nodejs",
@@ -170,8 +232,8 @@ if ($nodePath) {
         $major = Get-NodeMajorVersion
         Write-Host "[INFO] Node.js v$major detected"
         if ($major -ge 23) {
-            Write-Host "[WARN] Node.js v$major 不兼容, 需要 v22 LTS"
-            Write-Host "[FIX] 正在自动降级..."
+            Write-Host "[WARN] Node.js v$major is NOT compatible, needs v22 LTS"
+            Write-Host "[FIX] Auto-downgrading..."
             if (AutoInstall-NodeV22) { Start-App }
             Show-ManualSteps
         }
@@ -179,6 +241,5 @@ if ($nodePath) {
     }
 }
 
-# 5. 没有 Node.js → 全自动安装
 if (AutoInstall-NodeV22) { Start-App }
 Show-ManualSteps
