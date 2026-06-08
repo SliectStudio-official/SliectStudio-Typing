@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = [System.Text.Encoding]UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 chcp 65001 > $null 2>&1
 
@@ -209,7 +209,8 @@ function Ensure-NodeV22 {
                 }
                 Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
             } catch {
-                Write-Host "[WARN] Attempt $attempt: $($_.Exception.Message)"
+                $errMsg = $_.Exception.Message
+                Write-Host "[WARN] Attempt $attempt: $errMsg"
             }
             if ($attempt -lt 3) { Start-Sleep -Seconds 3 }
         }
