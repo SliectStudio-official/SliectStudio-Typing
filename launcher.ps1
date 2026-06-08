@@ -53,12 +53,6 @@ function Write-ConfigFile {
     [System.IO.File]::WriteAllText($configPath, $Content, $utf8BOM)
 }
 
-function Test-V22Exact {
-    param([version]$ver)
-    # 只接受 v22.14.0 或 v22.x.y (x < 15 的 LTS 版本)
-    return $ver.Major -eq 22 -and $ver.Minor -lt 24
-}
-
 # ============================================================
 # Phase 1: Node.js Environment Check & Auto-Fix
 # ============================================================
@@ -66,30 +60,15 @@ function Test-V22Exact {
 function Ensure-NodeV22 {
     # ---- 0. 先检查本地 MSI 安装包 ----
     $localMsi = Join-Path $root 'node-v22.14.0-x64.msi'
-    if (Test-Path $localMsi) {
-        Write-Host '[FOUND] Local MSI package. Installing from local...'
-        Start-Process msiexec.exe -ArgumentList "/i `"$localMsi`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
-        Refresh-SessionPath
-        Start-Sleep -Seconds 3
-        if (Test-NodeReady) {
-            $v = Get-NodeVersion
-            if ($v -and (Test-V22Exact $v)) {
-                Write-Host "[OK] Node.js $($v.Full) installed from local MSI"
-                return $true
-            }
-        }
-    }
+    $hasLocalMsi = Test-Path $localMsi
 
     # ---- 1. 检查 PATH 中是否有可用的 Node.js ----
     if (Test-NodeReady) {
         $v = Get-NodeVersion
         $exePath = (Get-Command node).Source
         Write-Host "[FOUND] Node.js $($v.Full) : $exePath"
-        if ($v -and (Test-V22Exact $v)) {
-            Write-Host "[OK] Node.js $($v.Full) is compatible."
-            return $true
-        }
-        Write-Host "[WARN] Node.js $($v.Full) is NOT compatible (better-sqlite3 needs v22 LTS)"
+        Write-Host "[OK] Node.js is working. Continuing with current version."
+        return $true
     }
 
     # ---- 2. 尝试从常见路径找到 Node.js ----
@@ -122,11 +101,8 @@ function Ensure-NodeV22 {
 
         if (Test-NodeReady) {
             $v = Get-NodeVersion
-            if ($v -and (Test-V22Exact $v)) {
-                Write-Host "[OK] Node.js $($v.Full) found at $nodePath"
-                return $true
-            }
-            Write-Host "[WARN] Node.js $($v.Full) at $nodePath is NOT compatible"
+            Write-Host "[OK] Node.js $($v.Full) found at $nodePath. Continuing."
+            return $true
         }
     }
 
@@ -142,10 +118,8 @@ function Ensure-NodeV22 {
                 Refresh-SessionPath
                 if (Test-NodeReady) {
                     $v = Get-NodeVersion
-                    if ($v -and (Test-V22Exact $v)) {
-                        Write-Host "[OK] Node.js $($v.Full) found via registry"
-                        return $true
-                    }
+                    Write-Host "[OK] Node.js $($v.Full) found via registry. Continuing."
+                    return $true
                 }
             }
         }
@@ -163,18 +137,31 @@ function Ensure-NodeV22 {
             Refresh-SessionPath
             if (Test-NodeReady) {
                 $v = Get-NodeVersion
-                if ($v -and (Test-V22Exact $v)) {
-                    Write-Host "[OK] Node.js $($v.Full) found on disk"
-                    return $true
-                }
+                Write-Host "[OK] Node.js $($v.Full) found on disk. Continuing."
+                return $true
             }
         }
     } catch {}
 
-    # ---- 5. 以上都失败，自动安装 ----
+    # ---- 5. 真正找不到任何 Node.js 时才尝试安装 ----
     Write-Host ''
-    Write-Host '[FIX] No compatible Node.js found. Installing Node.js v22 LTS...'
+    Write-Host '[FIX] No Node.js found. Installing...'
     Write-Host ''
+
+    # 有本地 MSI 优先使用
+    if ($hasLocalMsi) {
+        Write-Host '[INSTALL] Found local MSI package. Installing from local...'
+        Start-Process msiexec.exe -ArgumentList "/i `"$localMsi`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
+        Refresh-SessionPath
+        Start-Sleep -Seconds 3
+        if (Test-NodeReady) {
+            $v = Get-NodeVersion
+            if ($v) {
+                Write-Host "[OK] Node.js $($v.Full) installed from local MSI"
+                return $true
+            }
+        }
+    }
 
     # 尝试 winget 安装
     $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
@@ -185,14 +172,14 @@ function Ensure-NodeV22 {
         Refresh-SessionPath
         if (Test-NodeReady) {
             $v = Get-NodeVersion
-            if ($v -and (Test-V22Exact $v)) {
+            if ($v) {
                 Write-Host "[OK] Node.js $($v.Full) installed via winget"
                 return $true
             }
         }
     }
 
-    # ---- 6. 下载 MSI 安装 ----
+    # 下载 MSI 安装
     $nodeInstaller = Join-Path $env:TEMP 'node-v22.14.0-x64.msi'
     $urls = @(
         'https://cdn.npmmirror.com/binaries/node/v22.14.0/node-v22.14.0-x64.msi',
@@ -236,7 +223,7 @@ function Ensure-NodeV22 {
 
                 if (Test-NodeReady) {
                     $v = Get-NodeVersion
-                    if ($v -and (Test-V22Exact $v)) {
+                    if ($v) {
                         Write-Host "[OK] Node.js $($v.Full) installed from $label"
                         Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
                         return $true
@@ -248,13 +235,13 @@ function Ensure-NodeV22 {
         }
     }
 
-    # ---- 7. 全部失败，手动指引 ----
+    # ---- 6. 全部失败，手动指引 ----
     Write-Host ''
     Write-Host '========================================'
     Write-Host '  Auto-install failed - Manual Steps'
     Write-Host '========================================'
     Write-Host ''
-    Write-Host 'IMPORTANT: Install Node.js v22 LTS (NOT v23/v24/v25)'
+    Write-Host 'IMPORTANT: Install Node.js v22 LTS'
     Write-Host ''
     Write-Host 'Option A - Local MSI (Recommended, no internet needed):'
     Write-Host '  1. Download: https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi'
@@ -262,10 +249,9 @@ function Ensure-NodeV22 {
     Write-Host '  3. Re-run start.bat (will auto-detect local MSI)'
     Write-Host ''
     Write-Host 'Option B - Manual install:'
-    Write-Host '  1. Control Panel > Uninstall current Node.js'
-    Write-Host '  2. Install v22 LTS from https://nodejs.org'
-    Write-Host '  3. Check "Add to PATH" during install'
-    Write-Host '  4. Re-run start.bat'
+    Write-Host '  1. Download v22 LTS from https://nodejs.org'
+    Write-Host '  2. Install with "Add to PATH" checked'
+    Write-Host '  3. Re-run start.bat'
     Write-Host '========================================'
     Read-Host 'Press Enter to exit'
     exit 1
@@ -277,7 +263,7 @@ function Ensure-NodeV22 {
 
 Write-Host '[Phase 1] Checking Node.js environment...'
 if (-not (Ensure-NodeV22)) {
-    Write-Host '[ERROR] Node.js v22 is required. Cannot continue.'
+    Write-Host '[ERROR] Node.js is required. Cannot continue.'
     Read-Host 'Press Enter to exit'
     exit 1
 }
@@ -349,8 +335,7 @@ if ($needInstall) {
         Write-Host '  npm install FAILED'
         Write-Host '========================================'
         Write-Host 'Common causes:'
-        Write-Host '  1. Node.js v23/v24/v25 - better-sqlite3 has no prebuilt binary'
-        Write-Host '  2. Network issue - try: npm config set registry https://registry.npmmirror.com'
+        Write-Host '  1. Network issue - try: npm config set registry https://registry.npmmirror.com'
         Write-Host '========================================'
         Read-Host 'Press Enter to exit'
         exit 1
