@@ -210,7 +210,7 @@ function Ensure-NodeV22 {
                 Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
             } catch {
                 $errMsg = $_.Exception.Message
-                Write-Host "[WARN] Attempt $attempt: $errMsg"
+                Write-Host "[WARN] Attempt ${attempt}: ${errMsg}"
             }
             if ($attempt -lt 3) { Start-Sleep -Seconds 3 }
         }
