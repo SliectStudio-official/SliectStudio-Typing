@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 chcp 65001 > $null 2>&1
 
@@ -21,12 +21,19 @@ function Refresh-SessionPath {
                 [System.Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
-function Get-NodeMajorVersion {
+function Get-NodeVersion {
     try {
         $v = & node -v 2>$null
-        if ($v -match 'v(\d+)') { return [int]$Matches[1] }
+        if ($v -match 'v(\d+)\.(\d+)\.(\d+)') {
+            return @{
+                Major = [int]$Matches[1]
+                Minor = [int]$Matches[2]
+                Patch = [int]$Matches[3]
+                Full  = $v
+            }
+        }
     } catch {}
-    return 0
+    return $null
 }
 
 function Test-NodeReady {
@@ -46,63 +53,46 @@ function Write-ConfigFile {
     [System.IO.File]::WriteAllText($configPath, $Content, $utf8BOM)
 }
 
+function Test-V22Exact {
+    param([version]$ver)
+    # 只接受 v22.14.0 或 v22.x.y (x < 15 的 LTS 版本)
+    return $ver.Major -eq 22 -and $ver.Minor -lt 24
+}
+
 # ============================================================
 # Phase 1: Node.js Environment Check & Auto-Fix
 # ============================================================
 
-function Uninstall-CurrentNode {
-    $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
-    if (-not $hasWinget) { return }
-    Write-Host '[UNINSTALL] Removing current Node.js via winget...'
-    $list = winget list --name 'Node.js' --source winget 2>$null
-    if ($list -match 'OpenJS.NodeJS') {
-        winget uninstall OpenJS.NodeJS.LTS --silent --accept-source-agreements 2>&1 | Out-Null
-        Start-Sleep -Seconds 2
+function Ensure-NodeV22 {
+    # ---- 0. 先检查本地 MSI 安装包 ----
+    $localMsi = Join-Path $root 'node-v22.14.0-x64.msi'
+    if (Test-Path $localMsi) {
+        Write-Host '[FOUND] Local MSI package. Installing from local...'
+        Start-Process msiexec.exe -ArgumentList "/i `"$localMsi`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
         Refresh-SessionPath
-        Write-Host '[OK] Uninstalled.'
-    }
-}
-
-function Download-WithRetry {
-    param([string[]]$Urls, [string]$OutFile)
-
-    foreach ($url in $Urls) {
-        $label = if ($url -match 'nodejs\.org') { 'Official' }
-                 elseif ($url -match 'npmmirror') { 'npmmirror' }
-                 elseif ($url -match 'huaweicloud') { 'Huawei' }
-                 elseif ($url -match 'tuna') { 'TUNA' }
-                 else { $url }
-        Write-Host "[DOWNLOAD] Trying $label ..."
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            try {
-                $ProgressPreference = 'SilentlyContinue'
-                Invoke-WebRequest -Uri $url -OutFile $OutFile -UseBasicParsing -TimeoutSec 120
-                if (Test-Path $OutFile) {
-                    $size = (Get-Item $OutFile).Length
-                    if ($size -gt 1MB) {
-                        Write-Host "[OK] Downloaded ($([math]::Round($size/1MB, 1)) MB) from $label"
-                        return $true
-                    }
-                }
-                Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
-            } catch {
-                Write-Host "[WARN] Attempt $attempt failed: $($_.Exception.Message)"
+        Start-Sleep -Seconds 3
+        if (Test-NodeReady) {
+            $v = Get-NodeVersion
+            if ($v -and (Test-V22Exact $v)) {
+                Write-Host "[OK] Node.js $($v.Full) installed from local MSI"
+                return $true
             }
-            if ($attempt -lt 3) { Start-Sleep -Seconds 3 }
         }
     }
-    Remove-Item $OutFile -Force -ErrorAction SilentlyContinue
-    return $false
-}
 
-function Ensure-NodeV22 {
+    # ---- 1. 检查 PATH 中是否有可用的 Node.js ----
     if (Test-NodeReady) {
-        $major = Get-NodeMajorVersion
-        Write-Host "[FOUND] Node.js v$major : $((Get-Command node).Source)"
-        if ($major -lt 23) { return $true }
-        Write-Host "[WARN] Node.js v$major is NOT compatible (better-sqlite3 needs v22)"
+        $v = Get-NodeVersion
+        $exePath = (Get-Command node).Source
+        Write-Host "[FOUND] Node.js $($v.Full) : $exePath"
+        if ($v -and (Test-V22Exact $v)) {
+            Write-Host "[OK] Node.js $($v.Full) is compatible."
+            return $true
+        }
+        Write-Host "[WARN] Node.js $($v.Full) is NOT compatible (better-sqlite3 needs v22 LTS)"
     }
 
+    # ---- 2. 尝试从常见路径找到 Node.js ----
     $searchDirs = @(
         "${env:ProgramFiles}\nodejs",
         "${env:ProgramFiles(x86)}\nodejs",
@@ -119,21 +109,6 @@ function Ensure-NodeV22 {
     foreach ($dir in $searchDirs) {
         if (Test-Path (Join-Path $dir 'node.exe')) { $nodePath = $dir; break }
     }
-    if (-not $nodePath) {
-        try {
-            $regPath = 'HKLM:\SOFTWARE\Node.js'
-            if (Test-Path $regPath) {
-                $regItem = Get-ItemProperty -Path $regPath -ErrorAction Stop
-                if ($regItem.InstallPath) { $nodePath = $regItem.InstallPath.TrimEnd('\') }
-            }
-        } catch {}
-    }
-    if (-not $nodePath) {
-        Write-Host '[SEARCH] Scanning disk for node.exe...'
-        $found = Get-ChildItem -Path C:\ -Filter node.exe -Recurse -Depth 4 -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($found) { $nodePath = $found.DirectoryName }
-    }
 
     if ($nodePath) {
         Write-Host "[FOUND] Node.js at: $nodePath"
@@ -143,87 +118,153 @@ function Ensure-NodeV22 {
             $npmCandidate = Join-Path $nodePath 'node_modules\npm\bin\npm-cli.js'
         }
         if (Test-Path $npmCandidate) { $env:Path = "$(Split-Path $npmCandidate -Parent);$env:Path" }
+        Refresh-SessionPath
 
         if (Test-NodeReady) {
-            $major = Get-NodeMajorVersion
-            if ($major -lt 23) { return $true }
-            Write-Host "[WARN] Node.js v$major is NOT compatible, needs v22 LTS"
+            $v = Get-NodeVersion
+            if ($v -and (Test-V22Exact $v)) {
+                Write-Host "[OK] Node.js $($v.Full) found at $nodePath"
+                return $true
+            }
+            Write-Host "[WARN] Node.js $($v.Full) at $nodePath is NOT compatible"
         }
     }
 
-    Write-Host '[FIX] Auto-downgrading to Node.js v22 LTS...'
+    # ---- 3. 尝试查询注册表 ----
+    try {
+        $regPath = 'HKLM:\SOFTWARE\Node.js'
+        if (Test-Path $regPath) {
+            $regItem = Get-ItemProperty -Path $regPath -ErrorAction Stop
+            if ($regItem.InstallPath) {
+                $nodePath = $regItem.InstallPath.TrimEnd('\')
+                Write-Host "[FOUND] Node.js via registry: $nodePath"
+                $env:Path = "$nodePath;$env:Path"
+                Refresh-SessionPath
+                if (Test-NodeReady) {
+                    $v = Get-NodeVersion
+                    if ($v -and (Test-V22Exact $v)) {
+                        Write-Host "[OK] Node.js $($v.Full) found via registry"
+                        return $true
+                    }
+                }
+            }
+        }
+    } catch {}
 
-    Uninstall-CurrentNode
+    # ---- 4. 全盘搜索 node.exe ----
+    Write-Host '[SEARCH] Scanning disk for node.exe...'
+    try {
+        $found = Get-ChildItem -Path C:\ -Filter node.exe -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) {
+            $nodePath = $found.DirectoryName
+            Write-Host "[FOUND] Node.js at: $nodePath"
+            $env:Path = "$nodePath;$env:Path"
+            Refresh-SessionPath
+            if (Test-NodeReady) {
+                $v = Get-NodeVersion
+                if ($v -and (Test-V22Exact $v)) {
+                    Write-Host "[OK] Node.js $($v.Full) found on disk"
+                    return $true
+                }
+            }
+        }
+    } catch {}
 
+    # ---- 5. 以上都失败，自动安装 ----
+    Write-Host ''
+    Write-Host '[FIX] No compatible Node.js found. Installing Node.js v22 LTS...'
+    Write-Host ''
+
+    # 尝试 winget 安装
     $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
     if ($hasWinget) {
-        Write-Host '[INSTALL] winget install OpenJS.NodeJS.LTS --version 22.14.0 ...'
+        Write-Host '[INSTALL] Trying winget...'
         winget install OpenJS.NodeJS.LTS --version 22.14.0 --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        Start-Sleep -Seconds 5
         Refresh-SessionPath
         if (Test-NodeReady) {
-            $major = Get-NodeMajorVersion
-            if ($major -lt 23) {
-                Write-Host "[OK] Node.js v$major installed via winget"
+            $v = Get-NodeVersion
+            if ($v -and (Test-V22Exact $v)) {
+                Write-Host "[OK] Node.js $($v.Full) installed via winget"
                 return $true
             }
         }
-        Write-Host '[WARN] winget did not produce v22. Trying MSI download...'
     }
 
+    # ---- 6. 下载 MSI 安装 ----
     $nodeInstaller = Join-Path $env:TEMP 'node-v22.14.0-x64.msi'
     $urls = @(
-        'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi',
         'https://cdn.npmmirror.com/binaries/node/v22.14.0/node-v22.14.0-x64.msi',
         'https://registry.npmmirror.com/-/binary/node/v22.14.0/node-v22.14.0-x64.msi',
+        'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi',
         'https://mirrors.huaweicloud.com/nodejs/v22.14.0/node-v22.14.0-x64.msi',
         'https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v22.14.0/node-v22.14.0-x64.msi'
     )
 
-    if (Download-WithRetry -Urls $urls -OutFile $nodeInstaller) {
-        Write-Host '[INSTALL] Running MSI installer (silent)...'
-        Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
-        Refresh-SessionPath
-        Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
-        if (Test-NodeReady) {
-            $major = Get-NodeMajorVersion
-            if ($major -lt 23) {
-                Write-Host "[OK] Node.js v$major installed"
-                return $true
+    foreach ($url in $urls) {
+        $label = if ($url -match 'nodejs\.org') { 'Official' }
+                 elseif ($url -match 'npmmirror') { 'npmmirror' }
+                 elseif ($url -match 'huaweicloud') { 'Huawei' }
+                 elseif ($url -match 'tuna') { 'TUNA' }
+                 else { $url }
+        Write-Host "[DOWNLOAD] Trying $label ..."
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-WebRequest -Uri $url -OutFile $nodeInstaller -UseBasicParsing -TimeoutSec 120
+                if (Test-Path $nodeInstaller) {
+                    $size = (Get-Item $nodeInstaller).Length
+                    if ($size -gt 1MB) {
+                        Write-Host "[OK] Downloaded ($([math]::Round($size/1MB, 1)) MB) from $label"
+                        break
+                    }
+                }
+                Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Host "[WARN] Attempt $attempt: $($_.Exception.Message)"
+            }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 3 }
+        }
+
+        if (Test-Path $nodeInstaller) {
+            try {
+                Write-Host '[INSTALL] Running MSI installer (silent)...'
+                Start-Process msiexec.exe -ArgumentList "/i `"$nodeInstaller`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
+                Refresh-SessionPath
+                Start-Sleep -Seconds 3
+
+                if (Test-NodeReady) {
+                    $v = Get-NodeVersion
+                    if ($v -and (Test-V22Exact $v)) {
+                        Write-Host "[OK] Node.js $($v.Full) installed from $label"
+                        Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
+                        return $true
+                    }
+                }
+            } finally {
+                Remove-Item $nodeInstaller -Force -ErrorAction SilentlyContinue
             }
         }
     }
 
-    $localMsi = Join-Path $root 'node-v22.14.0-x64.msi'
-    if (Test-Path $localMsi) {
-        Write-Host '[INSTALL] Found local MSI in project folder. Installing...'
-        Start-Process msiexec.exe -ArgumentList "/i `"$localMsi`" /quiet /norestart ADDLOCAL=ALL" -Wait -NoNewWindow
-        Refresh-SessionPath
-        if (Test-NodeReady) {
-            $major = Get-NodeMajorVersion
-            if ($major -lt 23) {
-                Write-Host "[OK] Node.js v$major installed from local MSI"
-                return $true
-            }
-        }
-    }
-
+    # ---- 7. 全部失败，手动指引 ----
     Write-Host ''
     Write-Host '========================================'
     Write-Host '  Auto-install failed - Manual Steps'
     Write-Host '========================================'
     Write-Host ''
-    Write-Host 'IMPORTANT: Install Node.js v22 LTS (NOT v23/v24)'
+    Write-Host 'IMPORTANT: Install Node.js v22 LTS (NOT v23/v24/v25)'
     Write-Host ''
-    Write-Host 'Option A - Download MSI and place in project folder:'
+    Write-Host 'Option A - Local MSI (Recommended, no internet needed):'
     Write-Host '  1. Download: https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi'
-    Write-Host '  2. Or mirror: https://cdn.npmmirror.com/binaries/node/v22.14.0/'
-    Write-Host '  3. Save as: <project>\node-v22.14.0-x64.msi'
-    Write-Host '  4. Re-run start.bat (will auto-detect local MSI)'
+    Write-Host '  2. Save as: <project>\node-v22.14.0-x64.msi'
+    Write-Host '  3. Re-run start.bat (will auto-detect local MSI)'
     Write-Host ''
-    Write-Host 'Option B - Uninstall v24 first, then install v22:'
-    Write-Host '  1. Control Panel > Uninstall Node.js'
-    Write-Host '  2. Download v22 LTS from https://nodejs.org'
-    Write-Host '  3. Install with "Add to PATH" checked'
+    Write-Host 'Option B - Manual install:'
+    Write-Host '  1. Control Panel > Uninstall current Node.js'
+    Write-Host '  2. Install v22 LTS from https://nodejs.org'
+    Write-Host '  3. Check "Add to PATH" during install'
     Write-Host '  4. Re-run start.bat'
     Write-Host '========================================'
     Read-Host 'Press Enter to exit'
@@ -240,8 +281,8 @@ if (-not (Ensure-NodeV22)) {
     Read-Host 'Press Enter to exit'
     exit 1
 }
-$nodeVersion = & node -v 2>$null
-Write-Host "[OK] Node.js $nodeVersion ready."
+$v = Get-NodeVersion
+Write-Host "[OK] Node.js $($v.Full) ready."
 Write-Host ''
 
 # ============================================================
@@ -308,7 +349,7 @@ if ($needInstall) {
         Write-Host '  npm install FAILED'
         Write-Host '========================================'
         Write-Host 'Common causes:'
-        Write-Host '  1. Node.js v23/v24 - better-sqlite3 has no prebuilt binary'
+        Write-Host '  1. Node.js v23/v24/v25 - better-sqlite3 has no prebuilt binary'
         Write-Host '  2. Network issue - try: npm config set registry https://registry.npmmirror.com'
         Write-Host '========================================'
         Read-Host 'Press Enter to exit'
