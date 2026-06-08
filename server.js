@@ -34,7 +34,8 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, avatarDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    const name = req.user.id + '_' + Date.now() + ext;
+    const safeId = String(req.user.id).replace(/[^0-9]/g, '');
+    const name = safeId + '_' + Date.now() + ext;
     cb(null, name);
   }
 });
@@ -345,7 +346,12 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
     const params = [];
     if (username) { updates.push('username = ?'); params.push(username); updates.push('nickname = ?'); params.push(username); }
     if (email !== undefined) { updates.push('email = ?'); params.push(email); }
-    if (role !== undefined) { updates.push('role = ?'); params.push(role); }
+    if (role !== undefined) {
+      if (!['admin', 'user'].includes(role)) {
+        return res.status(400).json({ error: '角色必须为 admin 或 user' });
+      }
+      updates.push('role = ?'); params.push(role);
+    }
     if (password) {
       if (password.length < 6) {
         return res.status(400).json({ error: '密码至少6位' });
@@ -376,7 +382,13 @@ app.delete('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, 
         return res.status(400).json({ error: '不能删除唯一的管理员账户' });
       }
     }
-    await db.run('DELETE FROM users WHERE id = ?', req.params.id);
+    await db.transaction(async (tdb) => {
+      await tdb.run('DELETE FROM scores WHERE user_id = ?', req.params.id);
+      await tdb.run('DELETE FROM error_logs WHERE user_id = ?', req.params.id);
+      await tdb.run('DELETE FROM private_articles WHERE user_id = ?', req.params.id);
+      await tdb.run('UPDATE articles SET author_id = NULL WHERE author_id = ?', req.params.id);
+      await tdb.run('DELETE FROM users WHERE id = ?', req.params.id);
+    })();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: '删除用户失败: ' + e.message });
@@ -424,8 +436,10 @@ app.put('/api/categories/:id', authMiddleware, adminMiddleware, async (req, res)
 
 app.delete('/api/categories/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    await db.run('UPDATE articles SET category_id = NULL WHERE category_id = ?', req.params.id);
-    await db.run('DELETE FROM categories WHERE id = ?', req.params.id);
+    await db.transaction(async (tdb) => {
+      await tdb.run('UPDATE articles SET category_id = NULL WHERE category_id = ?', req.params.id);
+      await tdb.run('DELETE FROM categories WHERE id = ?', req.params.id);
+    })();
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: '删除分类失败: ' + e.message });
@@ -488,6 +502,12 @@ app.post('/api/articles', authMiddleware, adminMiddleware, async (req, res) => {
     if (!title || !content) {
       return res.status(400).json({ error: '标题和内容不能为空' });
     }
+    if (title.length > 200) {
+      return res.status(400).json({ error: '标题不能超过200字符' });
+    }
+    if (content.length > 50000) {
+      return res.status(400).json({ error: '内容不能超过50000字符' });
+    }
     if (!category_id) {
       return res.status(400).json({ error: '请选择分类' });
     }
@@ -505,6 +525,12 @@ app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) =
     const { title, content, category_id, difficulty_override } = req.body;
     if (!title || !content) {
       return res.status(400).json({ error: '标题和内容不能为空' });
+    }
+    if (title.length > 200) {
+      return res.status(400).json({ error: '标题不能超过200字符' });
+    }
+    if (content.length > 50000) {
+      return res.status(400).json({ error: '内容不能超过50000字符' });
     }
     const existing = await db.get('SELECT * FROM articles WHERE id = ?', req.params.id);
     if (!existing) {
@@ -539,6 +565,12 @@ app.post('/api/articles/submit', authMiddleware, async (req, res) => {
     const { title, content, category_id } = req.body;
     if (!title || !content) {
       return res.status(400).json({ error: '标题和内容不能为空' });
+    }
+    if (title.length > 200) {
+      return res.status(400).json({ error: '标题不能超过200字符' });
+    }
+    if (content.length > 50000) {
+      return res.status(400).json({ error: '内容不能超过50000字符' });
     }
     const sensitiveTitle = await containsSensitiveWord(title);
     if (sensitiveTitle) {
@@ -732,6 +764,14 @@ app.post('/api/crawl/save', authMiddleware, adminMiddleware, async (req, res) =>
     return res.status(400).json({ error: '请选择分类' });
   }
   try {
+    const sensitiveTitle = await containsSensitiveWord(title.trim());
+    if (sensitiveTitle) {
+      return res.status(400).json({ error: '标题包含敏感词: ' + sensitiveTitle });
+    }
+    const sensitiveContent = await containsSensitiveWord(content.trim());
+    if (sensitiveContent) {
+      return res.status(400).json({ error: '内容包含敏感词: ' + sensitiveContent });
+    }
     const { difficulty, difficulty_score } = calculateDifficulty(content.trim());
     const result = await db.run(
       'INSERT INTO articles (title, content, category_id, source, status, difficulty, difficulty_score) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -933,14 +973,15 @@ app.post('/api/user/generate-error-practice', authMiddleware, async (req, res) =
 
     const errorChars = topErrors.map(e => e.expected_char);
     const normalChars = '的一是不了人我在有他这为之大来以个中上们到说时地也子就道会那要下看天有';
-    let content = '';
+    const parts = [];
     for (const ch of errorChars) {
       for (let i = 0; i < 5; i++) {
-        content += ch;
+        parts.push(ch);
         const normalIdx = Math.floor(Math.random() * normalChars.length);
-        content += normalChars[normalIdx];
+        parts.push(normalChars[normalIdx]);
       }
     }
+    const content = parts.join('');
     res.json({ title: '错字专项练习', content });
   } catch (e) {
     res.status(500).json({ error: '生成练习失败' });
@@ -1134,8 +1175,10 @@ app.put('/api/admin/sensitive-words', authMiddleware, adminMiddleware, async (re
   }
 });
 
+const ALLOWED_TABLES = ['users', 'articles', 'categories', 'scores', 'announcements', 'settings', 'error_logs', 'private_articles'];
+
 async function assertDatabaseTable(table) {
-  if (!table || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) {
+  if (!table || !ALLOWED_TABLES.includes(table)) {
     return null;
   }
   const tables = await db.getTables();
@@ -1210,7 +1253,7 @@ app.get('/api/admin/db/:table', authMiddleware, adminMiddleware, async (req, res
     if (search) {
       const searchableColumns = columnNames.filter(name => !/password|hash|token|secret/i.test(name));
       if (searchableColumns.length > 0) {
-        where = 'WHERE ' + searchableColumns.map(name => `CAST(${name} AS CHAR) LIKE ?`).join(' OR ');
+        where = 'WHERE ' + searchableColumns.map(name => `\`${name}\` LIKE ?`).join(' OR ');
         params = searchableColumns.map(() => '%' + search + '%');
       }
     }
