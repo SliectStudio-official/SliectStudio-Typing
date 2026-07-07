@@ -1,13 +1,10 @@
-const CACHE_NAME = 'typing-practice-v2';
+const CACHE_NAME = 'typing-practice-v3';
 
 const CRITICAL_ASSETS = [
   '/index.html',
-  '/admin.html',
-  '/profile.html',
   '/style.css',
   '/script.js',
-  '/admin.js',
-  '/profile.js'
+  '/custom-select.js'
 ];
 
 function openIDB() {

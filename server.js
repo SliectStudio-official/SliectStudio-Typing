@@ -4,6 +4,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const compression = require('compression');
 const { execFile } = require('child_process');
 const {
   loadConfig, saveConfig, createDatabase,
@@ -22,8 +23,38 @@ if (!process.env.JWT_SECRET) {
   console.warn('[安全警告] JWT_SECRET 未设置，使用硬编码密钥。生产环境请务必设置环境变量 JWT_SECRET。');
 }
 
+app.use(compression({
+  level: 6,
+  threshold: 256,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: '7d',
+  etag: true,
+  lastModified: true,
+  setHeaders: (res, filePath) => {
+    // HTML files: short cache, always revalidate
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    }
+    // CSS/JS: long cache with revalidation
+    else if (filePath.endsWith('.css') || filePath.endsWith('.js')) {
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    }
+    // Images/avatars: very long cache
+    else if (/\.(jpg|jpeg|png|gif|webp|ico|svg)$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+    }
+    // Service worker: no cache
+    if (filePath.endsWith('service-worker.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+  }
+}));
 
 const avatarDir = path.join(__dirname, 'public', 'avatars');
 if (!fs.existsSync(avatarDir)) {

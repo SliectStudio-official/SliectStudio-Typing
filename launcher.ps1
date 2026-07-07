@@ -1,4 +1,4 @@
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 chcp 65001 > $null 2>&1
 
@@ -368,32 +368,44 @@ if ($port -gt $maxPort) {
 }
 $env:PORT = $port
 
-Start-Process -FilePath 'cmd.exe' -ArgumentList '/k', 'node server.js' -WorkingDirectory $root
+if ($env:SLIECT_FOREGROUND -eq '1') {
+    # Sliect Launcher mode: run in foreground, output captured by launcher
+    Write-Host '[Sliect Launcher] Foreground mode - output will be captured'
+    Write-Host ''
+    Write-Host '========================================'
+    Write-Host "  Server starting on port $port"
+    Write-Host '========================================'
 
-$bootstrapStatus = $null
-for ($i = 0; $i -lt 60; $i++) {
-    try {
-        $bootstrapStatus = Invoke-RestMethod -Uri "http://localhost:$port/api/bootstrap/status" -TimeoutSec 2
-        break
-    } catch {
-        Start-Sleep -Seconds 1
+    & node server.js
+} else {
+    # Standalone mode: launch server in a new window
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/k', 'node server.js' -WorkingDirectory $root
+
+    $bootstrapStatus = $null
+    for ($i = 0; $i -lt 60; $i++) {
+        try {
+            $bootstrapStatus = Invoke-RestMethod -Uri "http://localhost:$port/api/bootstrap/status" -TimeoutSec 2
+            break
+        } catch {
+            Start-Sleep -Seconds 1
+        }
     }
-}
 
-if (-not $bootstrapStatus) {
-    Write-Host '[ERROR] Server start timeout'
-    Read-Host 'Press Enter to exit'
-    exit 1
-}
+    if (-not $bootstrapStatus) {
+        Write-Host '[ERROR] Server start timeout'
+        Read-Host 'Press Enter to exit'
+        exit 1
+    }
 
-$launchUrl = "http://localhost:$port"
-if ($bootstrapStatus.needsBootstrap) {
-    $launchUrl = "http://localhost:$port/setup.html"
-    Write-Host '[INFO] First use - opening setup page'
-}
+    $launchUrl = "http://localhost:$port"
+    if ($bootstrapStatus.needsBootstrap) {
+        $launchUrl = "http://localhost:$port/setup.html"
+        Write-Host '[INFO] First use - opening setup page'
+    }
 
-Start-Process $launchUrl
-Write-Host ''
-Write-Host '========================================'
-Write-Host "  Server ready: http://localhost:$port"
-Write-Host '========================================'
+    Start-Process $launchUrl
+    Write-Host ''
+    Write-Host '========================================'
+    Write-Host "  Server ready: http://localhost:$port"
+    Write-Host '========================================'
+}

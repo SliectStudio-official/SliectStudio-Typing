@@ -23,6 +23,10 @@ let speechEnabled = false;
 let currentLbPeriod = 'all';
 let currentLbCategory = '';
 let errorPracticeMode = false;
+let segments = [];
+let currentSegmentIndex = 0;
+let segmentInputs = [];
+let segmentInputValues = [];
 
 const RENDER_BUFFER_BEFORE = 50;
 const RENDER_BUFFER_AFTER = 100;
@@ -38,8 +42,7 @@ const statsCard = document.getElementById('stats-card');
 const typingCard = document.getElementById('typing-card');
 const resultCard = document.getElementById('result-card');
 const historyCard = document.getElementById('history-card');
-const textDisplay = document.getElementById('text-display');
-const typingInput = document.getElementById('typing-input');
+const typingPages = document.getElementById('typing-pages');
 const timerRow = document.getElementById('timer-row');
 const timerDisplay = document.getElementById('timer-display');
 const timerProgress = document.getElementById('timer-progress');
@@ -408,6 +411,47 @@ function getDifficultyLabel(d) {
   return '';
 }
 
+function splitTextIntoSegments(text) {
+  const maxLineLength = 32; // 桌面端一行约 32 个字符，确保视觉上一行
+  const breakChars = /[\s，。！？、；：""''（）【】《》.,!?;:'"()\[\]{}]/;
+  const segs = [];
+  let start = 0;
+  while (start < text.length) {
+    // 剩余文字不足一行，直接作为最后一段
+    if (start + maxLineLength >= text.length) {
+      segs.push(text.slice(start));
+      break;
+    }
+    let end = start + maxLineLength;
+    // 强制限制长度，避免某一段过长导致换行
+    let breakAt = end;
+    // 向前查找合适的断点（至少保留一半长度，避免某行太短）
+    const minBreakAt = start + Math.floor(maxLineLength * 0.65);
+    for (let i = end; i >= minBreakAt; i--) {
+      if (breakChars.test(text[i])) {
+        breakAt = i + 1;
+        break;
+      }
+    }
+    segs.push(text.slice(start, breakAt));
+    start = breakAt;
+  }
+  return segs;
+}
+
+function calculateRecommendedTime(text, difficulty) {
+  const charCount = text.length;
+  if (charCount === 0) return 90;
+  // 基础打字速度：3 字/秒（约 180 字/分钟）
+  const baseSpeed = 3;
+  // 难度系数：简单 1.3（更宽容）、中等 1.0、困难 0.75（更紧张）
+  const diffMultiplier = difficulty === 1 ? 1.3 : difficulty === 3 ? 0.75 : 1.0;
+  let time = Math.round(charCount / baseSpeed * diffMultiplier);
+  // 限制在 10-600 秒
+  time = Math.max(10, Math.min(600, time));
+  return time;
+}
+
 function renderArticleSelect() {
   articleSelect.innerHTML = '<option value="">-- 请选择 --</option>';
   const list = [];
@@ -444,7 +488,12 @@ articleSelect.addEventListener('change', () => {
   const catName = currentArticle.category_name || '未分类';
   const diffLabel = getDifficultyLabel(currentArticle.difficulty);
   const diffStr = diffLabel ? ' | 难度：' + diffLabel : '';
-  articleInfo.textContent = '分类：' + catName + ' | 字数：' + originalText.length + '字 | 标题：' + currentArticle.title + diffStr;
+  // 根据文章字数和难度动态计算推荐时间
+  const recommendedTime = calculateRecommendedTime(originalText, currentArticle.difficulty);
+  timeLimitInput.value = recommendedTime;
+  timeLimit = recommendedTime;
+  const timeStr = ' | 推荐时间：' + recommendedTime + '秒';
+  articleInfo.textContent = '分类：' + catName + ' | 字数：' + originalText.length + '字 | 标题：' + currentArticle.title + diffStr + timeStr;
   updateSpeechToggle();
   resetPractice();
 });
@@ -483,15 +532,18 @@ function startPractice() {
   prevInputValue = '';
   cachedCorrect = 0;
   cachedWrong = 0;
+  currentSegmentIndex = 0;
+  segments = splitTextIntoSegments(originalText);
+  segmentInputs = [];
+  segmentInputValues = new Array(segments.length).fill('');
 
   statsCard.style.display = 'block';
   typingCard.style.display = 'block';
   resultCard.style.display = 'none';
-  typingInput.disabled = false;
-  typingInput.value = '';
-  typingInput.focus();
   startBtn.disabled = true;
   resetBtn.disabled = false;
+
+  renderTypingPages();
 
   if (mode === 'timed') {
     timerRow.style.display = 'block';
@@ -503,7 +555,7 @@ function startPractice() {
     textProgressWrap.style.display = 'block';
   }
 
-  renderDisplayNow();
+  focusCurrentSegment();
   updateStatsFromCache();
 }
 
@@ -516,6 +568,11 @@ function resetPractice() {
   prevInputValue = '';
   cachedCorrect = 0;
   cachedWrong = 0;
+  segments = [];
+  currentSegmentIndex = 0;
+  segmentInputs = [];
+  segmentInputValues = [];
+  lastStatUpdate = 0;
   if (rafId) {
     cancelAnimationFrame(rafId);
     rafId = null;
@@ -528,8 +585,7 @@ function resetPractice() {
   statsCard.style.display = 'none';
   typingCard.style.display = 'none';
   resultCard.style.display = 'none';
-  typingInput.disabled = true;
-  typingInput.value = '';
+  typingPages.innerHTML = '';
   startBtn.disabled = false;
   resetBtn.disabled = true;
   submitMsg.textContent = '';
@@ -570,123 +626,177 @@ function startTimer() {
   }, 1000);
 }
 
-typingInput.addEventListener('compositionstart', () => {
-  isComposing = true;
-});
-
-typingInput.addEventListener('compositionend', () => {
-  isComposing = false;
-  handleTypingInput();
-});
-
-typingInput.addEventListener('input', () => {
-  if (isComposing) return;
-  handleTypingInput();
-});
-
 let lastSpokenWord = '';
 
-function handleTypingInput() {
-  if (!isStarted || isFinished) return;
+function getSegmentStartOffset(segmentIndex) {
+  let offset = 0;
+  for (let i = 0; i < segmentIndex; i++) {
+    offset += segments[i].length;
+  }
+  return offset;
+}
 
-  const inputVal = typingInput.value;
-  const inputLen = inputVal.length;
+function focusCurrentSegment() {
+  const input = segmentInputs[currentSegmentIndex];
+  if (input && !input.disabled) {
+    input.focus();
+  }
+}
 
-  if (inputLen > prevInputLen) {
-    let changeStart = prevInputLen;
-    const minLen = Math.min(prevInputLen, inputLen);
-    for (let i = 0; i < minLen; i++) {
-      if (inputVal[i] !== prevInputValue[i]) {
-        changeStart = i;
-        break;
-      }
-    }
+function renderTypingPages() {
+  typingPages.innerHTML = '';
+  segmentInputs = [];
 
-    for (let i = changeStart; i < prevInputLen && i < originalText.length; i++) {
-      if (charStates[i] === 'correct') cachedCorrect--;
-      else if (charStates[i] === 'wrong') cachedWrong--;
-    }
+  segments.forEach((segment, index) => {
+    const page = document.createElement('div');
+    page.className = 'typing-page' + (index === currentSegmentIndex ? ' active' : '') + (index < currentSegmentIndex ? ' completed' : '');
 
-    for (let i = changeStart; i < inputLen && i < originalText.length; i++) {
-      if (inputVal[i] === originalText[i]) {
-        charStates[i] = 'correct';
-        cachedCorrect++;
-      } else {
-        charStates[i] = 'wrong';
-        cachedWrong++;
-      }
-    }
+    const textEl = document.createElement('div');
+    textEl.className = 'typing-line-text';
+    textEl.id = 'typing-text-' + index;
+    page.appendChild(textEl);
 
-    for (let i = inputLen; i < prevInputLen && i < originalText.length; i++) {
-      charStates[i] = 'pending';
-    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'typing-line-input' + (index < currentSegmentIndex ? ' completed' : '');
+    input.disabled = index !== currentSegmentIndex || !isStarted || isFinished;
+    input.value = segmentInputValues[index] || '';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.autocapitalize = 'off';
+    input.autocorrect = 'off';
+    input.name = 'typing-segment-' + Date.now() + '-' + index;
+    input.setAttribute('aria-label', '第 ' + (index + 1) + ' 段输入');
 
-    if (inputLen < originalText.length) {
-      charStates[inputLen] = 'current';
-    }
-  } else if (inputLen < prevInputLen) {
-    let changeStart = inputLen;
-    const minLen = Math.min(prevInputLen, inputLen);
-    for (let i = 0; i < minLen; i++) {
-      if (inputVal[i] !== prevInputValue[i]) {
-        changeStart = i;
-        break;
-      }
-    }
-
-    for (let i = changeStart; i < prevInputLen && i < originalText.length; i++) {
-      if (charStates[i] === 'correct') cachedCorrect--;
-      else if (charStates[i] === 'wrong') cachedWrong--;
-    }
-
-    for (let i = changeStart; i < inputLen && i < originalText.length; i++) {
-      if (inputVal[i] === originalText[i]) {
-        charStates[i] = 'correct';
-        cachedCorrect++;
-      } else {
-        charStates[i] = 'wrong';
-        cachedWrong++;
-      }
-    }
-
-    for (let i = inputLen; i < prevInputLen && i < originalText.length; i++) {
-      charStates[i] = 'pending';
-    }
-
-    if (inputLen < originalText.length) {
-      charStates[inputLen] = 'current';
-    }
-  } else {
-    let changeStart = inputLen;
-    for (let i = 0; i < inputLen; i++) {
-      if (inputVal[i] !== prevInputValue[i]) {
-        changeStart = i;
-        break;
-      }
-    }
-
-    if (changeStart < inputLen) {
-      for (let i = changeStart; i < inputLen && i < originalText.length; i++) {
-        if (charStates[i] === 'correct') cachedCorrect--;
-        else if (charStates[i] === 'wrong') cachedWrong--;
-      }
-      for (let i = changeStart; i < inputLen && i < originalText.length; i++) {
-        if (inputVal[i] === originalText[i]) {
-          charStates[i] = 'correct';
-          cachedCorrect++;
-        } else {
-          charStates[i] = 'wrong';
-          cachedWrong++;
+    // 避免浏览器自动填充：渲染后若值非用户输入则清空
+    if (!segmentInputValues[index]) {
+      requestAnimationFrame(() => {
+        if (input.value && input.value !== segmentInputValues[index]) {
+          input.value = '';
         }
-      }
+      });
+    }
+
+    input.addEventListener('input', () => {
+      if (isComposing) return;
+      handleSegmentInput(index, input.value);
+    });
+    input.addEventListener('compositionstart', () => { isComposing = true; });
+    input.addEventListener('compositionend', () => {
+      isComposing = false;
+      handleSegmentInput(index, input.value);
+    });
+
+    page.appendChild(input);
+    segmentInputs.push(input);
+    typingPages.appendChild(page);
+  });
+
+  renderSegmentTexts();
+}
+
+function renderSegmentTexts() {
+  // 渲染所有段落的原文（文字是静态的，渲染开销不大）
+  for (let i = 0; i < segments.length; i++) {
+    renderSegmentText(i);
+  }
+}
+
+function renderSegmentText(segmentIndex) {
+  const textEl = document.getElementById('typing-text-' + segmentIndex);
+  if (!textEl) return;
+  const segment = segments[segmentIndex];
+  const offset = getSegmentStartOffset(segmentIndex);
+  let html = '';
+  for (let i = 0; i < segment.length; i++) {
+    const globalIndex = offset + i;
+    const state = charStates[globalIndex] || 'pending';
+    html += '<span class="char ' + state + '">' + escapeChar(segment[i]) + '</span>';
+  }
+  textEl.innerHTML = html;
+}
+
+function updateSegmentStates(segmentIndex, inputValue) {
+  const offset = getSegmentStartOffset(segmentIndex);
+  const segment = segments[segmentIndex];
+  const segmentLen = segment.length;
+  const inputLen = inputValue.length;
+  const prevValue = segmentInputValues[segmentIndex] || '';
+  const prevLen = prevValue.length;
+  const minLen = Math.min(prevLen, inputLen);
+
+  // 找到变化起始位置，只更新变化部分
+  let changeStart = minLen;
+  for (let i = 0; i < minLen; i++) {
+    if (inputValue[i] !== prevValue[i]) {
+      changeStart = i;
+      break;
     }
   }
 
-  prevInputLen = inputLen;
-  prevInputValue = inputVal;
+  // 移除变化位置之后旧状态对缓存的影响
+  for (let i = changeStart; i < prevLen && i < segmentLen; i++) {
+    const oldState = charStates[offset + i];
+    if (oldState === 'correct') cachedCorrect--;
+    else if (oldState === 'wrong') cachedWrong--;
+  }
 
-  if (speechEnabled && inputLen > 0 && inputLen <= originalText.length) {
-    const word = getCurrentWord(inputLen - 1);
+  // 清除变化位置之后的状态
+  for (let i = changeStart; i < segmentLen; i++) {
+    charStates[offset + i] = 'pending';
+  }
+
+  // 重新计算变化位置之后的状态
+  for (let i = changeStart; i < inputLen && i < segmentLen; i++) {
+    if (inputValue[i] === segment[i]) {
+      charStates[offset + i] = 'correct';
+      cachedCorrect++;
+    } else {
+      charStates[offset + i] = 'wrong';
+      cachedWrong++;
+    }
+  }
+
+  // 设置当前光标位置
+  if (inputLen < segmentLen) {
+    charStates[offset + inputLen] = 'current';
+  } else if (segmentIndex < segments.length - 1) {
+    charStates[offset + segmentLen] = 'current';
+  }
+
+  segmentInputValues[segmentIndex] = inputValue;
+
+  // 增量更新全局输入长度
+  prevInputLen += (inputLen - prevLen);
+  // 重建 prevInputValue（仅在需要时，避免频繁字符串拼接）
+  if (prevInputLen <= 0) {
+    prevInputValue = '';
+  } else {
+    // 用数组拼接代替多次字符串连接
+    prevInputValue = segmentInputValues.join('');
+  }
+}
+
+function handleSegmentInput(segmentIndex, inputValue) {
+  if (!isStarted || isFinished) return;
+  if (segmentIndex !== currentSegmentIndex) return;
+
+  const segment = segments[segmentIndex];
+
+  // 防止输入超过本段长度（最后一行除外）
+  if (inputValue.length > segment.length) {
+    inputValue = inputValue.slice(0, segment.length);
+    segmentInputs[segmentIndex].value = inputValue;
+  }
+
+  updateSegmentStates(segmentIndex, inputValue);
+  renderSegmentText(segmentIndex);
+  updateStatsFromCache();
+
+  // 朗读功能
+  if (speechEnabled && inputValue.length > 0) {
+    const globalPos = getSegmentStartOffset(segmentIndex) + inputValue.length - 1;
+    const word = getCurrentWord(globalPos);
     if (word && word !== lastSpokenWord) {
       lastSpokenWord = word;
       const utterance = new SpeechSynthesisUtterance(word);
@@ -697,16 +807,46 @@ function handleTypingInput() {
     }
   }
 
-  scheduleDisplayUpdate();
-  updateStatsFromCache();
-
-  if (inputLen >= originalText.length) {
-    finishPractice();
+  // 当前段完成，自动翻页
+  if (inputValue.length >= segment.length) {
+    const allCorrect = segment.split('').every((c, i) => inputValue[i] === c);
+    if (allCorrect && segmentIndex < segments.length - 1) {
+      moveToNextSegment();
+    } else if (allCorrect && segmentIndex === segments.length - 1) {
+      finishPractice();
+    }
   }
 
   if (mode === 'full') {
-    const pct = Math.min(100, (inputLen / originalText.length) * 100);
+    const pct = Math.min(100, (prevInputLen / originalText.length) * 100);
     textProgress.style.width = pct + '%';
+  }
+}
+
+function moveToNextSegment() {
+  const prevInput = segmentInputs[currentSegmentIndex];
+  if (prevInput) {
+    prevInput.disabled = true;
+    prevInput.classList.add('completed');
+  }
+
+  const prevPage = typingPages.children[currentSegmentIndex];
+  if (prevPage) {
+    prevPage.classList.remove('active');
+    prevPage.classList.add('completed');
+  }
+
+  currentSegmentIndex++;
+
+  const nextInput = segmentInputs[currentSegmentIndex];
+  if (nextInput) {
+    nextInput.disabled = false;
+    const nextPage = typingPages.children[currentSegmentIndex];
+    if (nextPage) {
+      nextPage.classList.add('active');
+      nextPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    nextInput.focus();
   }
 }
 
@@ -720,73 +860,22 @@ function getCurrentWord(pos) {
   return originalText.substring(start, end + 1);
 }
 
-typingInput.addEventListener('keydown', (e) => {
-  if (!isStarted || isFinished) {
-    e.preventDefault();
-    return;
-  }
-});
-
 function scheduleDisplayUpdate() {
   if (rafId) return;
   rafId = requestAnimationFrame(() => {
     rafId = null;
-    renderDisplayNow();
+    renderSegmentText(currentSegmentIndex);
   });
 }
 
-function renderDisplayNow() {
+let lastStatUpdate = 0;
+function updateStatsFromCache(force = false) {
+  const now = Date.now();
+  if (!force && now - lastStatUpdate < 100) return; // 限制统计刷新频率
+  lastStatUpdate = now;
+
   const inputLen = prevInputLen;
-  const textLen = originalText.length;
-
-  if (textLen <= VIRTUAL_THRESHOLD) {
-    let html = '';
-    for (let i = 0; i < textLen; i++) {
-      const state = charStates[i] || 'pending';
-      let cls = 'char ' + state;
-      if (state === 'current' && i + 1 < textLen) {
-        html += '<span class="char current">' + escapeChar(originalText[i]) + '</span>';
-        html += '<span class="char char-next">' + escapeChar(originalText[i + 1]) + '</span>';
-        i++;
-      } else {
-        html += '<span class="' + cls + '">' + escapeChar(originalText[i]) + '</span>';
-      }
-    }
-    textDisplay.innerHTML = html;
-    return;
-  }
-
-  const windowStart = Math.max(0, inputLen - RENDER_BUFFER_BEFORE);
-  const windowEnd = Math.min(textLen, inputLen + RENDER_BUFFER_AFTER);
-
-  const parts = [];
-
-  if (windowStart > 0) {
-    parts.push('<span class="char-ellipsis">\u2026 \u5DF2\u8F93\u5165 ' + windowStart + ' \u5B57 \u2026</span>');
-  }
-
-  for (let i = windowStart; i < windowEnd; i++) {
-    const state = charStates[i] || 'pending';
-    let cls = 'char ' + state;
-    if (state === 'current' && i + 1 < windowEnd) {
-      parts.push('<span class="char current">' + escapeChar(originalText[i]) + '</span>');
-      parts.push('<span class="char char-next">' + escapeChar(originalText[i + 1]) + '</span>');
-      i++;
-    } else {
-      parts.push('<span class="' + cls + '">' + escapeChar(originalText[i]) + '</span>');
-    }
-  }
-
-  if (windowEnd < textLen) {
-    parts.push('<span class="char-ellipsis">\u2026 \u5269\u4F59 ' + (textLen - windowEnd) + ' \u5B57 \u2026</span>');
-  }
-
-  textDisplay.innerHTML = parts.join('');
-}
-
-function updateStatsFromCache() {
-  const inputLen = prevInputLen;
-  const elapsed = startTime ? (Date.now() - startTime) / 1000 : 0;
+  const elapsed = startTime ? (now - startTime) / 1000 : 0;
   const minutes = elapsed / 60;
   const speed = minutes > 0 ? Math.round(cachedCorrect / minutes) : 0;
   const accuracy = inputLen > 0 ? Math.round((cachedCorrect / inputLen) * 100) : 100;
@@ -801,7 +890,7 @@ function updateStatsFromCache() {
 function finishPractice() {
   isFinished = true;
   isStarted = false;
-  typingInput.disabled = true;
+  segmentInputs.forEach(input => { input.disabled = true; });
 
   if (rafId) {
     cancelAnimationFrame(rafId);
@@ -813,7 +902,8 @@ function finishPractice() {
     timerInterval = null;
   }
 
-  const inputLen = typingInput.value.length;
+  updateStatsFromCache(true);
+  const inputLen = prevInputLen;
   const elapsed = startTime ? (Date.now() - startTime) / 1000 : 0;
   const minutes = elapsed / 60;
   const speed = minutes > 0 ? Math.round(cachedCorrect / minutes) : 0;
@@ -834,7 +924,7 @@ function finishPractice() {
 
   if (currentUser && currentArticle && currentArticle.id) {
     const errors = [];
-    const inputVal = typingInput.value;
+    const inputVal = segmentInputValues.join('');
     for (let i = 0; i < inputVal.length && i < originalText.length; i++) {
       if (charStates[i] === 'wrong') {
         errors.push({
@@ -862,7 +952,7 @@ submitScoreBtn.addEventListener('click', async () => {
     nickname = '游客';
   }
 
-  const inputLen = typingInput.value.length;
+  const inputLen = prevInputLen;
   const elapsed = startTime ? (Date.now() - startTime) / 1000 : 0;
   const minutes = elapsed / 60;
   const speed = minutes > 0 ? Math.round(cachedCorrect / minutes) : 0;
@@ -956,7 +1046,13 @@ privateArticleSelect.addEventListener('change', () => {
   if (!article) return;
   currentArticle = article;
   originalText = article.content;
-  articleInfo.textContent = '私人文章 | 字数：' + originalText.length + '字 | 标题：' + article.title;
+  // 私人文章默认按中等难度计算推荐时间
+  const diff = article.difficulty || 2;
+  const recommendedTime = calculateRecommendedTime(originalText, diff);
+  timeLimitInput.value = recommendedTime;
+  timeLimit = recommendedTime;
+  const timeStr = ' | 推荐时间：' + recommendedTime + '秒';
+  articleInfo.textContent = '私人文章 | 字数：' + originalText.length + '字 | 标题：' + article.title + timeStr;
   articleSelect.value = '';
   updateSpeechToggle();
   resetPractice();
@@ -966,6 +1062,8 @@ function updateSpeechToggle() {
   if (!originalText) {
     speechToggle.style.display = 'none';
     speechEnabled = false;
+    speechToggle.classList.remove('active');
+    speechToggle.title = '英文朗读';
     return;
   }
   let asciiCount = 0;
@@ -975,15 +1073,18 @@ function updateSpeechToggle() {
   const ratio = originalText.length > 0 ? asciiCount / originalText.length : 0;
   if (ratio > 0.6) {
     speechToggle.style.display = 'inline-block';
+    speechToggle.title = speechEnabled ? '英文朗读：已开启（点击关闭）' : '英文朗读：已关闭（点击开启）';
   } else {
     speechToggle.style.display = 'none';
     speechEnabled = false;
+    speechToggle.classList.remove('active');
   }
 }
 
 speechToggle.addEventListener('click', () => {
   speechEnabled = !speechEnabled;
-  speechToggle.style.opacity = speechEnabled ? '1' : '0.5';
+  speechToggle.classList.toggle('active', speechEnabled);
+  speechToggle.title = speechEnabled ? '英文朗读：已开启（点击关闭）' : '英文朗读：已关闭（点击开启）';
   if (!speechEnabled) {
     speechSynthesis.cancel();
     lastSpokenWord = '';

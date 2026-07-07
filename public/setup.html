@@ -4,11 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>系统初始化 - 打字练习</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-  <script src="theme-toggle.js"></script>
+  <link rel="preload" href="style.css" as="style">
+  <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="style.css"></noscript>
+  <script>(function(){var s='theme',d='dark',h=document.documentElement;function g(){var t=localStorage.getItem(s);if(t)return t;return window.matchMedia('(prefers-color-scheme:dark)').matches?d:'light'}function a(t){if(t===d)h.setAttribute('data-theme',d);else h.removeAttribute('data-theme')}a(g());document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('theme-toggle');if(b)b.addEventListener('click',function(){var c=h.getAttribute('data-theme')===d?d:'light';var n=c===d?'light':d;localStorage.setItem(s,n);a(n)})});window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(e){if(!localStorage.getItem(s))a(e.matches?d:'light')})})()</script>
   <style>
     .setup-page {
       min-height: 100vh;
@@ -33,7 +32,7 @@
       margin-bottom: 32px;
     }
     .setup-header h1 {
-      font-family: 'Poppins', 'Inter', system-ui, sans-serif;
+      font-family: Georgia, 'Times New Roman', serif;
       font-size: 24px;
       font-weight: 700;
       color: var(--ink);
@@ -127,7 +126,7 @@
       color: #fff;
     }
     .setup-success h2 {
-      font-family: 'Poppins', 'Inter', system-ui, sans-serif;
+      font-family: Georgia, 'Times New Roman', serif;
       font-size: 20px;
       font-weight: 600;
       color: var(--ink);

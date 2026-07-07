@@ -1621,8 +1621,8 @@ document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(link => {
     const section = link.dataset.section;
     document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(l => l.classList.remove('active'));
     link.classList.add('active');
-    document.querySelectorAll('.admin-main > .section-card').forEach(card => {
-      card.style.display = card.id === 'section-' + section ? '' : 'none';
+    document.querySelectorAll('.admin-main > [id^="section-"]').forEach(el => {
+      el.classList.toggle('admin-section-active', el.id === 'section-' + section);
     });
     history.replaceState(null, null, '#' + section);
   });
@@ -1634,8 +1634,8 @@ function showSectionFromHash() {
   if (link) {
     document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(l => l.classList.remove('active'));
     link.classList.add('active');
-    document.querySelectorAll('.admin-main > .section-card').forEach(card => {
-      card.style.display = card.id === 'section-' + hash ? '' : 'none';
+    document.querySelectorAll('.admin-main > [id^="section-"]').forEach(el => {
+      el.classList.toggle('admin-section-active', el.id === 'section-' + hash);
     });
   }
 }

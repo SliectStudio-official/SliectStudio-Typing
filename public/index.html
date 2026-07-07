@@ -4,18 +4,34 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>打字练习</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-  <script src="theme-toggle.js"></script>
+  <link rel="preload" href="style.css" as="style">
+  <link rel="preload" href="script.js" as="script">
+  <link rel="preload" href="custom-select.js" as="script">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{--primary:#c96442;--primary-active:#b55838;--primary-light:#d97757;--primary-lighter:#e8a08a;--primary-lightest:#f5e6df;--ink:#141413;--body:#5e5d59;--body-strong:#4d4c48;--muted:#87867f;--muted-soft:#9c9b94;--canvas:#f5f4ed;--canvas-soft:#faf9f5;--surface-card:#faf9f5;--surface-strong:#e8e6dc;--on-primary:#faf9f5;--semantic-error:#b53333;--semantic-success:#2d8a4e;--semantic-warning:#b57b1a;--semantic-info:#3898ec;--hairline:#e8e6dc;--hairline-soft:#f0eee6;--hairline-strong:#d1cfc5;--glass-bg:rgba(250,249,245,0.95);--glass-bg-hover:rgba(250,249,245,0.98);--glass-border:#f0eee6;--glass-inner-glow:inset 0 1px 0 0 rgba(255,255,255,0.15);--glass-shadow:0px 0px 0px 1px #f0eee6,rgba(0,0,0,0.05) 0px 4px 24px;--glass-shadow-hover:0px 0px 0px 1px #e8e6dc,rgba(0,0,0,0.05) 0px 4px 24px;--glass-blur:2px;--glass-radius:16px;--glass-radius-sm:12px;--glass-radius-xs:8px;--nav-glass-bg:rgba(250,249,245,0.96);--overlay-bg:rgba(20,20,19,0.28);--bg-gradient:#f5f4ed;--accent-amber:#c96442;--spacing-unit:4px;--toast-success:#2d8a4e;--toast-error:#b53333;--toast-warning:#b57b1a;--toast-info:#3898ec;--font-display:Georgia,'Times New Roman',serif;--font-body:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;--font-mono:ui-monospace,SFMono-Regular,'SF Mono',Menlo,Consolas,'Liberation Mono',monospace;--ring-warm:#d1cfc5;--ring-deep:#c2c0b6;--heading-scale:1;--card-padding:16px}
+    [data-theme="dark"]{--primary:#d97757;--primary-active:#c96442;--primary-light:#e8a08a;--primary-lighter:#c9927e;--primary-lightest:#3d2a22;--ink:#e8e6e0;--body:#a8a7a0;--body-strong:#d1cfc8;--muted:#807f78;--muted-soft:#6b6a64;--canvas:#141413;--canvas-soft:#1e1e1c;--surface-card:#1e1e1c;--surface-strong:#30302e;--on-primary:#faf9f5;--semantic-error:#e06060;--semantic-success:#48a868;--semantic-warning:#d4a030;--semantic-info:#58a8e8;--hairline:#30302e;--hairline-soft:#262624;--hairline-strong:#3d3d3a;--glass-bg:rgba(30,30,28,0.95);--glass-bg-hover:rgba(30,30,28,0.98);--glass-border:#30302e;--glass-inner-glow:inset 0 1px 0 0 rgba(255,255,255,0.02);--glass-shadow:0px 0px 0px 1px #30302e,rgba(0,0,0,0.25) 0px 4px 24px;--glass-shadow-hover:0px 0px 0px 1px #3d3d3a,rgba(0,0,0,0.30) 0px 4px 24px;--glass-blur:2px;--nav-glass-bg:rgba(20,20,19,0.97);--overlay-bg:rgba(0,0,0,0.55);--bg-gradient:#141413;--accent-amber:#d97757;--toast-success:#48a868;--toast-error:#e06060;--toast-warning:#d4a030;--toast-info:#58a8e8;--ring-warm:#3d3d3a;--ring-deep:#4d4c48}
+    body{font-family:var(--font-body);background-color:var(--bg-gradient);color:var(--ink);min-height:100vh;font-size:15px;line-height:1.50;letter-spacing:0;font-weight:400;position:relative;overflow-x:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+    nav{background:var(--nav-glass-bg);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));border-bottom:1px solid var(--glass-border);padding:0 20px;display:flex;align-items:center;height:44px;position:sticky;top:0;z-index:50;box-shadow:var(--glass-shadow)}
+    nav .logo{font-family:var(--font-display);font-size:18px;font-weight:500;color:var(--primary)}
+    .container{max-width:760px;margin:0 auto;padding:20px 16px}
+    .section-card{background:var(--glass-bg);border-radius:var(--glass-radius);padding:var(--card-padding);margin-bottom:16px;box-shadow:var(--glass-shadow)}
+    .sub-nav{background:var(--nav-glass-bg);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));padding:8px 20px;border-bottom:1px solid var(--glass-border)}
+    .sub-nav .section-name{font-family:var(--font-display);font-size:calc(16px * var(--heading-scale));font-weight:500;color:var(--ink)}
+  </style>
+  <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="style.css"></noscript>
+  <script>(function(){var s='theme',d='dark',h=document.documentElement;function g(){var t=localStorage.getItem(s);if(t)return t;return window.matchMedia('(prefers-color-scheme:dark)').matches?d:'light'}function a(t){if(t===d)h.setAttribute('data-theme',d);else h.removeAttribute('data-theme')}a(g());document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('theme-toggle');if(b)b.addEventListener('click',function(){var c=h.getAttribute('data-theme')===d?d:'light';var n=c===d?'light':d;localStorage.setItem(s,n);a(n)})});window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(e){if(!localStorage.getItem(s))a(e.matches?d:'light')})})()</script>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
   <nav>
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="打开菜单">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+    </button>
     <div class="logo">Typing</div>
     <ul class="nav-links">
-      <li><a href="index.html" class="active">练习</a></li>
+      <li><a href="index.html" class="active" aria-current="page">练习</a></li>
       <li id="admin-nav-item" style="display:none"><a href="admin.html">管理</a></li>
       <li id="profile-nav-item" style="display:none"><a href="profile.html">个人中心</a></li>
     </ul>
@@ -79,6 +95,22 @@
         </div>
       </div>
       <p class="note" id="article-info"></p>
+      <hr>
+      <div class="mode-options">
+        <div class="segmented-control">
+          <input type="radio" name="mode" value="timed" id="mode-timed" checked>
+          <label for="mode-timed">限时模式</label>
+          <input type="radio" name="mode" value="full" id="mode-full">
+          <label for="mode-full">完成全文</label>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input type="number" id="time-limit" value="90" min="10" max="600" style="width:80px"> <span class="note" style="margin:0">秒</span>
+        </div>
+      </div>
+      <div class="btn-group">
+        <button class="btn-primary" id="start-btn">开始练习</button>
+        <button class="btn-secondary" id="reset-btn" disabled>重置</button>
+      </div>
     </div>
 
     <div class="section-card" id="private-articles-card" style="display:none">
@@ -87,19 +119,6 @@
         <option value="">-- 选择私人文章 --</option>
       </select>
       <div id="private-article-list" class="private-article-list"></div>
-    </div>
-
-    <div class="section-card">
-      <div class="section-card-title">练习设置</div>
-      <div class="mode-options">
-        <label><input type="radio" name="mode" value="timed" checked> 限时模式</label>
-        <input type="number" id="time-limit" value="90" min="10" max="600" style="width:80px;display:inline-block;margin-left:8px"> 秒
-        <label style="margin-left:16px"><input type="radio" name="mode" value="full"> 完成全文</label>
-      </div>
-      <div class="btn-group">
-        <button class="btn-primary" id="start-btn">开始练习</button>
-        <button class="btn-secondary" id="reset-btn" disabled>重置</button>
-      </div>
     </div>
 
     <div class="section-card" id="stats-card" style="display:none">
@@ -139,18 +158,11 @@
     </div>
 
     <div class="section-card" id="typing-card" style="display:none">
-      <div class="section-card-title">打字区域</div>
-      <div class="typing-layout">
-        <div class="typing-left">
-          <div class="typing-label">原文
-            <button class="speech-toggle" id="speech-toggle" title="英文朗读" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button>
-          </div>
-          <div class="text-display" id="text-display"></div>
-        </div>
-        <div class="typing-right">
-          <div class="typing-label">输入</div>
-          <textarea id="typing-input" placeholder="点击"开始练习"后在此打字..." disabled></textarea>
-        </div>
+      <div class="section-card-title">打字区域
+        <button class="speech-toggle" id="speech-toggle" title="英文朗读" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg></button>
+      </div>
+      <div class="typing-layout" id="typing-layout">
+        <div class="typing-pages" id="typing-pages"></div>
       </div>
     </div>
 
@@ -292,8 +304,25 @@
     </div>
   </div>
 
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Mobile Menu Drawer -->
+  <div class="mobile-menu-overlay" id="mobile-menu-overlay"></div>
+  <div class="mobile-menu-drawer" id="mobile-menu-drawer">
+    <div class="mobile-menu-drawer-header">
+      <div class="logo">Typing</div>
+      <button class="mobile-menu-drawer-close" id="mobile-menu-close" aria-label="关闭菜单">&times;</button>
+    </div>
+    <ul class="nav-links-mobile">
+      <li><a href="index.html" class="active">练习</a></li>
+      <li id="mobile-admin-nav" style="display:none"><a href="admin.html">管理</a></li>
+      <li id="mobile-profile-nav" style="display:none"><a href="profile.html">个人中心</a></li>
+    </ul>
+  </div>
+
   <footer class="site-footer" id="site-footer">Loading...</footer>
-  <script src="custom-select.js"></script>
-  <script src="script.js"></script>
+  <script src="custom-select.js" defer></script>
+  <script src="script.js" defer></script>
 </body>
 </html>

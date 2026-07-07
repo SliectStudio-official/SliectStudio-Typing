@@ -1,6 +1,6 @@
 {
   "name": "lan-typing-practice",
-  "version": "2.0.0",
+  "version": "1.0.260706.2330-RE",
   "description": "局域网打字练习网站",
   "main": "server.js",
   "scripts": {
@@ -9,6 +9,7 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.7.0",
+    "compression": "^1.8.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.1.1",

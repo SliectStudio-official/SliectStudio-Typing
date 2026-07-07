@@ -4,19 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>个人中心</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-  <script src="theme-toggle.js"></script>
+  <link rel="preload" href="style.css" as="style">
+  <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="style.css"></noscript>
+  <script>(function(){var s='theme',d='dark',h=document.documentElement;function g(){var t=localStorage.getItem(s);if(t)return t;return window.matchMedia('(prefers-color-scheme:dark)').matches?d:'light'}function a(t){if(t===d)h.setAttribute('data-theme',d);else h.removeAttribute('data-theme')}a(g());document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('theme-toggle');if(b)b.addEventListener('click',function(){var c=h.getAttribute('data-theme')===d?d:'light';var n=c===d?'light':d;localStorage.setItem(s,n);a(n)})});window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(e){if(!localStorage.getItem(s))a(e.matches?d:'light')})})()</script>
 </head>
 <body>
   <nav>
+    <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="打开菜单">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+    </button>
     <div class="logo">Typing</div>
     <ul class="nav-links">
       <li><a href="index.html">练习</a></li>
       <li id="admin-nav-item" style="display:none"><a href="admin.html">管理</a></li>
-      <li><a href="profile.html" class="active">个人中心</a></li>
+      <li><a href="profile.html" class="active" aria-current="page">个人中心</a></li>
     </ul>
     <div class="nav-right">
       <button class="theme-toggle" id="theme-toggle" aria-label="切换主题" title="切换亮色/暗色模式">
@@ -194,8 +196,25 @@
     </div>
   </div>
 
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Mobile Menu Drawer -->
+  <div class="mobile-menu-overlay" id="mobile-menu-overlay"></div>
+  <div class="mobile-menu-drawer" id="mobile-menu-drawer">
+    <div class="mobile-menu-drawer-header">
+      <div class="logo">Typing</div>
+      <button class="mobile-menu-drawer-close" id="mobile-menu-close" aria-label="关闭菜单">&times;</button>
+    </div>
+    <ul class="nav-links-mobile">
+      <li><a href="index.html">练习</a></li>
+      <li id="mobile-admin-nav" style="display:none"><a href="admin.html">管理</a></li>
+      <li><a href="profile.html" class="active">个人中心</a></li>
+    </ul>
+  </div>
+
   <footer class="site-footer" id="site-footer">Loading...</footer>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="profile.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
+  <script src="profile.js" defer></script>
 </body>
 </html>
