@@ -1,4 +1,4 @@
-const CACHE_NAME = 'typing-practice-v3';
+const CACHE_NAME = 'typing-practice-v5';
 
 const CRITICAL_ASSETS = [
   '/index.html',
@@ -7,13 +7,25 @@ const CRITICAL_ASSETS = [
   '/custom-select.js'
 ];
 
+// 状态检测接口：仅走网络，不缓存，服务器不可达时返回 503 以触发离线提示
+const NETWORK_ONLY_API = [
+  '/api/version',
+  '/api/bootstrap/status'
+];
+
 function openIDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('typing-practice-offline', 1);
-    req.onupgradeneeded = () => {
+    const req = indexedDB.open('typing-practice-offline', 2);
+    req.onupgradeneeded = (event) => {
       const db = req.result;
+      const oldVersion = event.oldVersion;
       if (!db.objectStoreNames.contains('pendingScores')) {
         db.createObjectStore('pendingScores', { autoIncrement: true });
+      }
+      if (oldVersion < 2 && !db.objectStoreNames.contains('offlineArticles')) {
+        const store = db.createObjectStore('offlineArticles', { keyPath: ['id', 'source'] });
+        store.createIndex('source', 'source', { unique: false });
+        store.createIndex('id', 'id', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -56,6 +68,72 @@ async function deletePendingScore(key) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('pendingScores', 'readwrite');
     tx.objectStore('pendingScores').delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function cacheArticle(article, source) {
+  if (!article || article.id == null || !source) return;
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('offlineArticles', 'readwrite');
+    tx.objectStore('offlineArticles').put({ ...article, source, cached_at: Date.now() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getAllCachedArticles() {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('offlineArticles', 'readonly');
+    const req = tx.objectStore('offlineArticles').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function deleteCachedArticle(id, source) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('offlineArticles', 'readwrite');
+    tx.objectStore('offlineArticles').delete([id, source]);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getCachedBySource(source) {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('offlineArticles', 'readonly');
+    const req = tx.objectStore('offlineArticles').index('source').getAll(source);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function syncGlobalOfflineArticles() {
+  let remoteArticles = [];
+  try {
+    const res = await fetch('/api/articles/offline', { cache: 'no-cache' });
+    if (res.ok) remoteArticles = await res.json();
+  } catch (e) {
+    return;
+  }
+  const existing = await getCachedBySource('global');
+  const newIds = new Set(remoteArticles.map(a => a.id));
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('offlineArticles', 'readwrite');
+    const store = tx.objectStore('offlineArticles');
+    existing.forEach(a => {
+      if (!newIds.has(a.id)) store.delete([a.id, 'global']);
+    });
+    remoteArticles.forEach(a => {
+      store.put({ ...a, source: 'global', cached_at: Date.now() });
+    });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -107,6 +185,7 @@ self.addEventListener('install', (event) => {
       } catch (e) {
         console.error('SW install failed:', e);
       }
+      try { await syncGlobalOfflineArticles(); } catch (e) {}
     })()
   );
   self.skipWaiting();
@@ -114,13 +193,16 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(
-        names
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      )
-    )
+    (async () => {
+      await caches.keys().then((names) =>
+        Promise.all(
+          names
+            .filter((name) => name !== CACHE_NAME)
+            .map((name) => caches.delete(name))
+        )
+      );
+      try { await syncGlobalOfflineArticles(); } catch (e) {}
+    })()
   );
   self.clients.claim();
 });
@@ -161,6 +243,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // 状态检测接口：网络优先且不缓存，失败时返回 503，让 checkServerReachable 正确识别离线
+  if (NETWORK_ONLY_API.includes(url.pathname)) {
+    event.respondWith(
+      fetch(request).catch(() => new Response(
+        JSON.stringify({ error: 'offline', message: '服务器不可达' }),
+        { headers: { 'Content-Type': 'application/json' }, status: 503 }
+      ))
+    );
+    return;
+  }
+
   if (url.pathname.startsWith('/api/')) {
     if (request.method !== 'GET') return;
 
@@ -194,7 +287,46 @@ self.addEventListener('online', () => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SYNC_SCORES') {
-    syncPendingScores();
+  const data = event.data;
+  if (!data) return;
+
+  switch (data.type) {
+    case 'SYNC_SCORES':
+      syncPendingScores();
+      break;
+
+    case 'SYNC_OFFLINE_ARTICLES':
+      syncGlobalOfflineArticles().catch(() => {});
+      break;
+
+    case 'CACHE_ARTICLE': {
+      const { article, source } = data;
+      if (article && source) {
+        cacheArticle(article, source).catch(() => {});
+      }
+      break;
+    }
+
+    case 'DELETE_CACHED_ARTICLE': {
+      const { id, source } = data;
+      if (id != null && source) {
+        deleteCachedArticle(id, source).catch(() => {});
+      }
+      break;
+    }
+
+    case 'GET_CACHED_ARTICLES':
+      getAllCachedArticles()
+        .then(articles => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ success: true, articles });
+          }
+        })
+        .catch(err => {
+          if (event.ports && event.ports[0]) {
+            event.ports[0].postMessage({ success: false, error: String(err), articles: [] });
+          }
+        });
+      break;
   }
 });

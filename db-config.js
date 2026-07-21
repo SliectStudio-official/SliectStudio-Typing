@@ -318,6 +318,7 @@ function getMySQLCreateSQL() {
       difficulty INT DEFAULT 1,
       difficulty_score DOUBLE DEFAULT 0,
       updated_at VARCHAR(50) DEFAULT '',
+      is_offline TINYINT DEFAULT 0,
       FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -407,6 +408,7 @@ function getSQLiteCreateSQL() {
       difficulty INTEGER DEFAULT 1,
       difficulty_score REAL DEFAULT 0,
       updated_at TEXT DEFAULT '',
+      is_offline INTEGER DEFAULT 0,
       FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
     );
 
@@ -483,7 +485,8 @@ async function runMigrations(db) {
       "ALTER TABLE announcements ADD COLUMN end_time DATETIME",
       "ALTER TABLE announcements ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
       "ALTER TABLE announcements ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-      "ALTER TABLE scores ADD COLUMN source VARCHAR(20) DEFAULT 'normal'"
+      "ALTER TABLE scores ADD COLUMN source VARCHAR(20) DEFAULT 'normal'",
+      "ALTER TABLE articles ADD COLUMN is_offline TINYINT DEFAULT 0"
     ];
     for (const sql of migrations) {
       try { await db.run(sql); } catch (e) {}
@@ -521,7 +524,8 @@ async function runMigrations(db) {
       'ALTER TABLE announcements ADD COLUMN end_time TEXT',
       "ALTER TABLE announcements ADD COLUMN created_at TEXT DEFAULT ''",
       "ALTER TABLE announcements ADD COLUMN updated_at TEXT DEFAULT ''",
-      "ALTER TABLE scores ADD COLUMN source TEXT DEFAULT 'normal'"
+      "ALTER TABLE scores ADD COLUMN source TEXT DEFAULT 'normal'",
+      'ALTER TABLE articles ADD COLUMN is_offline INTEGER DEFAULT 0'
     ];
     for (const sql of migrations) {
       try { await db.exec(sql); } catch (e) {}

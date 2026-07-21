@@ -47,6 +47,7 @@
           <li><a href="#overview" class="active" data-section="overview"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span> 管理概览</a></li>
           <li><a href="#users" data-section="users"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span> 用户管理</a></li>
           <li><a href="#articles" data-section="articles"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span> 文章管理</a></li>
+          <li><a href="#offline" data-section="offline"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span> 离线文章</a></li>
           <li><a href="#review" data-section="review"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg></span> 文章审核</a></li>
           <li><a href="#categories" data-section="categories"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></span> 分类管理</a></li>
           <li><a href="#leaderboard" data-section="leaderboard"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path></svg></span> 排行榜</a></li>
@@ -176,15 +177,61 @@
         <div class="empty-msg" id="article-empty">暂无文章</div>
       </div>
 
+      <div class="section-card admin-section" id="section-offline">
+        <div class="section-card-title">离线文章管理</div>
+        <p class="note" style="margin-bottom:12px">管理标记为离线可用的文章。标记后文章会被 Service Worker 缓存，用户断网时仍可练习。点击每篇右侧按钮可切换离线状态。</p>
+
+        <div class="offline-stats-bar" id="offline-stats-bar" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:10px 14px;background:var(--surface-strong);border-radius:8px">
+          <span>已标记离线：<strong id="offline-marked-count">0</strong> 篇</span>
+          <span>SW 缓存：<strong id="offline-cached-count">0</strong> 篇</span>
+          <span id="offline-sync-hint" style="color:var(--semantic-warning);display:none">缓存与标记不一致，建议同步</span>
+          <button class="btn-secondary" id="offline-sync-btn" style="margin-left:auto">立即同步缓存</button>
+          <button class="btn-secondary" id="offline-refresh-btn">刷新</button>
+        </div>
+
+        <div class="article-filter-panel" style="margin-bottom:12px">
+          <div class="filter-group" style="flex:1">
+            <label for="offline-search">搜索文章</label>
+            <input type="search" id="offline-search" placeholder="搜索标题、正文">
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">
+            <input type="checkbox" id="offline-select-all"> 全选
+          </label>
+          <button class="btn-secondary" id="offline-batch-add" disabled>批量加入离线</button>
+          <button class="btn-dark-utility" id="offline-batch-remove" disabled>批量取消离线</button>
+          <span class="note" id="offline-batch-count" style="margin-left:8px"></span>
+        </div>
+
+        <div class="article-filter-summary" id="offline-filter-summary">共 0 篇文章</div>
+        <div class="article-list" id="offline-article-list"></div>
+        <div class="empty-msg" id="offline-article-empty">暂无文章</div>
+      </div>
+
       <div class="section-card admin-section" id="section-crawler">
         <div class="section-card-title">爬虫抓取</div>
-        <p class="note" style="margin-bottom:12px">输入文章URL，从网页抓取文章内容。抓取后可预览和编辑，确认无误后再入库。</p>
-        <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:12px">
-          <div class="filter-group" style="flex:1">
-            <label for="crawl-url">文章URL</label>
-            <input type="text" id="crawl-url" placeholder="https://example.com/article">
+        <p class="note" style="margin-bottom:12px">支持两种模式：直接输入文章URL抓取，或输入关键词检索互联网文章后选择抓取。抓取后可预览和编辑，确认无误后再入库。</p>
+        <div class="crawl-mode-tabs" style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn-primary crawl-mode-tab active" data-mode="url" id="crawl-mode-url">URL 直抓</button>
+          <button class="btn-secondary crawl-mode-tab" data-mode="search" id="crawl-mode-search">关键词检索</button>
+        </div>
+        <div id="crawl-url-panel" style="margin-bottom:12px">
+          <div style="display:flex;gap:12px;align-items:flex-end">
+            <div class="filter-group" style="flex:1">
+              <label for="crawl-url">文章URL</label>
+              <input type="text" id="crawl-url" placeholder="https://example.com/article">
+            </div>
+            <button class="btn-primary" id="crawl-btn">抓取预览</button>
           </div>
-          <button class="btn-primary" id="crawl-btn">抓取预览</button>
+        </div>
+        <div id="crawl-search-panel" style="display:none;margin-bottom:12px">
+          <div style="display:flex;gap:12px;align-items:flex-end">
+            <div class="filter-group" style="flex:1">
+              <label for="crawl-keyword">搜索关键词</label>
+              <input type="text" id="crawl-keyword" placeholder="多个关键词用空格分隔，例如：english reading practice">
+            </div>
+            <button class="btn-primary" id="crawl-search-btn">搜索</button>
+          </div>
+          <div id="crawl-search-results" style="margin-top:12px"></div>
         </div>
         <div class="crawl-preview" id="crawl-preview" style="display:none">
           <div class="crawl-preview-header">

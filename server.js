@@ -527,6 +527,17 @@ app.get('/api/articles', async (req, res) => {
   }
 });
 
+app.get('/api/articles/offline', async (req, res) => {
+  try {
+    const articles = await db.all(
+      "SELECT * FROM articles WHERE is_offline = 1 AND status = 'approved' ORDER BY id DESC"
+    );
+    res.json(articles);
+  } catch (e) {
+    res.status(500).json({ error: '获取离线文章失败' });
+  }
+});
+
 app.post('/api/articles', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { title, content, category_id, source } = req.body;
@@ -638,6 +649,23 @@ app.put('/api/articles/:id/review', authMiddleware, adminMiddleware, async (req,
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: '审核文章失败: ' + e.message });
+  }
+});
+
+app.put('/api/articles/:id/offline', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { is_offline } = req.body;
+    if (typeof is_offline !== 'number' || (is_offline !== 0 && is_offline !== 1)) {
+      return res.status(400).json({ error: 'is_offline 必须为 0 或 1' });
+    }
+    const existing = await db.get('SELECT id FROM articles WHERE id = ?', req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: '文章不存在' });
+    }
+    await db.run('UPDATE articles SET is_offline = ? WHERE id = ?', is_offline, req.params.id);
+    res.json({ success: true, id: parseInt(req.params.id), is_offline });
+  } catch (e) {
+    res.status(500).json({ error: '更新离线标记失败: ' + e.message });
   }
 });
 
@@ -769,16 +797,69 @@ app.post('/api/crawl', authMiddleware, adminMiddleware, (req, res) => {
   if (!fs.existsSync(crawlerPath)) {
     return res.status(500).json({ error: '爬虫脚本不存在，请确保 crawler.py 已放置在项目根目录' });
   }
-  execFile('python', [crawlerPath, '--url', url, '--preview'], { timeout: 30000, env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, encoding: 'utf-8' }, (error, stdout, stderr) => {
+  execFile('python', [crawlerPath, '--url', url, '--preview'], { timeout: 90000, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, encoding: 'utf-8' }, (error, stdout, stderr) => {
+    const stdoutText = (stdout || '').trim();
     if (error) {
-      return res.status(500).json({ error: '爬虫执行失败: ' + (stderr || error.message) });
+      // crawler.py 出错时通过 sys.exit(1) 退出，但友好错误信息写在 stdout 的 JSON 里，优先提取
+      if (stdoutText) {
+        try {
+          const parsed = JSON.parse(stdoutText);
+          if (parsed && parsed.error) {
+            return res.status(500).json({ error: parsed.error });
+          }
+          parsed._source_url = url;
+          return res.json(parsed);
+        } catch (e) { /* stdout 非合法 JSON，走下方通用错误 */ }
+      }
+      if (error.killed) {
+        return res.status(500).json({ error: '抓取超时（超过90秒），该网站响应过慢或不可达' });
+      }
+      const detail = stderr ? stderr.trim().split('\n').slice(-3).join(' ') : error.message;
+      return res.status(500).json({ error: '爬虫执行失败: ' + detail });
     }
     try {
-      const result = JSON.parse(stdout.trim());
+      const result = JSON.parse(stdoutText);
       result._source_url = url;
       res.json(result);
     } catch (e) {
-      res.json({ title: '', content: stdout.trim(), _source_url: url });
+      res.json({ title: '', content: stdoutText, _source_url: url });
+    }
+  });
+});
+
+app.post('/api/crawl/search', authMiddleware, adminMiddleware, (req, res) => {
+  const { keyword } = req.body;
+  if (!keyword || !keyword.trim()) {
+    return res.status(400).json({ error: '请输入关键词' });
+  }
+  const crawlerPath = path.join(__dirname, 'crawler.py');
+  if (!fs.existsSync(crawlerPath)) {
+    return res.status(500).json({ error: '爬虫脚本不存在' });
+  }
+  execFile('python', [crawlerPath, '--keyword', keyword.trim(), '--search-limit', '12'], { timeout: 45000, maxBuffer: 5 * 1024 * 1024, env: { ...process.env, PYTHONIOENCODING: 'utf-8' }, encoding: 'utf-8' }, (error, stdout, stderr) => {
+    const stdoutText = (stdout || '').trim();
+    if (error) {
+      // 优先从 stdout 提取 crawler.py 返回的友好错误
+      if (stdoutText) {
+        try {
+          const parsed = JSON.parse(stdoutText);
+          if (parsed && parsed.error) {
+            return res.status(500).json({ error: parsed.error });
+          }
+          return res.json(parsed);
+        } catch (e) { /* stdout 非合法 JSON，走下方通用错误 */ }
+      }
+      if (error.killed) {
+        return res.status(500).json({ error: '搜索超时，请稍后重试' });
+      }
+      const detail = stderr ? stderr.trim().split('\n').slice(-3).join(' ') : error.message;
+      return res.status(500).json({ error: '搜索失败: ' + detail });
+    }
+    try {
+      const result = JSON.parse(stdoutText);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: '解析搜索结果失败' });
     }
   });
 });

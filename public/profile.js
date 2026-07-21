@@ -47,6 +47,12 @@ const uploadPrivateArticleBtn = document.getElementById('upload-private-article-
 
 const dayRangeBtns = document.querySelectorAll('.day-range-btn');
 
+const offlineManageList = document.getElementById('offline-manage-list');
+const offlineManageEmpty = document.getElementById('offline-manage-empty');
+let allApprovedArticles = [];
+let cachedGlobalIds = new Set();
+let cachedPersonalIds = new Set();
+
 function getToken() {
   return localStorage.getItem('token');
 }
@@ -56,6 +62,43 @@ function apiHeaders() {
   const h = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = 'Bearer ' + token;
   return h;
+}
+
+async function getSWController() {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    await navigator.serviceWorker.ready;
+    return navigator.serviceWorker.controller;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getCachedArticlesFromSW() {
+  const ctrl = await getSWController();
+  if (!ctrl) return [];
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    let settled = false;
+    channel.port1.onmessage = (e) => {
+      settled = true;
+      resolve((e.data && e.data.articles) || []);
+    };
+    ctrl.postMessage({ type: 'GET_CACHED_ARTICLES' }, [channel.port2]);
+    setTimeout(() => { if (!settled) resolve([]); }, 3000);
+  });
+}
+
+async function sendCacheArticleSW(article, source) {
+  const ctrl = await getSWController();
+  if (!ctrl) return;
+  ctrl.postMessage({ type: 'CACHE_ARTICLE', article, source });
+}
+
+async function sendDeleteCachedArticleSW(id, source) {
+  const ctrl = await getSWController();
+  if (!ctrl) return;
+  ctrl.postMessage({ type: 'DELETE_CACHED_ARTICLE', id, source });
 }
 
 function escapeHtml(str) {
@@ -111,6 +154,7 @@ function showProfile() {
   loadErrorLog();
   loadSubmittedArticles();
   loadPrivateArticles();
+  loadOfflineArticlesManage();
 }
 
 async function loadProfile() {
@@ -449,6 +493,83 @@ async function loadPrivateArticles() {
   } catch (e) {}
 }
 
+async function loadOfflineArticlesManage() {
+  try {
+    const res = await fetch('/api/articles');
+    if (res.ok) {
+      allApprovedArticles = await res.json();
+    } else {
+      allApprovedArticles = [];
+    }
+  } catch (e) {
+    allApprovedArticles = [];
+  }
+
+  const cached = await getCachedArticlesFromSW();
+  cachedGlobalIds = new Set(cached.filter(a => a.source === 'global').map(a => a.id));
+  cachedPersonalIds = new Set(cached.filter(a => a.source === 'personal').map(a => a.id));
+
+  renderOfflineArticlesManage();
+}
+
+function renderOfflineArticlesManage() {
+  offlineManageList.innerHTML = '';
+  if (!allApprovedArticles || allApprovedArticles.length === 0) {
+    offlineManageEmpty.style.display = '';
+    return;
+  }
+  offlineManageEmpty.style.display = 'none';
+
+  allApprovedArticles.forEach(a => {
+    const isGlobal = cachedGlobalIds.has(a.id);
+    const isPersonal = cachedPersonalIds.has(a.id);
+    const globalTag = isGlobal ? '<span class="offline-source-badge global">全局离线</span>' : '';
+
+    let btnHtml;
+    if (isPersonal) {
+      btnHtml = '<button class="btn-dark-utility cancel-personal-offline-btn" data-id="' + a.id + '">取消离线</button>';
+    } else if (isGlobal) {
+      btnHtml = '<button class="btn-secondary" disabled>已离线</button>';
+    } else {
+      btnHtml = '<button class="btn-primary add-personal-offline-btn" data-id="' + a.id + '">加入离线</button>';
+    }
+
+    const div = document.createElement('div');
+    div.className = 'article-item';
+    div.innerHTML =
+      '<div class="info">' +
+        '<div class="title">' + escapeHtml(a.title) + globalTag + '</div>' +
+        '<div class="preview">' + escapeHtml((a.content || '').slice(0, 60)) + '...（' + (a.content || '').length + '字）</div>' +
+      '</div>' +
+      '<div class="btn-group">' + btnHtml + '</div>';
+    offlineManageList.appendChild(div);
+  });
+
+  offlineManageList.querySelectorAll('.add-personal-offline-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id);
+      const article = allApprovedArticles.find(a => a.id === id);
+      if (!article) return;
+      await sendCacheArticleSW(article, 'personal');
+      const cached = await getCachedArticlesFromSW();
+      cachedPersonalIds = new Set(cached.filter(a => a.source === 'personal').map(a => a.id));
+      cachedGlobalIds = new Set(cached.filter(a => a.source === 'global').map(a => a.id));
+      renderOfflineArticlesManage();
+    });
+  });
+
+  offlineManageList.querySelectorAll('.cancel-personal-offline-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id);
+      await sendDeleteCachedArticleSW(id, 'personal');
+      const cached = await getCachedArticlesFromSW();
+      cachedPersonalIds = new Set(cached.filter(a => a.source === 'personal').map(a => a.id));
+      cachedGlobalIds = new Set(cached.filter(a => a.source === 'global').map(a => a.id));
+      renderOfflineArticlesManage();
+    });
+  });
+}
+
 addPrivateArticleBtn.addEventListener('click', async () => {
   const title = privateTitleInput.value.trim();
   const content = privateContentInput.value.trim();
@@ -691,3 +812,37 @@ async function loadVersion() {
 
 loadVersion();
 checkAuth();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js').catch(() => {});
+}
+
+// 离线状态检测：服务器不可达时显示红色横幅
+const offlineBanner = document.getElementById('offline-banner');
+function setOfflineBanner(visible) {
+  if (offlineBanner) offlineBanner.style.display = visible ? 'flex' : 'none';
+}
+async function checkServerReachable() {
+  if (!navigator.onLine) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('/api/version?_t=' + Date.now(), { cache: 'no-cache', signal: controller.signal });
+    clearTimeout(timer);
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+async function updateOfflineStatus() {
+  if (!navigator.onLine) {
+    setOfflineBanner(true);
+    return;
+  }
+  const reachable = await checkServerReachable();
+  setOfflineBanner(!reachable);
+}
+window.addEventListener('offline', updateOfflineStatus);
+window.addEventListener('online', updateOfflineStatus);
+updateOfflineStatus();
+setInterval(updateOfflineStatus, 30000);

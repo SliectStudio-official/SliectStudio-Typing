@@ -49,6 +49,15 @@ const crawlPreviewClose = document.getElementById('crawl-preview-close');
 const crawlSaveMsg = document.getElementById('crawl-save-msg');
 let crawlSourceUrl = '';
 
+// 关键词检索相关
+const crawlModeUrlBtn = document.getElementById('crawl-mode-url');
+const crawlModeSearchBtn = document.getElementById('crawl-mode-search');
+const crawlUrlPanel = document.getElementById('crawl-url-panel');
+const crawlSearchPanel = document.getElementById('crawl-search-panel');
+const crawlKeyword = document.getElementById('crawl-keyword');
+const crawlSearchBtn = document.getElementById('crawl-search-btn');
+const crawlSearchResults = document.getElementById('crawl-search-results');
+
 const lbFilter = document.getElementById('lb-filter');
 const lbManageList = document.getElementById('lb-manage-list');
 const lbManageEmpty = document.getElementById('lb-manage-empty');
@@ -227,6 +236,26 @@ const adminNewPassword = document.getElementById('admin-new-password');
 const saveAdminInfoBtn = document.getElementById('save-admin-info-btn');
 const adminInfoMsg = document.getElementById('admin-info-msg');
 
+const offlineStatsBar = document.getElementById('offline-stats-bar');
+const offlineMarkedCount = document.getElementById('offline-marked-count');
+const offlineCachedCount = document.getElementById('offline-cached-count');
+const offlineSyncHint = document.getElementById('offline-sync-hint');
+const offlineSyncBtn = document.getElementById('offline-sync-btn');
+const offlineRefreshBtn = document.getElementById('offline-refresh-btn');
+const offlineSearch = document.getElementById('offline-search');
+const offlineSelectAll = document.getElementById('offline-select-all');
+const offlineBatchAdd = document.getElementById('offline-batch-add');
+const offlineBatchRemove = document.getElementById('offline-batch-remove');
+const offlineBatchCount = document.getElementById('offline-batch-count');
+const offlineFilterSummary = document.getElementById('offline-filter-summary');
+const offlineArticleList = document.getElementById('offline-article-list');
+const offlineArticleEmpty = document.getElementById('offline-article-empty');
+
+let offlineArticles = [];
+let offlineCachedIds = new Set();
+let offlineSelectedIds = new Set();
+let allArticlesForAdd = [];
+
 function getToken() {
   return localStorage.getItem('token');
 }
@@ -236,6 +265,43 @@ function apiHeaders() {
   const h = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = 'Bearer ' + token;
   return h;
+}
+
+async function getSWController() {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    await navigator.serviceWorker.ready;
+    return navigator.serviceWorker.controller;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getCachedArticlesFromSW() {
+  const ctrl = await getSWController();
+  if (!ctrl) return [];
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    let settled = false;
+    channel.port1.onmessage = (e) => {
+      settled = true;
+      resolve((e.data && e.data.articles) || []);
+    };
+    ctrl.postMessage({ type: 'GET_CACHED_ARTICLES' }, [channel.port2]);
+    setTimeout(() => { if (!settled) resolve([]); }, 3000);
+  });
+}
+
+async function sendCacheArticleSW(article, source) {
+  const ctrl = await getSWController();
+  if (!ctrl) return;
+  ctrl.postMessage({ type: 'CACHE_ARTICLE', article, source });
+}
+
+async function sendDeleteCachedArticleSW(id, source) {
+  const ctrl = await getSWController();
+  if (!ctrl) return;
+  ctrl.postMessage({ type: 'DELETE_CACHED_ARTICLE', id, source });
 }
 
 function showAccessDenied(msg) {
@@ -1237,15 +1303,44 @@ function renderArticles() {
     div.className = 'article-item';
     const catTag = a.category_name ? '<span class="category-tag">' + escapeHtml(a.category_name) + '</span>' : '';
     const diffTag = a.difficulty ? '<span class="difficulty-badge diff-' + a.difficulty + '">' + (a.difficulty === 1 ? '简单' : a.difficulty === 2 ? '中等' : '困难') + '</span>' : '';
+    const offlineBtn = a.is_offline
+      ? '<button class="btn-secondary offline-toggle-btn active" data-id="' + a.id + '" data-offline="1">已离线</button>'
+      : '<button class="btn-dark-utility offline-toggle-btn" data-id="' + a.id + '" data-offline="0">加入离线</button>';
     div.innerHTML =
       '<div class="info">' +
         '<div class="title">' + escapeHtml(a.title) + catTag + diffTag + '</div>' +
         '<div class="preview">' + escapeHtml(a.content.slice(0, 60)) + '...（' + a.content.length + '字）</div>' +
       '</div>' +
       '<div class="btn-group" style="gap:8px">' +
+        offlineBtn +
         '<button class="btn-secondary edit-btn" data-id="' + a.id + '">编辑</button>' +
         '<button class="btn-dark-utility delete-btn" data-id="' + a.id + '">删除</button>' +
       '</div>';
+    div.querySelector('.offline-toggle-btn').addEventListener('click', async function() {
+      const id = this.dataset.id;
+      const newOffline = this.dataset.offline === '0' ? 1 : 0;
+      try {
+        const res = await fetch('/api/articles/' + id + '/offline', {
+          method: 'PUT',
+          headers: apiHeaders(),
+          body: JSON.stringify({ is_offline: newOffline })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          alert(err.error || '操作失败');
+          return;
+        }
+        if (newOffline === 1) {
+          const article = articles.find(a => String(a.id) === String(id));
+          if (article) await sendCacheArticleSW(article, 'global');
+        } else {
+          await sendDeleteCachedArticleSW(parseInt(id), 'global');
+        }
+        await fetchArticles();
+      } catch (e) {
+        alert('网络错误，操作失败');
+      }
+    });
     div.querySelector('.edit-btn').addEventListener('click', function() {
       openEditModal(a);
     });
@@ -1259,6 +1354,199 @@ function renderArticles() {
     articleList.appendChild(div);
   });
 }
+
+async function loadAllArticlesForOffline() {
+  try {
+    const [res, cached] = await Promise.all([
+      fetch('/api/articles').then(r => r.ok ? r.json() : []),
+      getCachedArticlesFromSW()
+    ]);
+    allOfflineArticles = Array.isArray(res) ? res : [];
+    offlineCachedIds = new Set(cached.filter(a => a.source === 'global').map(a => a.id));
+    renderOfflineArticleList();
+    updateOfflineStats();
+  } catch (e) {
+    allOfflineArticles = [];
+    renderOfflineArticleList();
+    updateOfflineStats();
+  }
+}
+
+function updateOfflineStats() {
+  const markedCount = allOfflineArticles.filter(a => a.is_offline).length;
+  offlineMarkedCount.textContent = markedCount;
+  offlineCachedCount.textContent = offlineCachedIds.size;
+  const inconsistent = allOfflineArticles.some(a => a.is_offline && !offlineCachedIds.has(a.id));
+  offlineSyncHint.style.display = inconsistent ? '' : 'none';
+}
+
+function renderOfflineArticleList() {
+  const q = offlineSearch.value.trim().toLowerCase();
+  const list = q
+    ? allOfflineArticles.filter(a => (a.title || '').toLowerCase().includes(q) || (a.content || '').toLowerCase().includes(q))
+    : allOfflineArticles;
+
+  offlineFilterSummary.textContent = '共 ' + list.length + ' 篇文章';
+  offlineArticleList.innerHTML = '';
+  offlineSelectAll.checked = false;
+  offlineSelectedIds.clear();
+  updateBatchBar();
+
+  if (list.length === 0) {
+    offlineArticleEmpty.style.display = 'block';
+    offlineArticleEmpty.textContent = q ? '未找到匹配文章' : '暂无文章';
+    return;
+  }
+  offlineArticleEmpty.style.display = 'none';
+
+  list.forEach(a => {
+    const div = document.createElement('div');
+    div.className = 'article-item';
+    const catTag = a.category_name ? '<span class="category-tag">' + escapeHtml(a.category_name) + '</span>' : '';
+    const diffTag = a.difficulty ? '<span class="difficulty-badge diff-' + a.difficulty + '">' + (a.difficulty === 1 ? '简单' : a.difficulty === 2 ? '中等' : '困难') + '</span>' : '';
+    const statusBadge = a.is_offline
+      ? (offlineCachedIds.has(a.id) ? '<span class="offline-source-badge global">已离线·已缓存</span>' : '<span class="offline-mode-badge">已离线·未缓存</span>')
+      : '';
+    const toggleBtn = a.is_offline
+      ? '<button class="btn-dark-utility offline-toggle-one" data-id="' + a.id + '">取消离线</button>'
+      : '<button class="btn-secondary offline-toggle-one" data-id="' + a.id + '">加入离线</button>';
+    div.innerHTML =
+      '<div class="info" style="display:flex;align-items:center;gap:10px">' +
+        '<input type="checkbox" class="offline-item-check" data-id="' + a.id + '" data-offline="' + (a.is_offline ? 1 : 0) + '">' +
+        '<div>' +
+          '<div class="title">' + escapeHtml(a.title) + catTag + diffTag + statusBadge + '</div>' +
+          '<div class="preview">' + escapeHtml(a.content.slice(0, 60)) + '...（' + a.content.length + '字）</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="btn-group" style="gap:8px">' + toggleBtn + '</div>';
+    div.querySelector('.offline-item-check').addEventListener('change', function() {
+      const id = parseInt(this.dataset.id);
+      if (this.checked) offlineSelectedIds.add(id); else offlineSelectedIds.delete(id);
+      updateBatchBar();
+    });
+    div.querySelector('.offline-toggle-one').addEventListener('click', async function() {
+      await toggleOfflineArticle(this.dataset.id);
+    });
+    offlineArticleList.appendChild(div);
+  });
+}
+
+function updateBatchBar() {
+  const selected = offlineSelectedIds.size;
+  const selectedOffline = Array.from(offlineSelectedIds).filter(id => {
+    const a = allOfflineArticles.find(x => x.id === id);
+    return a && a.is_offline;
+  }).length;
+  const selectedNonOffline = selected - selectedOffline;
+  offlineBatchAdd.disabled = selectedNonOffline === 0;
+  offlineBatchRemove.disabled = selectedOffline === 0;
+  offlineBatchCount.textContent = selected > 0 ? '已选 ' + selected + ' 篇' : '';
+  const allCheckable = offlineArticleList.querySelectorAll('.offline-item-check');
+  offlineSelectAll.checked = allCheckable.length > 0 && selected === allCheckable.length;
+}
+
+async function toggleOfflineArticle(id) {
+  const article = allOfflineArticles.find(a => String(a.id) === String(id));
+  if (!article) return;
+  const newOffline = article.is_offline ? 0 : 1;
+  try {
+    const res = await fetch('/api/articles/' + id + '/offline', {
+      method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: newOffline })
+    });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.error || '操作失败'); return; }
+    if (newOffline === 1) {
+      await sendCacheArticleSW(article, 'global');
+    } else {
+      await sendDeleteCachedArticleSW(parseInt(id), 'global');
+    }
+    await loadAllArticlesForOffline();
+  } catch (e) {
+    alert('网络错误，操作失败');
+  }
+}
+
+async function batchAddOffline() {
+  const ids = Array.from(offlineSelectedIds).filter(id => {
+    const a = allOfflineArticles.find(x => x.id === id);
+    return a && !a.is_offline;
+  });
+  if (ids.length === 0) return;
+  if (!confirm('确定将 ' + ids.length + ' 篇文章加入离线吗？')) return;
+  offlineBatchAdd.disabled = true;
+  offlineBatchAdd.textContent = '处理中...';
+  try {
+    for (const id of ids) {
+      const article = allOfflineArticles.find(a => a.id === id);
+      await fetch('/api/articles/' + id + '/offline', {
+        method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: 1 })
+      });
+      if (article) await sendCacheArticleSW(article, 'global');
+    }
+    await loadAllArticlesForOffline();
+  } catch (e) {
+    alert('部分操作失败，请刷新后重试');
+  } finally {
+    offlineBatchAdd.disabled = false;
+    offlineBatchAdd.textContent = '批量加入离线';
+  }
+}
+
+async function batchRemoveOffline() {
+  const ids = Array.from(offlineSelectedIds).filter(id => {
+    const a = allOfflineArticles.find(x => x.id === id);
+    return a && a.is_offline;
+  });
+  if (ids.length === 0) return;
+  if (!confirm('确定取消 ' + ids.length + ' 篇文章的离线标记吗？')) return;
+  offlineBatchRemove.disabled = true;
+  offlineBatchRemove.textContent = '处理中...';
+  try {
+    for (const id of ids) {
+      await fetch('/api/articles/' + id + '/offline', {
+        method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: 0 })
+      });
+      await sendDeleteCachedArticleSW(id, 'global');
+    }
+    await loadAllArticlesForOffline();
+  } catch (e) {
+    alert('部分操作失败，请刷新后重试');
+  } finally {
+    offlineBatchRemove.disabled = false;
+    offlineBatchRemove.textContent = '批量取消离线';
+  }
+}
+
+async function syncOfflineCache() {
+  const ctrl = await getSWController();
+  if (!ctrl) { alert('Service Worker 未就绪'); return; }
+  offlineSyncBtn.disabled = true;
+  offlineSyncBtn.textContent = '同步中...';
+  ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
+  setTimeout(async () => {
+    await loadAllArticlesForOffline();
+    offlineSyncBtn.disabled = false;
+    offlineSyncBtn.textContent = '立即同步缓存';
+  }, 1500);
+}
+
+offlineSyncBtn.addEventListener('click', syncOfflineCache);
+offlineRefreshBtn.addEventListener('click', loadAllArticlesForOffline);
+offlineBatchAdd.addEventListener('click', batchAddOffline);
+offlineBatchRemove.addEventListener('click', batchRemoveOffline);
+offlineSelectAll.addEventListener('change', function() {
+  const checks = offlineArticleList.querySelectorAll('.offline-item-check');
+  checks.forEach(c => {
+    c.checked = this.checked;
+    const id = parseInt(c.dataset.id);
+    if (this.checked) offlineSelectedIds.add(id); else offlineSelectedIds.delete(id);
+  });
+  updateBatchBar();
+});
+let offlineSearchTimer = null;
+offlineSearch.addEventListener('input', () => {
+  if (offlineSearchTimer) clearTimeout(offlineSearchTimer);
+  offlineSearchTimer = setTimeout(renderOfflineArticleList, 300);
+});
 
 let articleSearchTimer = null;
 articleSearchInput.addEventListener('input', () => {
@@ -1387,6 +1675,152 @@ editArticleSave.addEventListener('click', async () => {
   }
 });
 
+// 模式切换：URL直抓 / 关键词检索
+function switchCrawlMode(mode) {
+  if (mode === 'search') {
+    crawlUrlPanel.style.display = 'none';
+    crawlSearchPanel.style.display = 'block';
+    crawlModeUrlBtn.classList.remove('active');
+    crawlModeSearchBtn.classList.add('active');
+    crawlModeUrlBtn.classList.remove('btn-primary');
+    crawlModeUrlBtn.classList.add('btn-secondary');
+    crawlModeSearchBtn.classList.remove('btn-secondary');
+    crawlModeSearchBtn.classList.add('btn-primary');
+  } else {
+    crawlUrlPanel.style.display = 'block';
+    crawlSearchPanel.style.display = 'none';
+    crawlModeUrlBtn.classList.add('active');
+    crawlModeSearchBtn.classList.remove('active');
+    crawlModeUrlBtn.classList.add('btn-primary');
+    crawlModeUrlBtn.classList.remove('btn-secondary');
+    crawlModeSearchBtn.classList.add('btn-secondary');
+    crawlModeSearchBtn.classList.remove('btn-primary');
+  }
+}
+crawlModeUrlBtn.addEventListener('click', () => switchCrawlMode('url'));
+crawlModeSearchBtn.addEventListener('click', () => switchCrawlMode('search'));
+
+// 从 URL 抓取（搜索结果点击或 URL 直抓共用）
+async function fetchArticleByUrl(targetUrl) {
+  crawlSaveMsg.textContent = '抓取中，请稍候...';
+  crawlSaveMsg.style.color = 'var(--text-muted, #888)';
+  try {
+    const res = await fetch('/api/crawl', {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ url: targetUrl })
+    });
+    const data = await res.json();
+    if (data.error) {
+      crawlSaveMsg.textContent = '抓取失败：' + data.error;
+      crawlSaveMsg.style.color = 'var(--semantic-error)';
+      return false;
+    }
+    crawlEditTitle.value = data.title || '';
+    crawlEditContent.value = data.content || '';
+    crawlSourceUrl = data._source_url || targetUrl;
+    crawlSaveCategory.value = '';
+    crawlPreview.style.display = 'block';
+    crawlSaveMsg.textContent = data.warning ? ('⚠ ' + data.warning) : '';
+    crawlSaveMsg.style.color = data.warning ? 'var(--semantic-warning, #e67e22)' : '';
+    crawlPreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return true;
+  } catch (e) {
+    crawlSaveMsg.textContent = '请求失败，请检查Python环境';
+    crawlSaveMsg.style.color = 'var(--semantic-error)';
+    return false;
+  }
+}
+
+// 关键词搜索
+crawlSearchBtn.addEventListener('click', async () => {
+  const kw = crawlKeyword.value.trim();
+  if (!kw) {
+    crawlSearchResults.innerHTML = '<p class="note" style="color:var(--semantic-error)">请输入关键词</p>';
+    return;
+  }
+  crawlSearchBtn.disabled = true;
+  crawlSearchBtn.textContent = '搜索中...';
+  crawlSearchResults.innerHTML = '<p class="note">正在检索互联网文章...</p>';
+
+  try {
+    const res = await fetch('/api/crawl/search', {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ keyword: kw })
+    });
+    const data = await res.json();
+    if (data.error) {
+      crawlSearchResults.innerHTML = '<p class="note" style="color:var(--semantic-error)">搜索失败：' + escapeHtml(data.error) + '</p>';
+      return;
+    }
+    const results = data.results || [];
+    if (results.length === 0) {
+      crawlSearchResults.innerHTML = '<p class="note">未找到相关文章，请尝试其他关键词</p>';
+      return;
+    }
+    const modeLabel = data.mode === 'AND' ? '（AND 精确匹配）' : (data.mode === 'OR' ? '（OR 模糊匹配）' : '');
+    crawlSearchResults.innerHTML = '<p class="note" style="margin-bottom:8px">找到 ' + results.length + ' 篇相关文章' + modeLabel + '，点击"抓取"按钮抓取对应文章：</p>';
+    const list = document.createElement('div');
+    list.className = 'crawl-search-list';
+    results.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'crawl-search-item';
+      const main = document.createElement('div');
+      main.className = 'crawl-search-item-main';
+      const title = document.createElement('div');
+      title.className = 'crawl-search-item-title';
+      title.textContent = item.title || '(无标题)';
+      const url = document.createElement('div');
+      url.className = 'crawl-search-item-url';
+      const urlIcon = document.createElement('span');
+      urlIcon.className = 'url-icon';
+      urlIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+      const urlText = document.createElement('span');
+      urlText.className = 'url-text';
+      urlText.textContent = item.url;
+      url.appendChild(urlIcon);
+      url.appendChild(urlText);
+      const snippet = document.createElement('div');
+      snippet.className = 'crawl-search-item-snippet';
+      snippet.textContent = item.snippet || '';
+      const btn = document.createElement('button');
+      btn.className = 'btn-secondary crawl-search-item-btn';
+      btn.textContent = '抓取';
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = '抓取中...';
+        const ok = await fetchArticleByUrl(item.url);
+        btn.disabled = false;
+        btn.textContent = '抓取';
+        if (ok) {
+          crawlUrl.value = item.url;
+          switchCrawlMode('url');
+        }
+      });
+      main.appendChild(title);
+      main.appendChild(url);
+      if (item.snippet) main.appendChild(snippet);
+      card.appendChild(main);
+      card.appendChild(btn);
+      list.appendChild(card);
+    });
+    crawlSearchResults.appendChild(list);
+  } catch (e) {
+    crawlSearchResults.innerHTML = '<p class="note" style="color:var(--semantic-error)">网络错误</p>';
+  } finally {
+    crawlSearchBtn.disabled = false;
+    crawlSearchBtn.textContent = '搜索';
+  }
+});
+
+crawlKeyword.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    crawlSearchBtn.click();
+  }
+});
+
 crawlBtn.addEventListener('click', async () => {
   const url = crawlUrl.value.trim();
 
@@ -1405,35 +1839,9 @@ crawlBtn.addEventListener('click', async () => {
 
   crawlBtn.disabled = true;
   crawlBtn.textContent = '抓取中...';
-  crawlSaveMsg.textContent = '';
-
-  try {
-    const res = await fetch('/api/crawl', {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify({ url })
-    });
-
-    const data = await res.json();
-
-    if (data.error) {
-      crawlSaveMsg.textContent = '抓取失败：' + data.error;
-      crawlSaveMsg.style.color = 'var(--semantic-error)';
-    } else {
-      crawlEditTitle.value = data.title || '';
-      crawlEditContent.value = data.content || '';
-      crawlSourceUrl = data._source_url || url;
-      crawlSaveCategory.value = '';
-      crawlPreview.style.display = 'block';
-      crawlSaveMsg.textContent = '';
-    }
-  } catch (e) {
-    crawlSaveMsg.textContent = '请求失败，请检查Python环境';
-    crawlSaveMsg.style.color = 'var(--semantic-error)';
-  } finally {
-    crawlBtn.disabled = false;
-    crawlBtn.textContent = '抓取预览';
-  }
+  await fetchArticleByUrl(url);
+  crawlBtn.disabled = false;
+  crawlBtn.textContent = '抓取预览';
 });
 
 crawlSaveBtn.addEventListener('click', async () => {
@@ -1609,8 +2017,13 @@ async function init() {
     fetchCategories(),
     fetchArticles(),
     fetchLeaderboard(),
-    loadUsers()
+    loadUsers(),
+    loadAllArticlesForOffline()
   ]);
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js').catch(() => {});
 }
 
 init();

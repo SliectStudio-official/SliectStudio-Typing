@@ -23,6 +23,7 @@ let speechEnabled = false;
 let currentLbPeriod = 'all';
 let currentLbCategory = '';
 let errorPracticeMode = false;
+let isOfflineArticles = false;
 let segments = [];
 let currentSegmentIndex = 0;
 let segmentInputs = [];
@@ -399,8 +400,22 @@ async function fetchArticles(categoryId, difficulty) {
   if (difficulty) params.push('difficulty=' + difficulty);
   url += params.join('&');
   if (params.length === 0) url = '/api/articles';
-  const res = await fetch(url);
-  articles = await res.json();
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    articles = await res.json();
+    isOfflineArticles = false;
+  } catch (e) {
+    // 后端不可达，回退到 SW 缓存的离线文章
+    const cached = await getCachedArticlesFromSW();
+    const seen = new Set();
+    articles = cached.filter(a => {
+      if (a.id == null || seen.has(a.id)) return false;
+      seen.add(a.id);
+      return true;
+    });
+    isOfflineArticles = articles.length > 0;
+  }
   renderArticleSelect();
 }
 
@@ -453,6 +468,7 @@ function calculateRecommendedTime(text, difficulty) {
 }
 
 function renderArticleSelect() {
+  const offlineSuffix = isOfflineArticles ? '（离线）' : '';
   articleSelect.innerHTML = '<option value="">-- 请选择 --</option>';
   const list = [];
 
@@ -461,8 +477,8 @@ function renderArticleSelect() {
     const diffLabel = getDifficultyLabel(a.difficulty);
     const suffix = diffLabel ? ' [' + diffLabel + ']' : '';
     const title = (categories.length > 0 && !categoryFilter.value)
-      ? catName + '｜' + a.title + '（' + a.content.length + '字）' + suffix
-      : a.title + '（' + a.content.length + '字）' + suffix;
+      ? catName + '｜' + a.title + '（' + a.content.length + '字）' + suffix + offlineSuffix
+      : a.title + '（' + a.content.length + '字）' + suffix + offlineSuffix;
     list.push({ id: a.id, text: title });
   });
 
@@ -493,7 +509,12 @@ articleSelect.addEventListener('change', () => {
   timeLimitInput.value = recommendedTime;
   timeLimit = recommendedTime;
   const timeStr = ' | 推荐时间：' + recommendedTime + '秒';
-  articleInfo.textContent = '分类：' + catName + ' | 字数：' + originalText.length + '字 | 标题：' + currentArticle.title + diffStr + timeStr;
+  const baseText = '分类：' + catName + ' | 字数：' + originalText.length + '字 | 标题：' + currentArticle.title + diffStr + timeStr;
+  if (isOfflineArticles) {
+    articleInfo.innerHTML = escapeHtml(baseText) + ' <span class="offline-mode-badge">离线</span>';
+  } else {
+    articleInfo.textContent = baseText;
+  }
   updateSpeechToggle();
   resetPractice();
 });
@@ -1229,6 +1250,31 @@ function escapeHtml(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+async function getSWController() {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    await navigator.serviceWorker.ready;
+    return navigator.serviceWorker.controller;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function getCachedArticlesFromSW() {
+  const ctrl = await getSWController();
+  if (!ctrl) return [];
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    let settled = false;
+    channel.port1.onmessage = (e) => {
+      settled = true;
+      resolve((e.data && e.data.articles) || []);
+    };
+    ctrl.postMessage({ type: 'GET_CACHED_ARTICLES' }, [channel.port2]);
+    setTimeout(() => { if (!settled) resolve([]); }, 3000);
+  });
+}
+
 function checkErrorPracticeMode() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('error_practice') === '1') {
@@ -1268,16 +1314,38 @@ async function loadVersion() {
   } catch (e) {}
 }
 
-function updateOfflineStatus() {
-  if (!navigator.onLine) {
-    offlineBanner.style.display = 'flex';
-  } else {
-    offlineBanner.style.display = 'none';
+function setOfflineBanner(visible) {
+  if (offlineBanner) offlineBanner.style.display = visible ? 'flex' : 'none';
+}
+
+async function checkServerReachable() {
+  if (!navigator.onLine) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('/api/version?_t=' + Date.now(), { cache: 'no-cache', signal: controller.signal });
+    clearTimeout(timer);
+    return res.ok;
+  } catch (e) {
+    return false;
   }
+}
+
+let offlineCheckTimer = null;
+async function updateOfflineStatus() {
+  if (!navigator.onLine) {
+    setOfflineBanner(true);
+    return;
+  }
+  // 主动 ping 服务器，确认服务器可达
+  const reachable = await checkServerReachable();
+  setOfflineBanner(!reachable);
 }
 
 window.addEventListener('offline', updateOfflineStatus);
 window.addEventListener('online', updateOfflineStatus);
+// 定期检测服务器可达性，服务器恢复后自动隐藏横幅
+offlineCheckTimer = setInterval(updateOfflineStatus, 30000);
 
 async function init() {
   loadVersion();
