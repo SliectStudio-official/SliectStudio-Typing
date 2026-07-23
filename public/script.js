@@ -411,6 +411,7 @@ async function fetchArticles(categoryId, difficulty) {
     const seen = new Set();
     articles = cached.filter(a => {
       if (a.id == null || seen.has(a.id)) return false;
+      if (a.source && a.source !== 'global') return false;
       seen.add(a.id);
       return true;
     });

@@ -1459,6 +1459,8 @@ async function toggleOfflineArticle(id) {
     } else {
       await sendDeleteCachedArticleSW(parseInt(id), 'global');
     }
+    const ctrl = await getSWController();
+    if (ctrl) ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
     await loadAllArticlesForOffline();
   } catch (e) {
     alert('网络错误，操作失败');
@@ -1482,6 +1484,8 @@ async function batchAddOffline() {
       });
       if (article) await sendCacheArticleSW(article, 'global');
     }
+    const ctrl = await getSWController();
+    if (ctrl) ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
     await loadAllArticlesForOffline();
   } catch (e) {
     alert('部分操作失败，请刷新后重试');
@@ -1507,6 +1511,8 @@ async function batchRemoveOffline() {
       });
       await sendDeleteCachedArticleSW(id, 'global');
     }
+    const ctrl = await getSWController();
+    if (ctrl) ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
     await loadAllArticlesForOffline();
   } catch (e) {
     alert('部分操作失败，请刷新后重试');
