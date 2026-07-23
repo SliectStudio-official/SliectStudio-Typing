@@ -270,7 +270,10 @@ function apiHeaders() {
 async function getSWController() {
   if (!('serviceWorker' in navigator)) return null;
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+    ]);
     return (reg && reg.active) ? reg.active : navigator.serviceWorker.controller;
   } catch (e) {
     return null;

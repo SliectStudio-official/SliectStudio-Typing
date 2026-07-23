@@ -428,9 +428,10 @@ async function fetchArticles(categoryId, difficulty) {
       return true;
     });
     isOfflineArticles = articles.length > 0;
+  } finally {
+    renderArticleSelect();
+    hideLoadingOverlay();
   }
-  renderArticleSelect();
-  hideLoadingOverlay();
 }
 
 function getDifficultyLabel(d) {
@@ -1267,7 +1268,10 @@ function escapeHtml(str) {
 async function getSWController() {
   if (!('serviceWorker' in navigator)) return null;
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+    ]);
     return (reg && reg.active) ? reg.active : navigator.serviceWorker.controller;
   } catch (e) {
     return null;
@@ -1377,3 +1381,5 @@ async function init() {
 }
 
 init();
+// 安全网：5秒后强制移除加载遮罩，防止因任何异常导致页面永久卡在加载状态
+setTimeout(hideLoadingOverlay, 5000);
