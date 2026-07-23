@@ -5,7 +5,7 @@ let currentUser = null;
 let currentFilter = '';
 let weeklyChart = null;
 
-const adminContent = document.querySelector('.container');
+const adminContent = document.querySelector('.admin-layout') || document.body;
 const adminUsername = document.getElementById('admin-username');
 const adminLogoutBtn = document.getElementById('admin-logout-btn');
 
@@ -2042,8 +2042,17 @@ document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(link => {
 });
 
 function showSectionFromHash() {
-  const hash = location.hash.slice(1) || 'overview';
-  const link = document.querySelector('.admin-sidebar .nav-menu a[data-section="' + hash + '"]');
+  let hash = location.hash.slice(1) || 'overview';
+  // 处理 hash 以 "section-" 开头的情况（如 #section-overview → overview）
+  if (hash.indexOf('section-') === 0) {
+    hash = hash.slice(8);
+  }
+  let link = document.querySelector('.admin-sidebar .nav-menu a[data-section="' + hash + '"]');
+  // fallback: 找不到匹配的链接时默认激活 overview
+  if (!link) {
+    hash = 'overview';
+    link = document.querySelector('.admin-sidebar .nav-menu a[data-section="overview"]');
+  }
   if (link) {
     document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(l => l.classList.remove('active'));
     link.classList.add('active');
