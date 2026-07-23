@@ -253,7 +253,7 @@ nav .nav-links a.active {
   padding: 12px;
   margin-bottom: 8px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  transition: background 0.25s ease, box-shadow 0.25s ease;
 }
 
 .section-card:hover {
@@ -728,22 +728,19 @@ textarea {
   letter-spacing: 0;
   line-height: 1.0;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
   text-decoration: none;
   height: 34px;
   box-shadow: var(--primary) 0px 0px 0px 0px, var(--primary) 0px 0px 0px 1px;
-  will-change: transform;
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--primary-active);
-  transform: translateY(-1px);
   box-shadow: var(--primary-active) 0px 0px 0px 0px, var(--primary-active) 0px 0px 0px 1px, rgba(0, 0, 0, 0.05) 0px 4px 24px;
 }
 
 .btn-primary:active:not(:disabled) {
   background: var(--primary-active);
-  transform: scale(0.98) translateY(0);
   box-shadow: inset 0px 0px 0px 1px rgba(0, 0, 0, 0.15);
 }
 
@@ -773,21 +770,18 @@ textarea {
   letter-spacing: 0;
   line-height: 1.0;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
   text-decoration: none;
   height: 34px;
   box-shadow: var(--surface-strong) 0px 0px 0px 0px, var(--ring-warm) 0px 0px 0px 1px;
-  will-change: transform;
 }
 
 .btn-secondary:hover:not(:disabled) {
   background: var(--hairline);
-  transform: translateY(-1px);
   box-shadow: var(--hairline) 0px 0px 0px 0px, var(--ring-deep) 0px 0px 0px 1px;
 }
 
 .btn-secondary:active:not(:disabled) {
-  transform: scale(0.98) translateY(0);
   box-shadow: inset 0px 0px 0px 1px rgba(0, 0, 0, 0.08);
 }
 
@@ -816,14 +810,13 @@ textarea {
   letter-spacing: 0;
   line-height: 1.0;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   box-shadow: var(--surface-strong) 0px 0px 0px 0px, var(--ring-warm) 0px 0px 0px 1px;
 }
 
 .btn-dark-utility:hover {
   background: var(--ink);
   color: var(--on-primary);
-  transform: translateY(-1px);
 }
 
 .btn-group {
@@ -854,7 +847,7 @@ textarea {
   border-radius: var(--glass-radius);
   padding: 20px 22px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .typing-page.active {
@@ -931,7 +924,7 @@ textarea {
 }
 
 .typing-line-input.completed {
-  border-color: var(--success);
+  border-color: var(--semantic-success);
   background: rgba(22, 163, 74, 0.06);
   color: var(--ink);
 }
@@ -1100,16 +1093,14 @@ textarea {
   letter-spacing: 0;
   line-height: 1.0;
   cursor: pointer;
-  transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
   z-index: 100;
   height: 40px;
   box-shadow: var(--primary) 0px 0px 0px 0px, var(--primary) 0px 0px 0px 1px, rgba(0, 0, 0, 0.05) 0px 4px 24px;
-  will-change: transform;
 }
 
 .leaderboard-btn:hover {
   background: var(--primary-active);
-  transform: scale(1.02) translateY(-2px);
   box-shadow: var(--primary-active) 0px 0px 0px 0px, var(--primary-active) 0px 0px 0px 1px, rgba(0, 0, 0, 0.05) 0px 8px 24px;
 }
 
@@ -1338,14 +1329,12 @@ textarea {
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .article-item:hover, .lb-item:hover {
   background: var(--glass-bg-hover);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-2px);
 }
 
 .article-item .info, .lb-item .info {
@@ -1670,13 +1659,11 @@ nav .nav-btn {
   cursor: pointer;
   padding: 8px 14px;
   border-radius: 8px;
-  transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 nav .nav-btn:hover {
   background: var(--glass-bg-hover);
-  transform: scale(1.02) translateY(-1px);
   box-shadow: var(--glass-shadow);
 }
 
@@ -2053,14 +2040,12 @@ nav .nav-btn:hover {
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .history-item:hover {
   background: var(--glass-bg-hover);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-2px);
 }
 
 .history-item .info {
@@ -2227,7 +2212,7 @@ nav .nav-btn:hover {
   border: 1px solid var(--hairline);
   border-radius: 6px;
   font-size: 12px;
-  color: var(--ink-muted-48);
+  color: var(--muted);
   word-break: break-all;
   font-family: var(--font-mono, ui-monospace, monospace);
   max-width: 100%;
@@ -2241,7 +2226,7 @@ nav .nav-btn:hover {
 }
 .crawl-search-item-snippet {
   font-size: 13px;
-  color: var(--ink-muted-48);
+  color: var(--muted);
   line-height: 1.5;
 }
 .crawl-search-item-btn {
@@ -2256,21 +2241,6 @@ nav .nav-btn:hover {
   font-size: 14px;
 }
 
-/* 爬虫区域按钮去除悬浮上浮动画，仅保留背景色变化 */
-#section-crawler .btn-primary,
-#section-crawler .btn-secondary {
-  transition: background 0.15s ease, box-shadow 0.15s ease;
-  will-change: auto;
-}
-#section-crawler .btn-primary:hover:not(:disabled),
-#section-crawler .btn-secondary:hover:not(:disabled) {
-  transform: none;
-}
-#section-crawler .btn-primary:active:not(:disabled),
-#section-crawler .btn-secondary:active:not(:disabled) {
-  transform: none;
-}
-
 .category-item {
   display: flex;
   justify-content: space-between;
@@ -2283,14 +2253,12 @@ nav .nav-btn:hover {
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .category-item:hover {
   background: var(--glass-bg-hover);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-2px);
 }
 
 .category-item .name {
@@ -2406,14 +2374,12 @@ nav .nav-btn:hover {
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius);
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .profile-header:hover {
   background: var(--glass-bg-hover);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-2px);
 }
 
 .avatar-wrapper {
@@ -2623,13 +2589,11 @@ nav .nav-btn:hover {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .page-btn:hover:not(:disabled) {
   background: var(--glass-bg-hover);
-  transform: scale(1.02) translateY(-1px);
   box-shadow: var(--glass-shadow);
 }
 
@@ -2855,8 +2819,7 @@ nav .nav-btn:hover {
   cursor: pointer;
   margin-left: 8px;
   vertical-align: middle;
-  transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, color 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, color 0.3s ease;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2874,7 +2837,6 @@ nav .nav-btn:hover {
 
 .speech-toggle:hover {
   background: var(--glass-bg-hover);
-  transform: scale(1.02);
 }
 
 .speech-toggle.active {
@@ -2972,14 +2934,12 @@ nav .nav-btn:hover {
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .private-article-item:hover {
   background: var(--glass-bg-hover);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-2px);
 }
 
 .private-article-item .title {
@@ -3099,14 +3059,12 @@ nav .nav-btn:hover {
   border-radius: 12px;
   margin-bottom: 8px;
   box-shadow: var(--glass-shadow);
-  transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .pending-article-item:hover {
   background: var(--glass-bg-hover);
   box-shadow: var(--glass-shadow-hover);
-  transform: translateY(-2px);
 }
 
 .pending-article-item .title {
@@ -3161,13 +3119,11 @@ nav .nav-btn:hover {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease, color 0.3s ease, border-color 0.3s ease;
 }
 
 .stats-range-btn:hover {
   background: var(--glass-bg-hover);
-  transform: scale(1.02) translateY(-1px);
   box-shadow: var(--glass-shadow);
 }
 
@@ -3229,18 +3185,12 @@ nav .nav-btn:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
-  will-change: transform;
+  transition: background 0.3s ease, box-shadow 0.3s ease;
 }
 
 .theme-toggle:hover {
   background: var(--glass-bg-hover);
-  transform: scale(1.05) translateY(-1px);
   box-shadow: var(--glass-shadow);
-}
-
-.theme-toggle:active {
-  transform: scale(0.95);
 }
 
 .theme-toggle:focus-visible {
@@ -3279,7 +3229,7 @@ nav .nav-btn:hover {
 }
 
 [data-theme="dark"] nav .nav-links a:visited {
-  color: var(--muted-soft);
+  color: var(--body-strong);
 }
 
 [data-theme="dark"] .custom-select-dropdown {

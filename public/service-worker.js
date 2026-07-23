@@ -1,10 +1,11 @@
-const CACHE_NAME = 'typing-practice-v6';
+const CACHE_NAME = 'typing-practice-v7';
 
 const CRITICAL_ASSETS = [
   '/index.html',
   '/style.css',
   '/script.js',
-  '/custom-select.js'
+  '/custom-select.js',
+  '/loading-indicator.js?v=2'
 ];
 
 // 状态检测接口：仅走网络，不缓存，服务器不可达时返回 503 以触发离线提示
@@ -251,6 +252,25 @@ self.addEventListener('fetch', (event) => {
         JSON.stringify({ error: 'offline', message: '服务器不可达' }),
         { headers: { 'Content-Type': 'application/json' }, status: 503 }
       ))
+    );
+    return;
+  }
+
+  // 文章列表离线时不应返回过期的全量缓存，让前端回退到 SW 的离线文章缓存
+  if (url.pathname === '/api/articles') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() => new Response(
+          JSON.stringify({ error: 'offline', message: '离线模式仅显示已启用离线访问的文章' }),
+          { headers: { 'Content-Type': 'application/json' }, status: 503 }
+        ))
     );
     return;
   }

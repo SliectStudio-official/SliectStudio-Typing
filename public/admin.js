@@ -251,7 +251,7 @@ const offlineFilterSummary = document.getElementById('offline-filter-summary');
 const offlineArticleList = document.getElementById('offline-article-list');
 const offlineArticleEmpty = document.getElementById('offline-article-empty');
 
-let offlineArticles = [];
+let allOfflineArticles = [];
 let offlineCachedIds = new Set();
 let offlineSelectedIds = new Set();
 let allArticlesForAdd = [];
@@ -312,7 +312,7 @@ function showAccessDenied(msg) {
     '<div style="text-align:center;padding:80px 32px">' +
       '<div style="font-size:48px;margin-bottom:16px">🔒</div>' +
       '<h2 style="margin-bottom:12px;color:var(--ink)">' + msg + '</h2>' +
-      '<p style="color:var(--ink-muted-48);margin-bottom:24px">请先在练习页面以管理员账号登录</p>' +
+      '<p style="color:var(--muted);margin-bottom:24px">请先在练习页面以管理员账号登录</p>' +
       '<a href="index.html" class="btn-primary" style="display:inline-flex;text-decoration:none">返回练习页面</a>' +
     '</div>';
 }
@@ -349,6 +349,24 @@ adminLogoutBtn.addEventListener('click', () => {
   window.location.href = 'index.html';
 });
 
+let chartJsPromise = null;
+function ensureChartJS() {
+  if (typeof Chart !== 'undefined') return Promise.resolve();
+  if (chartJsPromise) return chartJsPromise;
+  chartJsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      chartJsPromise = null;
+      reject(new Error('Chart.js 加载失败'));
+    };
+    document.head.appendChild(script);
+  });
+  return chartJsPromise;
+}
+
 async function loadDashboard() {
   try {
     const res = await fetch('/api/admin/dashboard', { headers: apiHeaders() });
@@ -361,7 +379,12 @@ async function loadDashboard() {
     dashTotalArticles.textContent = data.total_articles ?? 0;
     dashPendingArticles.textContent = data.pending_articles ?? 0;
 
-    renderWeeklyChart(data.weekly_users || []);
+    try {
+      await ensureChartJS();
+      renderWeeklyChart(data.weekly_users || []);
+    } catch (chartErr) {
+      console.error('图表加载失败', chartErr);
+    }
   } catch (e) {
     dashTotalUsers.textContent = '-';
     dashTodayPractices.textContent = '-';
@@ -474,7 +497,7 @@ function renderPendingArticles(list) {
         '<div class="title">' + escapeHtml(a.title) +
           (a.category_name ? '<span class="category-tag">' + escapeHtml(a.category_name) + '</span>' : '') +
         '</div>' +
-        '<div class="preview" style="font-size:12px;color:var(--ink-muted-48)">作者：' + escapeHtml(a.author || '匿名') + '</div>' +
+        '<div class="preview" style="font-size:12px;color:var(--muted)">作者：' + escapeHtml(a.author || '匿名') + '</div>' +
         '<div class="preview">' + escapeHtml(preview) + '</div>' +
       '</div>' +
       '<div class="actions" style="display:flex;gap:8px">' +
@@ -1276,8 +1299,19 @@ addCategoryBtn.addEventListener('click', async () => {
   }
 });
 
+async function fetchArticleDetail(id) {
+  try {
+    const res = await fetch('/api/articles/' + id, { headers: apiHeaders() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
 async function fetchArticles() {
   const params = new URLSearchParams();
+  params.set('brief', '1');
   const search = articleSearchInput.value.trim();
   const categoryId = articleCategoryFilter.value;
   const difficulty = articleDifficultyFilter.value;
@@ -1286,7 +1320,7 @@ async function fetchArticles() {
   if (categoryId) params.set('category_id', categoryId);
   if (difficulty) params.set('difficulty', difficulty);
 
-  const url = params.toString() ? '/api/articles?' + params.toString() : '/api/articles';
+  const url = '/api/articles?' + params.toString();
   const res = await fetch(url, { headers: apiHeaders() });
   articles = await res.json();
   renderArticles();
@@ -1309,10 +1343,12 @@ function renderArticles() {
     const offlineBtn = a.is_offline
       ? '<button class="btn-secondary offline-toggle-btn active" data-id="' + a.id + '" data-offline="1">已离线</button>'
       : '<button class="btn-dark-utility offline-toggle-btn" data-id="' + a.id + '" data-offline="0">加入离线</button>';
+    const preview = a.content_preview != null ? a.content_preview : (a.content ? a.content.slice(0, 60) : '');
+    const charCount = a.content_length != null ? a.content_length : (a.content ? a.content.length : 0);
     div.innerHTML =
       '<div class="info">' +
         '<div class="title">' + escapeHtml(a.title) + catTag + diffTag + '</div>' +
-        '<div class="preview">' + escapeHtml(a.content.slice(0, 60)) + '...（' + a.content.length + '字）</div>' +
+        '<div class="preview">' + escapeHtml(preview) + '...（' + charCount + '字）</div>' +
       '</div>' +
       '<div class="btn-group" style="gap:8px">' +
         offlineBtn +
@@ -1335,7 +1371,11 @@ function renderArticles() {
         }
         if (newOffline === 1) {
           const article = articles.find(a => String(a.id) === String(id));
-          if (article) await sendCacheArticleSW(article, 'global');
+          let fullArticle = article && article.content ? article : null;
+          if (!fullArticle) {
+            fullArticle = await fetchArticleDetail(id);
+          }
+          if (fullArticle) await sendCacheArticleSW(fullArticle, 'global');
         } else {
           await sendDeleteCachedArticleSW(parseInt(id), 'global');
         }
@@ -1344,8 +1384,14 @@ function renderArticles() {
         alert('网络错误，操作失败');
       }
     });
-    div.querySelector('.edit-btn').addEventListener('click', function() {
-      openEditModal(a);
+    div.querySelector('.edit-btn').addEventListener('click', async function() {
+      const id = this.dataset.id;
+      const article = a.content ? a : await fetchArticleDetail(id);
+      if (!article) {
+        alert('文章详情加载失败');
+        return;
+      }
+      openEditModal(article);
     });
     div.querySelector('.delete-btn').addEventListener('click', async function() {
       if (confirm('确定删除文章"' + a.title + '"吗？')) {
@@ -1361,7 +1407,7 @@ function renderArticles() {
 async function loadAllArticlesForOffline() {
   try {
     const [res, cached] = await Promise.all([
-      fetch('/api/articles').then(r => r.ok ? r.json() : []),
+      fetch('/api/articles?brief=1').then(r => r.ok ? r.json() : []),
       getCachedArticlesFromSW()
     ]);
     allOfflineArticles = Array.isArray(res) ? res : [];
@@ -1386,7 +1432,10 @@ function updateOfflineStats() {
 function renderOfflineArticleList() {
   const q = offlineSearch.value.trim().toLowerCase();
   const list = q
-    ? allOfflineArticles.filter(a => (a.title || '').toLowerCase().includes(q) || (a.content || '').toLowerCase().includes(q))
+    ? allOfflineArticles.filter(a => {
+        const text = (a.content_preview || a.content || '').toLowerCase();
+        return (a.title || '').toLowerCase().includes(q) || text.includes(q);
+      })
     : allOfflineArticles;
 
   offlineFilterSummary.textContent = '共 ' + list.length + ' 篇文章';
@@ -1413,12 +1462,14 @@ function renderOfflineArticleList() {
     const toggleBtn = a.is_offline
       ? '<button class="btn-dark-utility offline-toggle-one" data-id="' + a.id + '">取消离线</button>'
       : '<button class="btn-secondary offline-toggle-one" data-id="' + a.id + '">加入离线</button>';
+    const preview = a.content_preview != null ? a.content_preview : (a.content ? a.content.slice(0, 60) : '');
+    const charCount = a.content_length != null ? a.content_length : (a.content ? a.content.length : 0);
     div.innerHTML =
       '<div class="info" style="display:flex;align-items:center;gap:10px">' +
         '<input type="checkbox" class="offline-item-check" data-id="' + a.id + '" data-offline="' + (a.is_offline ? 1 : 0) + '">' +
         '<div>' +
           '<div class="title">' + escapeHtml(a.title) + catTag + diffTag + statusBadge + '</div>' +
-          '<div class="preview">' + escapeHtml(a.content.slice(0, 60)) + '...（' + a.content.length + '字）</div>' +
+          '<div class="preview">' + escapeHtml(preview) + '...（' + charCount + '字）</div>' +
         '</div>' +
       '</div>' +
       '<div class="btn-group" style="gap:8px">' + toggleBtn + '</div>';
@@ -1458,7 +1509,8 @@ async function toggleOfflineArticle(id) {
     });
     if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.error || '操作失败'); return; }
     if (newOffline === 1) {
-      await sendCacheArticleSW(article, 'global');
+      const fullArticle = article.content ? article : await fetchArticleDetail(id);
+      if (fullArticle) await sendCacheArticleSW(fullArticle, 'global');
     } else {
       await sendDeleteCachedArticleSW(parseInt(id), 'global');
     }
@@ -1485,7 +1537,8 @@ async function batchAddOffline() {
       await fetch('/api/articles/' + id + '/offline', {
         method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: 1 })
       });
-      if (article) await sendCacheArticleSW(article, 'global');
+      const fullArticle = article && article.content ? article : await fetchArticleDetail(id);
+      if (fullArticle) await sendCacheArticleSW(fullArticle, 'global');
     }
     const ctrl = await getSWController();
     if (ctrl) ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
@@ -2012,23 +2065,60 @@ async function loadVersion() {
   } catch (e) {}
 }
 
+const sectionLoaders = {
+  overview: () => loadDashboard(),
+  users: () => loadUsers(),
+  articles: () => fetchArticles(),
+  offline: () => loadAllArticlesForOffline(),
+  review: () => loadPendingArticles(),
+  categories: () => fetchCategories(),
+  leaderboard: () => fetchLeaderboard(currentFilter),
+  announcements: () => loadAnnouncements(),
+  sensitive: () => loadSensitiveWords(),
+  database: async () => {
+    await loadDbConfig();
+    await loadDatabaseTables();
+  },
+  crawler: () => Promise.resolve()
+};
+const loadedSections = new Set();
+
+async function loadSectionData(section) {
+  if (loadedSections.has(section)) return;
+  const loader = sectionLoaders[section];
+  if (!loader) return;
+  try {
+    await loader();
+    loadedSections.add(section);
+  } catch (e) {
+    console.error('加载 section 失败', section, e);
+  }
+}
+
+function activateSection(section) {
+  document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(l => l.classList.remove('active'));
+  const link = document.querySelector('.admin-sidebar .nav-menu a[data-section="' + section + '"]');
+  if (link) link.classList.add('active');
+  document.querySelectorAll('.admin-main > [id^="section-"]').forEach(el => {
+    el.classList.toggle('admin-section-active', el.id === 'section-' + section);
+  });
+}
+
 async function init() {
-  loadVersion();
-  const authed = await checkAuth();
-  if (!authed) return;
-  await Promise.all([
-    loadDashboard(),
-    loadPendingArticles(),
-    loadAnnouncements(),
-    loadSensitiveWords(),
-    loadDbConfig(),
-    loadDatabaseTables(),
-    fetchCategories(),
-    fetchArticles(),
-    fetchLeaderboard(),
-    loadUsers(),
-    loadAllArticlesForOffline()
-  ]);
+  try {
+    loadVersion();
+    const authed = await checkAuth();
+    if (!authed) return;
+    // 首屏只加载概览和分类，其余 section 按需加载
+    await Promise.all([
+      loadDashboard().catch(() => {}),
+      fetchCategories().catch(() => {})
+    ]);
+    loadedSections.add('overview');
+    loadedSections.add('categories');
+  } catch (e) {
+    console.error('管理后台初始化失败', e);
+  }
 }
 
 if ('serviceWorker' in navigator) {
@@ -2038,19 +2128,16 @@ if ('serviceWorker' in navigator) {
 init();
 
 document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(link => {
-  link.addEventListener('click', (e) => {
+  link.addEventListener('click', async (e) => {
     e.preventDefault();
     const section = link.dataset.section;
-    document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(l => l.classList.remove('active'));
-    link.classList.add('active');
-    document.querySelectorAll('.admin-main > [id^="section-"]').forEach(el => {
-      el.classList.toggle('admin-section-active', el.id === 'section-' + section);
-    });
+    activateSection(section);
     history.replaceState(null, null, '#' + section);
+    await loadSectionData(section);
   });
 });
 
-function showSectionFromHash() {
+async function showSectionFromHash() {
   let hash = location.hash.slice(1) || 'overview';
   // 处理 hash 以 "section-" 开头的情况（如 #section-overview → overview）
   if (hash.indexOf('section-') === 0) {
@@ -2063,11 +2150,8 @@ function showSectionFromHash() {
     link = document.querySelector('.admin-sidebar .nav-menu a[data-section="overview"]');
   }
   if (link) {
-    document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(l => l.classList.remove('active'));
-    link.classList.add('active');
-    document.querySelectorAll('.admin-main > [id^="section-"]').forEach(el => {
-      el.classList.toggle('admin-section-active', el.id === 'section-' + hash);
-    });
+    activateSection(hash);
+    await loadSectionData(hash);
   }
 }
 

@@ -24,7 +24,7 @@ if (!process.env.JWT_SECRET) {
 }
 
 app.use(compression({
-  level: 6,
+  level: 9,
   threshold: 256,
   filter: (req, res) => {
     if (req.headers['x-no-compression']) return false;
@@ -516,6 +516,22 @@ app.get('/api/articles', async (req, res) => {
     }
 
     const whereStr = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
+    const isBrief = req.query.brief === '1';
+    const lenFn = isMySQL(db) ? 'CHAR_LENGTH' : 'LENGTH';
+    const substrFn = isMySQL(db) ? 'SUBSTRING' : 'SUBSTR';
+
+    if (isBrief) {
+      const briefFields = `a.id, a.title, a.category_id, a.difficulty, a.status, a.is_offline, a.difficulty_score,
+        ${lenFn}(a.content) AS content_length,
+        ${substrFn}(a.content, 1, 120) AS content_preview,
+        c.name AS category_name`;
+      const articles = await db.all(
+        `SELECT ${briefFields} FROM articles a LEFT JOIN categories c ON a.category_id = c.id ${whereStr} ORDER BY a.id DESC`,
+        ...params
+      );
+      return res.json(articles);
+    }
+
     const articles = await db.all(
       `SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id ${whereStr} ORDER BY a.id DESC`,
       ...params
@@ -529,6 +545,20 @@ app.get('/api/articles', async (req, res) => {
 
 app.get('/api/articles/offline', async (req, res) => {
   try {
+    const isBrief = req.query.brief === '1';
+    const lenFn = isMySQL(db) ? 'CHAR_LENGTH' : 'LENGTH';
+    const substrFn = isMySQL(db) ? 'SUBSTRING' : 'SUBSTR';
+
+    if (isBrief) {
+      const articles = await db.all(
+        `SELECT id, title, category_id, difficulty, status, is_offline, difficulty_score,
+          ${lenFn}(content) AS content_length,
+          ${substrFn}(content, 1, 120) AS content_preview
+         FROM articles WHERE is_offline = 1 AND status = 'approved' ORDER BY id DESC`
+      );
+      return res.json(articles);
+    }
+
     const articles = await db.all(
       "SELECT * FROM articles WHERE is_offline = 1 AND status = 'approved' ORDER BY id DESC"
     );
@@ -559,46 +589,6 @@ app.post('/api/articles', authMiddleware, adminMiddleware, async (req, res) => {
     res.json(article);
   } catch (e) {
     res.status(500).json({ error: '创建文章失败: ' + e.message });
-  }
-});
-
-app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const { title, content, category_id, difficulty_override } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ error: '标题和内容不能为空' });
-    }
-    if (title.length > 200) {
-      return res.status(400).json({ error: '标题不能超过200字符' });
-    }
-    if (content.length > 50000) {
-      return res.status(400).json({ error: '内容不能超过50000字符' });
-    }
-    const existing = await db.get('SELECT * FROM articles WHERE id = ?', req.params.id);
-    if (!existing) {
-      return res.status(404).json({ error: '文章不存在' });
-    }
-    const autoResult = calculateDifficulty(content);
-    const finalDifficulty = (difficulty_override >= 1 && difficulty_override <= 3) ? difficulty_override : autoResult.difficulty;
-    const finalScore = autoResult.difficulty_score;
-    const nl = nowLocaltime(db);
-    await db.run(`UPDATE articles SET title = ?, content = ?, category_id = ?, difficulty = ?, difficulty_score = ?, updated_at = ${nl} WHERE id = ?`, title, content, category_id || existing.category_id, finalDifficulty, finalScore, req.params.id);
-    const article = await db.get('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', req.params.id);
-    res.json(article);
-  } catch (e) {
-    res.status(500).json({ error: '更新文章失败: ' + e.message });
-  }
-});
-
-app.delete('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    await db.transaction(async (tdb) => {
-      await tdb.run('DELETE FROM articles WHERE id = ?', req.params.id);
-      await tdb.run('DELETE FROM scores WHERE article_id = ?', req.params.id);
-    })();
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: '删除文章失败: ' + e.message });
   }
 });
 
@@ -639,6 +629,32 @@ app.get('/api/articles/pending', authMiddleware, adminMiddleware, async (req, re
   }
 });
 
+app.get('/api/articles/:id', async (req, res) => {
+  try {
+    let isAdmin = false;
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(auth.slice(7), JWT_SECRET);
+        if (decoded.role === 'admin') isAdmin = true;
+      } catch (e) {}
+    }
+
+    const whereStatus = isAdmin ? '' : " AND status = 'approved'";
+    const article = await db.get(
+      `SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?${whereStatus}`,
+      req.params.id
+    );
+
+    if (!article) {
+      return res.status(404).json({ error: '文章不存在' });
+    }
+    res.json(article);
+  } catch (e) {
+    res.status(500).json({ error: '获取文章详情失败' });
+  }
+});
+
 app.put('/api/articles/:id/review', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { status, review_msg } = req.body;
@@ -666,6 +682,46 @@ app.put('/api/articles/:id/offline', authMiddleware, adminMiddleware, async (req
     res.json({ success: true, id: parseInt(req.params.id), is_offline });
   } catch (e) {
     res.status(500).json({ error: '更新离线标记失败: ' + e.message });
+  }
+});
+
+app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { title, content, category_id, difficulty_override } = req.body;
+    if (!title || !content) {
+      return res.status(400).json({ error: '标题和内容不能为空' });
+    }
+    if (title.length > 200) {
+      return res.status(400).json({ error: '标题不能超过200字符' });
+    }
+    if (content.length > 50000) {
+      return res.status(400).json({ error: '内容不能超过50000字符' });
+    }
+    const existing = await db.get('SELECT * FROM articles WHERE id = ?', req.params.id);
+    if (!existing) {
+      return res.status(404).json({ error: '文章不存在' });
+    }
+    const autoResult = calculateDifficulty(content);
+    const finalDifficulty = (difficulty_override >= 1 && difficulty_override <= 3) ? difficulty_override : autoResult.difficulty;
+    const finalScore = autoResult.difficulty_score;
+    const nl = nowLocaltime(db);
+    await db.run(`UPDATE articles SET title = ?, content = ?, category_id = ?, difficulty = ?, difficulty_score = ?, updated_at = ${nl} WHERE id = ?`, title, content, category_id || existing.category_id, finalDifficulty, finalScore, req.params.id);
+    const article = await db.get('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', req.params.id);
+    res.json(article);
+  } catch (e) {
+    res.status(500).json({ error: '更新文章失败: ' + e.message });
+  }
+});
+
+app.delete('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await db.transaction(async (tdb) => {
+      await tdb.run('DELETE FROM articles WHERE id = ?', req.params.id);
+      await tdb.run('DELETE FROM scores WHERE article_id = ?', req.params.id);
+    })();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '删除文章失败: ' + e.message });
   }
 });
 

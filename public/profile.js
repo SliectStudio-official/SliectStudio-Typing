@@ -53,6 +53,41 @@ let allApprovedArticles = [];
 let cachedGlobalIds = new Set();
 let cachedPersonalIds = new Set();
 
+let chartJsPromise = null;
+function ensureChartJS() {
+  if (typeof Chart !== 'undefined') return Promise.resolve();
+  if (chartJsPromise) return chartJsPromise;
+  chartJsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      chartJsPromise = null;
+      reject(new Error('Chart.js 加载失败'));
+    };
+    document.head.appendChild(script);
+  });
+  return chartJsPromise;
+}
+
+async function fetchArticleDetail(id) {
+  try {
+    const res = await fetch('/api/articles/' + id);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+function scheduleIdle(fn) {
+  if ('requestIdleCallback' in window) {
+    return requestIdleCallback(fn, { timeout: 2000 });
+  }
+  return setTimeout(fn, 1);
+}
+
 function getToken() {
   return localStorage.getItem('token');
 }
@@ -152,12 +187,14 @@ function showProfile() {
 
   loadProfile();
   loadAnnouncement();
-  loadStats(7);
   loadHistory(1);
-  loadErrorLog();
-  loadSubmittedArticles();
-  loadPrivateArticles();
-  loadOfflineArticlesManage();
+  scheduleIdle(() => {
+    loadStats(7);
+    loadErrorLog();
+    loadSubmittedArticles();
+    loadPrivateArticles();
+    loadOfflineArticlesManage();
+  });
 }
 
 async function loadProfile() {
@@ -233,10 +270,6 @@ if (announcementCloseBtn) {
 }
 
 async function loadStats(days) {
-  if (typeof Chart === 'undefined') {
-    console.error('Chart.js is not loaded');
-    return;
-  }
   try {
     const res = await fetch('/api/user/stats?days=' + days, {
       headers: { 'Authorization': 'Bearer ' + getToken() }
@@ -253,104 +286,109 @@ async function loadStats(days) {
     const speedData = (data.dailyStats || []).map(d => d.avgSpeed);
     const accuracyData = (data.dailyStats || []).map(d => d.avgAccuracy);
 
-    if (statsChart) {
-      statsChart.data.labels = labels;
-      statsChart.data.datasets[0].data = speedData;
-      statsChart.data.datasets[1].data = accuracyData;
-      statsChart.update();
-    } else {
-      const ctx = document.getElementById('stats-chart').getContext('2d');
-      statsChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: labels,
-          datasets: [
-            {
-              label: '平均速度 (字/分)',
-              data: speedData,
-              borderColor: '#f54e00',
-              backgroundColor: 'transparent',
-              fill: false,
-              tension: 0.4,
-              yAxisID: 'y',
-              pointBackgroundColor: '#f54e00',
-              pointBorderColor: '#f54e00',
-              pointRadius: 3,
-              pointHoverRadius: 5
-            },
-            {
-              label: '平均准确率 (%)',
-              data: accuracyData,
-              borderColor: '#1f8a65',
-              backgroundColor: 'transparent',
-              fill: false,
-              tension: 0.4,
-              yAxisID: 'y1',
-              pointBackgroundColor: '#1f8a65',
-              pointBorderColor: '#1f8a65',
-              pointRadius: 3,
-              pointHoverRadius: 5
-            }
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: {
-            mode: 'index',
-            intersect: false
-          },
-          plugins: {
-            legend: {
-              labels: {
-                font: { family: 'Inter', size: 12 },
-                color: '#5a5852'
-              }
-            }
-          },
-          scales: {
-            x: {
-              grid: { color: '#efeee8' },
-              ticks: {
-                font: { family: 'Inter', size: 11 },
-                color: '#807d72'
-              }
-            },
-            y: {
-              type: 'linear',
-              position: 'left',
-              title: {
-                display: true,
-                text: '速度 (字/分)',
-                font: { family: 'Inter', size: 12 },
-                color: '#f54e00'
+    try {
+      await ensureChartJS();
+      if (statsChart) {
+        statsChart.data.labels = labels;
+        statsChart.data.datasets[0].data = speedData;
+        statsChart.data.datasets[1].data = accuracyData;
+        statsChart.update();
+      } else {
+        const ctx = document.getElementById('stats-chart').getContext('2d');
+        statsChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: '平均速度 (字/分)',
+                data: speedData,
+                borderColor: '#f54e00',
+                backgroundColor: 'transparent',
+                fill: false,
+                tension: 0.4,
+                yAxisID: 'y',
+                pointBackgroundColor: '#f54e00',
+                pointBorderColor: '#f54e00',
+                pointRadius: 3,
+                pointHoverRadius: 5
               },
-              grid: { color: '#efeee8' },
-              ticks: {
-                font: { family: 'Inter', size: 11 },
-                color: '#807d72'
+              {
+                label: '平均准确率 (%)',
+                data: accuracyData,
+                borderColor: '#1f8a65',
+                backgroundColor: 'transparent',
+                fill: false,
+                tension: 0.4,
+                yAxisID: 'y1',
+                pointBackgroundColor: '#1f8a65',
+                pointBorderColor: '#1f8a65',
+                pointRadius: 3,
+                pointHoverRadius: 5
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+              mode: 'index',
+              intersect: false
+            },
+            plugins: {
+              legend: {
+                labels: {
+                  font: { family: 'Inter', size: 12 },
+                  color: '#5a5852'
+                }
               }
             },
-            y1: {
-              type: 'linear',
-              position: 'right',
-              title: {
-                display: true,
-                text: '准确率 (%)',
-                font: { family: 'Inter', size: 12 },
-                color: '#1f8a65'
+            scales: {
+              x: {
+                grid: { color: '#efeee8' },
+                ticks: {
+                  font: { family: 'Inter', size: 11 },
+                  color: '#807d72'
+                }
               },
-              min: 0,
-              max: 100,
-              grid: { drawOnChartArea: false },
-              ticks: {
-                font: { family: 'Inter', size: 11 },
-                color: '#807d72'
+              y: {
+                type: 'linear',
+                position: 'left',
+                title: {
+                  display: true,
+                  text: '速度 (字/分)',
+                  font: { family: 'Inter', size: 12 },
+                  color: '#f54e00'
+                },
+                grid: { color: '#efeee8' },
+                ticks: {
+                  font: { family: 'Inter', size: 11 },
+                  color: '#807d72'
+                }
+              },
+              y1: {
+                type: 'linear',
+                position: 'right',
+                title: {
+                  display: true,
+                  text: '准确率 (%)',
+                  font: { family: 'Inter', size: 12 },
+                  color: '#1f8a65'
+                },
+                min: 0,
+                max: 100,
+                grid: { drawOnChartArea: false },
+                ticks: {
+                  font: { family: 'Inter', size: 11 },
+                  color: '#807d72'
+                }
               }
             }
           }
-        }
-      });
+        });
+      }
+    } catch (chartErr) {
+      console.error('图表加载失败', chartErr);
     }
   } catch (e) {}
 }
@@ -498,7 +536,7 @@ async function loadPrivateArticles() {
 
 async function loadOfflineArticlesManage() {
   try {
-    const res = await fetch('/api/articles');
+    const res = await fetch('/api/articles?brief=1');
     if (res.ok) {
       allApprovedArticles = await res.json();
     } else {
@@ -537,12 +575,16 @@ function renderOfflineArticlesManage() {
       btnHtml = '<button class="btn-primary add-personal-offline-btn" data-id="' + a.id + '">加入离线</button>';
     }
 
+    const previewText = a.content_preview || (a.content || '').slice(0, 120);
+    const preview = escapeHtml(previewText.slice(0, 60));
+    const len = a.content_length != null ? a.content_length : (a.content || '').length;
+
     const div = document.createElement('div');
     div.className = 'article-item';
     div.innerHTML =
       '<div class="info">' +
         '<div class="title">' + escapeHtml(a.title) + globalTag + '</div>' +
-        '<div class="preview">' + escapeHtml((a.content || '').slice(0, 60)) + '...（' + (a.content || '').length + '字）</div>' +
+        '<div class="preview">' + preview + '...（' + len + '字）</div>' +
       '</div>' +
       '<div class="btn-group">' + btnHtml + '</div>';
     offlineManageList.appendChild(div);
@@ -551,8 +593,14 @@ function renderOfflineArticlesManage() {
   offlineManageList.querySelectorAll('.add-personal-offline-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = parseInt(btn.dataset.id);
-      const article = allApprovedArticles.find(a => a.id === id);
+      let article = allApprovedArticles.find(a => a.id === id);
       if (!article) return;
+      const detail = await fetchArticleDetail(id);
+      if (detail) article = detail;
+      if (!article.content) {
+        alert('文章正文未加载，请联网后再加入离线缓存');
+        return;
+      }
       await sendCacheArticleSW(article, 'personal');
       const cached = await getCachedArticlesFromSW();
       cachedPersonalIds = new Set(cached.filter(a => a.source === 'personal').map(a => a.id));
@@ -813,8 +861,16 @@ async function loadVersion() {
   } catch (e) {}
 }
 
-loadVersion();
-checkAuth();
+async function initProfile() {
+  try {
+    loadVersion();
+    await checkAuth();
+  } catch (e) {
+    console.error('个人中心初始化失败', e);
+  }
+}
+
+initProfile();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js').catch(() => {});

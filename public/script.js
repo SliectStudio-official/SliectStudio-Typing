@@ -402,13 +402,33 @@ function hideLoadingOverlay() {
   }
 }
 
+async function loadOfflineArticlesFromSW(categoryId, difficulty) {
+  const cached = await getCachedArticlesFromSW();
+  const seen = new Set();
+  articles = cached.filter(a => {
+    if (a.id == null || seen.has(a.id)) return false;
+    if (a.source && a.source !== 'global') return false;
+    if (categoryId && String(a.category_id) !== String(categoryId)) return false;
+    if (difficulty && String(a.difficulty) !== String(difficulty)) return false;
+    seen.add(a.id);
+    return true;
+  });
+  isOfflineArticles = articles.length > 0;
+}
+
 async function fetchArticles(categoryId, difficulty) {
-  let url = '/api/articles?';
+  if (!navigator.onLine) {
+    await loadOfflineArticlesFromSW(categoryId, difficulty);
+    renderArticleSelect();
+    return;
+  }
+
+  let url = '/api/articles?brief=1&';
   const params = [];
   if (categoryId) params.push('category_id=' + categoryId);
   if (difficulty) params.push('difficulty=' + difficulty);
   url += params.join('&');
-  if (params.length === 0) url = '/api/articles';
+  if (params.length === 0) url = '/api/articles?brief=1';
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -419,18 +439,21 @@ async function fetchArticles(categoryId, difficulty) {
     if (ctrl) ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
   } catch (e) {
     // 后端不可达，回退到 SW 缓存的离线文章
-    const cached = await getCachedArticlesFromSW();
-    const seen = new Set();
-    articles = cached.filter(a => {
-      if (a.id == null || seen.has(a.id)) return false;
-      if (a.source && a.source !== 'global') return false;
-      seen.add(a.id);
-      return true;
-    });
-    isOfflineArticles = articles.length > 0;
+    await loadOfflineArticlesFromSW(categoryId, difficulty);
   } finally {
     renderArticleSelect();
-    hideLoadingOverlay();
+  }
+}
+
+async function fetchArticleDetail(id) {
+  try {
+    const res = await fetch('/api/articles/' + id);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    const cached = await getCachedArticlesFromSW();
+    const article = cached.find(a => a.id == id && (!a.source || a.source === 'global'));
+    return article || null;
   }
 }
 
@@ -491,9 +514,10 @@ function renderArticleSelect() {
     const catName = a.category_name || '未分类';
     const diffLabel = getDifficultyLabel(a.difficulty);
     const suffix = diffLabel ? ' [' + diffLabel + ']' : '';
+    const charCount = a.content_length != null ? a.content_length : (a.content ? a.content.length : 0);
     const title = (categories.length > 0 && !categoryFilter.value)
-      ? catName + '｜' + a.title + '（' + a.content.length + '字）' + suffix + offlineSuffix
-      : a.title + '（' + a.content.length + '字）' + suffix + offlineSuffix;
+      ? catName + '｜' + a.title + '（' + charCount + '字）' + suffix + offlineSuffix
+      : a.title + '（' + charCount + '字）' + suffix + offlineSuffix;
     list.push({ id: a.id, text: title });
   });
 
@@ -505,7 +529,7 @@ function renderArticleSelect() {
   });
 }
 
-articleSelect.addEventListener('change', () => {
+articleSelect.addEventListener('change', async () => {
   const id = articleSelect.value;
   if (!id) {
     currentArticle = null;
@@ -514,7 +538,25 @@ articleSelect.addEventListener('change', () => {
     hideTypingArea();
     return;
   }
-  currentArticle = articles.find(a => String(a.id) === String(id));
+  const briefArticle = articles.find(a => String(a.id) === String(id));
+  if (!briefArticle) return;
+
+  // 离线缓存文章通常包含完整 content；在线 brief 列表需要按需拉取详情
+  let article = briefArticle;
+  if (!isOfflineArticles && !briefArticle.content) {
+    const detail = await fetchArticleDetail(id);
+    if (articleSelect.value !== id) return;
+    if (!detail) {
+      alert('文章详情加载失败');
+      return;
+    }
+    article = detail;
+    // 更新本地缓存，避免再次选择时重复请求
+    const idx = articles.findIndex(a => String(a.id) === String(id));
+    if (idx >= 0) articles[idx] = detail;
+  }
+
+  currentArticle = article;
   originalText = currentArticle.content;
   const catName = currentArticle.category_name || '未分类';
   const diffLabel = getDifficultyLabel(currentArticle.difficulty);
@@ -1297,10 +1339,17 @@ function checkErrorPracticeMode() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('error_practice') === '1') {
     errorPracticeMode = true;
-    const title = params.get('title') || '错字练习';
-    const content = params.get('content') || '';
+    let title = params.get('title') || '错字练习';
+    let content = params.get('content') || '';
+    try {
+      title = decodeURIComponent(title);
+      content = decodeURIComponent(content);
+    } catch (e) {
+      console.error('错字练习参数解码失败', e);
+      return;
+    }
     if (content) {
-      currentArticle = { id: null, title: decodeURIComponent(title), content: decodeURIComponent(content) };
+      currentArticle = { id: null, title: title, content: content };
       originalText = currentArticle.content;
       articleInfo.textContent = '错字练习 | 字数：' + originalText.length + '字 | 标题：' + currentArticle.title;
       updateSpeechToggle();
@@ -1366,17 +1415,24 @@ window.addEventListener('online', updateOfflineStatus);
 offlineCheckTimer = setInterval(updateOfflineStatus, 30000);
 
 async function init() {
-  loadVersion();
-  updateOfflineStatus();
-  const isBootstrapping = await loadBootstrapStatus();
-  if (isBootstrapping) return;
-  await checkAuth();
-  await fetchCategories();
-  await fetchArticles();
-  loadAnnouncement();
-  checkErrorPracticeMode();
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  try {
+    loadVersion();
+    updateOfflineStatus();
+    const isBootstrapping = await loadBootstrapStatus();
+    if (isBootstrapping) return;
+    await checkAuth().catch(() => {});
+    await fetchCategories().catch(() => {});
+    // 分类返回后即可移除 loading，文章列表在后台继续加载
+    hideLoadingOverlay();
+    fetchArticles().catch(() => {});
+    loadAnnouncement().catch(() => {});
+    checkErrorPracticeMode();
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('service-worker.js').catch(() => {});
+    }
+  } catch (e) {
+    console.error('练习页面初始化失败', e);
+    hideLoadingOverlay();
   }
 }
 
