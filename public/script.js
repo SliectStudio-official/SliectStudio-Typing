@@ -405,6 +405,9 @@ async function fetchArticles(categoryId, difficulty) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     articles = await res.json();
     isOfflineArticles = false;
+    // 在线时触发 SW 同步离线文章缓存，确保 IndexedDB 与数据库一致
+    const ctrl = await getSWController();
+    if (ctrl) ctrl.postMessage({ type: 'SYNC_OFFLINE_ARTICLES' });
   } catch (e) {
     // 后端不可达，回退到 SW 缓存的离线文章
     const cached = await getCachedArticlesFromSW();
