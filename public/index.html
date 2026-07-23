@@ -18,13 +18,24 @@
     .section-card{background:var(--glass-bg);border-radius:var(--glass-radius);padding:var(--card-padding);margin-bottom:16px;box-shadow:var(--glass-shadow)}
     .sub-nav{background:var(--nav-glass-bg);backdrop-filter:blur(var(--glass-blur));-webkit-backdrop-filter:blur(var(--glass-blur));padding:8px 20px;border-bottom:1px solid var(--glass-border)}
     .sub-nav .section-name{font-family:var(--font-display);font-size:calc(16px * var(--heading-scale));font-weight:500;color:var(--ink)}
+    .page-loading-overlay{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--canvas);transition:opacity 0.3s ease,visibility 0.3s ease}
+    .page-loading-overlay.hidden{opacity:0;visibility:hidden;pointer-events:none}
+    .page-loading-spinner{width:40px;height:40px;border:3px solid var(--hairline);border-top-color:var(--primary);border-radius:50%;animation:page-loading-spin 0.8s linear infinite}
+    @keyframes page-loading-spin{to{transform:rotate(360deg)}}
+    .page-loading-text{font-family:var(--font-body);font-size:14px;color:var(--muted)}
+    body.loading .container,body.loading nav,body.loading .sub-nav{filter:blur(4px);pointer-events:none}
+    body.loading{overflow:hidden}
   </style>
   <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
   <noscript><link rel="stylesheet" href="style.css"></noscript>
   <script>(function(){var s='theme',d='dark',h=document.documentElement;function g(){var t=localStorage.getItem(s);if(t)return t;return window.matchMedia('(prefers-color-scheme:dark)').matches?d:'light'}function a(t){if(t===d)h.setAttribute('data-theme',d);else h.removeAttribute('data-theme')}a(g());document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('theme-toggle');if(b)b.addEventListener('click',function(){var c=h.getAttribute('data-theme')===d?d:'light';var n=c===d?'light':d;localStorage.setItem(s,n);a(n)})});window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(e){if(!localStorage.getItem(s))a(e.matches?d:'light')})})()</script>
   <link rel="manifest" href="manifest.json">
 </head>
-<body>
+<body class="loading">
+  <div id="page-loading-overlay" class="page-loading-overlay">
+    <div class="page-loading-spinner"></div>
+    <div class="page-loading-text">正在加载</div>
+  </div>
   <nav>
     <button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="打开菜单">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>

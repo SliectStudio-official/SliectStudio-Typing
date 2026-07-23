@@ -1,4 +1,4 @@
-const CACHE_NAME = 'typing-practice-v5';
+const CACHE_NAME = 'typing-practice-v6';
 
 const CRITICAL_ASSETS = [
   '/index.html',
@@ -115,10 +115,11 @@ async function getCachedBySource(source) {
 }
 
 async function syncGlobalOfflineArticles() {
-  let remoteArticles = [];
+  let remoteArticles;
   try {
     const res = await fetch('/api/articles/offline', { cache: 'no-cache' });
-    if (res.ok) remoteArticles = await res.json();
+    if (!res.ok) return;
+    remoteArticles = await res.json();
   } catch (e) {
     return;
   }

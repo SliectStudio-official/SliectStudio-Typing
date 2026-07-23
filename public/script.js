@@ -393,6 +393,15 @@ difficultyFilter.addEventListener('change', () => {
   fetchArticles(categoryFilter.value, difficultyFilter.value);
 });
 
+function hideLoadingOverlay() {
+  document.body.classList.remove('loading');
+  const overlay = document.getElementById('page-loading-overlay');
+  if (overlay) {
+    overlay.classList.add('hidden');
+    setTimeout(() => overlay.remove(), 300);
+  }
+}
+
 async function fetchArticles(categoryId, difficulty) {
   let url = '/api/articles?';
   const params = [];
@@ -421,6 +430,7 @@ async function fetchArticles(categoryId, difficulty) {
     isOfflineArticles = articles.length > 0;
   }
   renderArticleSelect();
+  hideLoadingOverlay();
 }
 
 function getDifficultyLabel(d) {
