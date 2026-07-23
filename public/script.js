@@ -1254,8 +1254,8 @@ function escapeHtml(str) {
 async function getSWController() {
   if (!('serviceWorker' in navigator)) return null;
   try {
-    await navigator.serviceWorker.ready;
-    return navigator.serviceWorker.controller;
+    const reg = await navigator.serviceWorker.ready;
+    return (reg && reg.active) ? reg.active : navigator.serviceWorker.controller;
   } catch (e) {
     return null;
   }
