@@ -101,6 +101,12 @@
         '<div class="notify-guest-hint" id="notify-guest-hint" style="display:none">注册后可保留比赛记录</div>' +
       '</div>';
 
+    var matchBar =
+      '<div class="race-match-bar" id="race-match-bar" style="display:none">' +
+        '<span class="race-match-bar-text" id="race-match-bar-text"></span>' +
+        '<button class="race-match-bar-action" id="race-match-bar-action">取消</button>' +
+      '</div>';
+
     var mount = document.getElementById('site-nav');
     if (!mount) return;
     mount.innerHTML =
@@ -108,7 +114,7 @@
         '<button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="打开菜单">' +
           '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>' +
         '</button>' + desktop +
-      '</nav>' + notifyDrawer + drawer;
+      '</nav>' + notifyDrawer + drawer + matchBar;
   }
 
   function addItem(html) {
@@ -499,9 +505,133 @@
     closeNotifyDrawer();
   });
 
+  /* ---------- 全局快速匹配底栏 ---------- */
+  var MATCH_PENDING_KEY = 'raceMatchPending';
+  var MATCH_SINCE_KEY = 'raceMatchPendingSince';
+  var matchBarTimer = null;
+  var matchBarEnterCode = null;
+
+  function matchBarEls() {
+    return {
+      bar: document.getElementById('race-match-bar'),
+      text: document.getElementById('race-match-bar-text'),
+      action: document.getElementById('race-match-bar-action')
+    };
+  }
+  function matchElapsedText(ms) {
+    var sec = Math.max(0, Math.floor((ms || 0) / 1000));
+    var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    var ss = String(sec % 60).padStart(2, '0');
+    return '匹配中 ' + mm + ':' + ss;
+  }
+  function setMatchBar(text, actionLabel) {
+    var els = matchBarEls();
+    if (!els.bar) return;
+    if (els.text) els.text.textContent = text;
+    if (els.action) els.action.textContent = actionLabel || '取消';
+    els.bar.style.display = 'flex';
+    document.body.classList.add('race-match-open');
+  }
+  function stopMatchBarPolling() {
+    if (matchBarTimer) { clearInterval(matchBarTimer); matchBarTimer = null; }
+  }
+  function clearMatchBar() {
+    stopMatchBarPolling();
+    matchBarEnterCode = null;
+    try {
+      localStorage.removeItem(MATCH_PENDING_KEY);
+      localStorage.removeItem(MATCH_SINCE_KEY);
+    } catch (e) {}
+    var els = matchBarEls();
+    if (els.bar) els.bar.style.display = 'none';
+    document.body.classList.remove('race-match-open');
+  }
+  function isPracticeActive() {
+    var inputs = document.querySelectorAll('#typing-pages .typing-line-input');
+    if (!inputs.length) return false;
+    var result = document.getElementById('result-card');
+    if (result && getComputedStyle(result).display !== 'none') return false;
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i].value && inputs[i].value.trim().length > 0) return true;
+    }
+    return false;
+  }
+  function pollMatchBar() {
+    var tk = localStorage.getItem('token');
+    if (!tk) { clearMatchBar(); return; }
+    fetch('/api/race/match/status', { headers: { Authorization: 'Bearer ' + tk } })
+      .then(function (r) {
+        return r.json().catch(function () { return null; }).then(function (data) {
+          if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.status === 'matched' && data.code) {
+          stopMatchBarPolling();
+          if (isPracticeActive()) {
+            matchBarEnterCode = data.code;
+            setMatchBar('匹配成功 · 进入比赛', '进入比赛');
+          } else {
+            clearMatchBar();
+            location.href = 'race.html?code=' + encodeURIComponent(data.code);
+          }
+          return;
+        }
+        if (data.status === 'waiting') {
+          var text = matchElapsedText(data.elapsed);
+          if (data.hint) text += ' · ' + data.hint;
+          matchBarEnterCode = null;
+          setMatchBar(text, '取消');
+          if (!matchBarTimer) matchBarTimer = setInterval(pollMatchBar, 1000);
+          return;
+        }
+        clearMatchBar();
+      })
+      .catch(function (e) {
+        setMatchBar('匹配状态获取失败：' + (e.message || '网络错误'), '取消');
+        if (!matchBarTimer) matchBarTimer = setInterval(pollMatchBar, 1000);
+      });
+  }
+  function startMatchBarPolling() {
+    if (localStorage.getItem(MATCH_PENDING_KEY) !== '1') return;
+    if (!localStorage.getItem('token')) { clearMatchBar(); return; }
+    setMatchBar('匹配中 00:00', '取消');
+    if (!matchBarTimer) matchBarTimer = setInterval(pollMatchBar, 1000);
+    pollMatchBar();
+  }
+  function matchBarAction() {
+    if (matchBarEnterCode) {
+      var code = matchBarEnterCode;
+      clearMatchBar();
+      location.href = 'race.html?code=' + encodeURIComponent(code);
+      return;
+    }
+    fetch('/api/race/match/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (localStorage.getItem('token') || '') },
+      body: '{}'
+    }).catch(function () {}).then(clearMatchBar);
+  }
+  var matchBarActionBtn = document.getElementById('race-match-bar-action');
+  if (matchBarActionBtn) matchBarActionBtn.addEventListener('click', matchBarAction);
+  window.addEventListener('race-match-pending', startMatchBarPolling);
+  window.addEventListener('race-match-cancel-local', clearMatchBar);
+  window.addEventListener('race-room-entered', function () {
+    if (localStorage.getItem(MATCH_PENDING_KEY) !== '1') return;
+    fetch('/api/race/match/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (localStorage.getItem('token') || '') },
+      body: '{}'
+    }).catch(function () {});
+    clearMatchBar();
+  });
+
   var userAreaEl = document.getElementById('user-area');
   if (userAreaEl && window.MutationObserver) {
     new MutationObserver(refreshAccount).observe(userAreaEl, { attributes: true, attributeFilter: ['style', 'class'] });
   }
   refreshAccount();
+  startMatchBarPolling();
 })();

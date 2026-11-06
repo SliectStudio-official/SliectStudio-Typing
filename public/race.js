@@ -9,7 +9,8 @@
     pollTimer: null, listTimer: null,
     isSpectator: false, engine: null, engineReady: false,
     finished: false, focusNick: null, lastRank: {},
-    tickFailures: 0, reconnectShown: false
+    tickFailures: 0, reconnectShown: false,
+    countdownTimer: null, countdownOffset: 0, countdownHideTimer: null
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -113,6 +114,26 @@
       $('room-list').innerHTML = '<div class="race-empty">' + esc(e.message) + '</div>';
     });
   }
+  /* ---------- 快速匹配（全局底部条由 nav.js 管理） ---------- */
+  function updateQuickMatchVisibility() {
+    var btn = $('btn-quick-match');
+    var hint = $('quick-match-guest-hint');
+    if (btn) btn.style.display = state.token ? 'inline-flex' : 'none';
+    if (hint) hint.style.display = state.token ? 'none' : 'block';
+  }
+  function startQuickMatch() {
+    if (!state.token) { toast('请先登录后再快速匹配'); return; }
+    api('/api/race/match/join', { method: 'POST', body: {} }).then(function () {
+      try {
+        localStorage.setItem('raceMatchPending', '1');
+        localStorage.setItem('raceMatchPendingSince', String(Date.now()));
+      } catch (e) {}
+      window.dispatchEvent(new Event('race-match-pending'));
+    }).catch(function (e) {
+      toast(e.message);
+    });
+  }
+
   function quickJoin(code) {
     var pw = prompt('该房间需要密码（4 位数字）：');
     if (pw === null) return;
@@ -155,6 +176,8 @@
 
   /* ---------- 轮询 ---------- */
   function enterRoom(code) {
+    try { window.dispatchEvent(new Event('race-room-entered')); } catch (e) {}
+    hideCountdownOverlay();
     state.code = code;
     state.finished = false;
     state.engineReady = false;
@@ -260,21 +283,62 @@
     api('/api/race/kick', { method: 'POST', body: body }).then(tick).catch(function (e) { toast(e.message); });
   }
 
+  /* ---------- 全屏倒计时 ---------- */
+  function updateCountdownNumber() {
+    if (!state.snap || state.snap.race.status !== 'countdown') return;
+    var race = state.snap.race;
+    var leftMs = race.startsAt - (Date.now() + state.countdownOffset);
+    var n = Math.ceil(leftMs / 1000);
+    var text = n > 0 ? String(n) : 'GO';
+    var el = $('race-countdown-number');
+    if (el && el.textContent !== text) {
+      el.textContent = text;
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+    }
+  }
+  function showCountdownOverlay(snap) {
+    var overlay = $('race-countdown-overlay');
+    if (!overlay) return;
+    if (state.countdownHideTimer) { clearTimeout(state.countdownHideTimer); state.countdownHideTimer = null; }
+    overlay.style.display = 'flex';
+    overlay.classList.remove('closing');
+    state.countdownOffset = (snap.race.serverNow || Date.now()) - Date.now();
+    var title = $('race-countdown-title');
+    var meta = $('race-countdown-meta');
+    if (title) title.textContent = '即将开始 · ' + snap.race.articleTitle;
+    if (meta) meta.textContent = snap.race.charCount + ' 字';
+    updateCountdownNumber();
+    if (!state.countdownTimer) state.countdownTimer = setInterval(updateCountdownNumber, 100);
+  }
+  function hideCountdownOverlay() {
+    if (state.countdownTimer) { clearInterval(state.countdownTimer); state.countdownTimer = null; }
+    var overlay = $('race-countdown-overlay');
+    if (!overlay || overlay.style.display === 'none') return;
+    overlay.classList.add('closing');
+    if (state.countdownHideTimer) clearTimeout(state.countdownHideTimer);
+    state.countdownHideTimer = setTimeout(function () {
+      overlay.style.display = 'none';
+      overlay.classList.remove('closing');
+      state.countdownHideTimer = null;
+    }, 200);
+  }
+
   /* ---------- 比赛（与首页同一套打字交互） ---------- */
   function renderCountdown(snap) {
     $('race-article').textContent = snap.race.articleTitle;
     $('race-meta').textContent = snap.race.charCount + ' 字';
-    var offset = snap.race.serverNow - Date.now();
-    var left = Math.ceil((snap.race.startsAt - (Date.now() + offset)) / 1000);
     var cd = $('race-countdown');
-    cd.style.display = 'flex';
-    cd.textContent = left > 0 ? String(left) : 'GO';
+    if (cd) cd.style.display = 'none';
+    showCountdownOverlay(snap);
     mountEngine(snap, false);
     renderRank(snap);
   }
 
   function renderRacing(snap) {
     $('race-countdown').style.display = 'none';
+    hideCountdownOverlay();
     $('race-article').textContent = snap.race.articleTitle;
     $('race-meta').textContent = snap.race.charCount + ' 字';
     mountEngine(snap, true);
@@ -417,6 +481,7 @@
 
   function backToLobby() {
     stopPolling();
+    hideCountdownOverlay();
     clearRaceRestore();
     if (state.engine) { state.engine.destroy(); state.engine = null; }
     state.snap = null; state.code = null; state.raceToken = state.token;
@@ -471,6 +536,7 @@
 
   /* ---------- 绑定 ---------- */
   function bind() {
+    $('btn-quick-match').onclick = startQuickMatch;
     $('btn-create').onclick = doCreate;
     $('btn-join').onclick = function () {
       var code = ($('join-code').value || '').trim().toUpperCase();
@@ -497,6 +563,7 @@
 
   state.token = localStorage.getItem('token');
   bind();
+  updateQuickMatchVisibility();
   showView('lobby');
   loadArticles();
   restoreRace();

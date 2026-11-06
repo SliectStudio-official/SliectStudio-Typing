@@ -4036,6 +4036,14 @@ button:focus-visible,
 .race-btn-small { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
 
 .race-hint { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0 0 10px; }
+.quick-match-card .race-hint { margin-bottom: 8px; }
+.quick-match-card .race-btn { white-space: nowrap; }
+.quick-match-error { color: var(--semantic-error) !important; }
+#quick-match-waiting .race-btn { margin-top: 2px; }
+@media (max-width: 480px) {
+  .quick-match-card { padding: 16px; }
+  .quick-match-card .race-btn { width: 100%; }
+}
 .race-reconnect-banner {
   display: none;
   margin: 0 0 12px;
@@ -4123,6 +4131,36 @@ button:focus-visible,
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: var(--font-display); font-size: 88px; font-weight: 600; color: var(--primary);
   background: var(--glass-bg); border-radius: 14px; z-index: 2;
+}
+
+.race-countdown-overlay {
+  position: fixed; inset: 0; z-index: 600;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(20, 20, 19, 0.58); backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px);
+  opacity: 1; transition: opacity 200ms var(--ease-out);
+}
+.race-countdown-overlay.closing { opacity: 0; }
+.race-countdown-card { text-align: center; color: #fff; padding: 24px; max-width: 90vw; }
+.race-countdown-label { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,.7); }
+.race-countdown-title { margin-top: 10px; font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+.race-countdown-meta { margin-top: 6px; font-size: 13px; color: rgba(255,255,255,.72); }
+.race-countdown-number {
+  margin: 18px 0 8px; font-family: var(--font-display); font-size: clamp(88px, 18vw, 160px);
+  line-height: 1; font-weight: 700; color: #fff; text-shadow: 0 0 40px rgba(201,100,66,.55);
+  animation: countdownPop var(--motion-base) var(--ease-out);
+}
+@keyframes countdownPop {
+  from { transform: scale(.78); opacity: .3; }
+  to { transform: scale(1); opacity: 1; }
+}
+.race-countdown-hint { margin-top: 12px; font-size: 13px; color: rgba(255,255,255,.72); }
+@media (max-width: 480px) {
+  .race-countdown-title { font-size: 17px; }
+  .race-countdown-number { font-size: 104px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .race-countdown-overlay { transition: none; }
+  .race-countdown-number { animation: none; }
 }
 
 .race-result { display: flex; flex-direction: column; gap: 8px; }
@@ -4295,6 +4333,28 @@ button:focus-visible,
 .notify-guest-hint { padding: 10px; margin-top: 4px; border-top: 1px solid var(--hairline-soft); color: var(--muted); font-size: 12.5px; text-align: center; }
 @media (max-width: 480px) {
   .notify-drawer { top: calc(var(--nav-h) + 6px); left: 8px; right: 8px; width: auto; max-height: 60vh; }
+}
+
+/* 全局快速匹配底栏 */
+.race-match-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 500;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: var(--ink); color: #fff; border-top: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 -4px 18px rgba(0,0,0,0.18); font-family: var(--font-body); font-size: 13px;
+}
+.race-match-bar-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.race-match-bar-action {
+  flex: 0 0 auto; border: 1px solid rgba(255,255,255,0.35); border-radius: 7px;
+  background: transparent; color: #fff; font-family: var(--font-body); font-size: 13px;
+  padding: 5px 12px; cursor: pointer; white-space: nowrap;
+}
+.race-match-bar-action:hover { background: rgba(255,255,255,0.12); }
+body.race-match-open { padding-bottom: 54px; }
+@media (max-width: 480px) {
+  .race-match-bar { padding: 9px 10px calc(9px + env(safe-area-inset-bottom)); font-size: 12.5px; gap: 8px; }
+  .race-match-bar-action { padding: 5px 9px; }
+  body.race-match-open { padding-bottom: 52px; }
 }
 @media (max-width: 480px) {
   .user-menu { right: -8px; min-width: 220px; }
