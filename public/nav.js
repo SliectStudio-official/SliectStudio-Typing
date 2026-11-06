@@ -74,7 +74,7 @@
         '</div>' +
       '</div>';
 
-    var desktop = '<div class="logo">Typing</div>' +
+    var desktop = '<a class="logo" href="home.html" aria-label="回到引导页">Typing</a>' +
       '<ul class="nav-links">' + items + '</ul>' +
       '<div class="nav-right">' + right + '</div>';
 
@@ -87,7 +87,7 @@
       '<div class="mobile-menu-overlay" id="mobile-menu-overlay"></div>' +
       '<div class="mobile-menu-drawer" id="mobile-menu-drawer">' +
         '<div class="mobile-menu-drawer-header">' +
-          '<div class="logo">Typing</div>' +
+          '<a class="logo" href="home.html" aria-label="回到引导页">Typing</a>' +
           '<button class="mobile-menu-drawer-close" id="mobile-menu-close" aria-label="关闭菜单">&times;</button>' +
         '</div>' +
         '<ul class="nav-links-mobile" id="mobile-nav-items">' + mobileItems + '</ul>' +

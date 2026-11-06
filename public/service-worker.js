@@ -1,4 +1,8 @@
 const CRITICAL_ASSETS = [
+  '/nav.js',
+  '/home.html',
+  '/home.js',
+  '/announcement-bar.js',
   '/index.html',
   '/style.css',
   '/script.js',
@@ -19,6 +23,7 @@ function getCacheName() {
         if (!data || !data.version || !data.files) throw new Error('asset-version invalid');
         precacheAssets = Object.keys(data.files).map(p => p + '?v=' + data.files[p]);
         if (!precacheAssets.includes('/index.html')) precacheAssets.push('/index.html');
+        if (!precacheAssets.includes('/home.html')) precacheAssets.push('/home.html');
         return 'typing-' + data.version;
       } catch (e) {
         cacheNamePromise = null;
@@ -268,7 +273,12 @@ self.addEventListener('fetch', (event) => {
           putInCache(request, clone).catch(() => {});
           return response;
         })
-        .catch(() => caches.match(request).then((r) => r || caches.match('/index.html')))
+        .catch(() => {
+          if (url.pathname === '/' || url.pathname === '/home.html') {
+            return caches.match('/home.html').then((r) => r || caches.match('/index.html'));
+          }
+          return caches.match(request).then((r) => r || caches.match('/home.html'));
+        })
     );
     return;
   }

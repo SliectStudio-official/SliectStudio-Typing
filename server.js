@@ -118,7 +118,7 @@ function getAssetHash(key, checkedKeys) {
   return nextHash;
 }
 
-const HTML_PAGES = ['/', '/index.html', '/admin.html', '/profile.html', '/setup.html', '/race.html'];
+const HTML_PAGES = ['/', '/home.html', '/index.html', '/admin.html', '/profile.html', '/setup.html', '/race.html'];
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -137,7 +137,7 @@ app.use(compression({
 }));
 app.use(express.json({ limit: '1mb' }));
 app.get(HTML_PAGES, (req, res, next) => {
-  const fileName = req.path === '/' ? 'index.html' : req.path.slice(1);
+  const fileName = req.path === '/' ? 'home.html' : req.path.slice(1);
   fs.readFile(path.join(publicDir, fileName), 'utf8', (err, html) => {
     if (err) return next();
     const checkedKeys = new Set();
@@ -166,8 +166,12 @@ app.use(express.static(publicDir, {
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
+    // /assets/ 的图片不走长缓存：换图后必须立刻可见（P25.1 K-39）
+    if (filePath.includes(path.sep + 'assets' + path.sep)) {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    }
     // HTML files: short cache, always revalidate
-    if (filePath.endsWith('.html')) {
+    else if (filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
     }
     // CSS/JS: long cache with revalidation

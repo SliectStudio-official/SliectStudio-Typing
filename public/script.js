@@ -464,6 +464,32 @@ function renderArticleSelect() {
     opt.textContent = item.text;
     articleSelect.appendChild(opt);
   });
+  applyArticleQueryParam();
+}
+
+function applyArticleQueryParam() {
+  const id = new URLSearchParams(location.search).get('article');
+  if (!id) return;
+  const option = [...articleSelect.options].find(o => o.value === id);
+  if (!option) return;
+  articleSelect.value = id;
+  articleSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+}
+
+function applyPageIntent() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('login') === '1') {
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    loginBtn.click();
+  } else if (params.get('submit') === '1') {
+    try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+    if (getToken()) submitArticleBtn.click(); else loginBtn.click();
+  }
+  if (location.hash === '#leaderboard') {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+    openLeaderboard();
+  }
 }
 
 articleSelect.addEventListener('change', async () => {
@@ -1386,253 +1412,6 @@ window.addEventListener('online', updateOfflineStatus);
 // 定期检测服务器可达性，服务器恢复后自动隐藏横幅
 offlineCheckTimer = setInterval(updateOfflineStatus, 30000);
 
-/* ===== P25 首页仪表盘 ===== */
-let dashContinueId = null;
-let dashMatchActive = false;
-let dashMatchTimer = null;
-let dashFitTimer = null;
-
-function dashEl(id) { return document.getElementById(id); }
-function dashCompactNumber(value) {
-  const n = Number(value) || 0;
-  if (n >= 100000000) return (n / 100000000).toFixed(1).replace(/\.0$/, '') + ' M';
-  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, '') + ' K';
-  return String(n);
-}
-function dashToast(text) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-  const el = document.createElement('div');
-  el.className = 'dash-toast';
-  el.textContent = text;
-  container.appendChild(el);
-  setTimeout(() => el.remove(), 2800);
-}
-function fitDashboard() {
-  const view = dashEl('view-dashboard');
-  if (!view) return;
-  const list = window.innerWidth < 900 || window.innerHeight > window.innerWidth;
-  view.classList.toggle('is-list', list);
-  document.body.classList.toggle('dash-list-mode', list && document.body.classList.contains('dashboard-mode'));
-  const stage = dashEl('dash-stage');
-  if (!stage) return;
-  if (list) {
-    stage.style.transform = 'none';
-    return;
-  }
-  const s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-  stage.style.transform = 'scale(' + s + ')';
-}
-function scheduleDashFit() {
-  if (dashFitTimer) clearTimeout(dashFitTimer);
-  dashFitTimer = setTimeout(fitDashboard, 100);
-}
-function showDashboard() {
-  const view = dashEl('view-dashboard');
-  const practice = dashEl('view-practice');
-  if (view) view.style.display = '';
-  if (practice) practice.style.display = 'none';
-  document.body.classList.add('dashboard-mode');
-  fitDashboard();
-  if (typeof initDashboardData === 'function') initDashboardData();
-  window.scrollTo(0, 0);
-}
-function showPractice(articleId) {
-  const view = dashEl('view-dashboard');
-  const practice = dashEl('view-practice');
-  if (view) view.style.display = 'none';
-  if (practice) practice.style.display = 'block';
-  document.body.classList.remove('dashboard-mode', 'dash-list-mode');
-  window.scrollTo(0, 0);
-  if (articleId != null) {
-    const option = [...articleSelect.options].find(o => String(o.value) === String(articleId));
-    if (option) {
-      articleSelect.value = String(articleId);
-      articleSelect.dispatchEvent(new Event('change', { bubbles: true }));
-    } else {
-      setTimeout(() => showPractice(articleId), 250);
-      return;
-    }
-  } else {
-    articleSelect.focus();
-  }
-}
-function setDashMatching(active, startedAt) {
-  dashMatchActive = active;
-  const card = dashEl('dash-quick');
-  const title = dashEl('dash-quick-title');
-  const desc = dashEl('dash-quick-desc');
-  if (!card || !title || !desc) return;
-  card.classList.toggle('is-matching', active);
-  if (active) {
-    try {
-      const since = startedAt || Number(localStorage.getItem('raceMatchPendingSince')) || Date.now();
-      if (!localStorage.getItem('raceMatchPendingSince')) localStorage.setItem('raceMatchPendingSince', String(since));
-    } catch (e) {}
-    title.textContent = '00:00';
-    desc.textContent = '正在寻找对手';
-    if (!dashMatchTimer) dashMatchTimer = setInterval(updateDashMatchTimer, 250);
-    updateDashMatchTimer();
-  } else {
-    title.textContent = '快速开始';
-    desc.textContent = '进行 SOLO 匹配';
-    if (dashMatchTimer) { clearInterval(dashMatchTimer); dashMatchTimer = null; }
-  }
-}
-function updateDashMatchTimer() {
-  if (!dashMatchActive) return;
-  const title = dashEl('dash-quick-title');
-  if (!title) return;
-  const barText = document.getElementById('race-match-bar-text');
-  let text = null;
-  if (barText) {
-    const m = barText.textContent.match(/(\d{2}:\d{2})/);
-    if (m) text = m[1];
-  }
-  if (!text) {
-    const since = Number(localStorage.getItem('raceMatchPendingSince')) || Date.now();
-    const sec = Math.max(0, Math.floor((Date.now() - since) / 1000));
-    text = String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
-  }
-  title.textContent = text;
-  if (!localStorage.getItem('raceMatchPending')) setDashMatching(false);
-}
-function startDashMatch() {
-  if (dashMatchActive) { cancelDashMatch(); return; }
-  if (!getToken()) { loginBtn.click(); return; }
-  fetch('/api/race/match/join', { method: 'POST', headers: apiHeaders(), body: '{}' })
-    .then(res => readJson(res).then(data => ({ res, data })))
-    .then(({ res, data }) => {
-      if (!res.ok) throw new Error(data && data.error || ('HTTP ' + res.status));
-      if (data && data.status === 'matched' && data.code) {
-        window.location.href = 'race.html?code=' + encodeURIComponent(data.code);
-        return;
-      }
-      try {
-        localStorage.setItem('raceMatchPending', '1');
-        if (!localStorage.getItem('raceMatchPendingSince')) localStorage.setItem('raceMatchPendingSince', String(Date.now()));
-      } catch (e) {}
-      setDashMatching(true);
-      window.dispatchEvent(new Event('race-match-pending'));
-    })
-    .catch(e => dashToast(e.message || '匹配失败，请稍后再试'));
-}
-function cancelDashMatch() {
-  const token = getToken();
-  setDashMatching(false);
-  try {
-    localStorage.removeItem('raceMatchPending');
-    localStorage.removeItem('raceMatchPendingSince');
-  } catch (e) {}
-  if (token) {
-    fetch('/api/race/match/cancel', { method: 'POST', headers: apiHeaders(), body: '{}' }).catch(() => {});
-  }
-  try { window.dispatchEvent(new Event('race-match-cancel-local')); } catch (e) {}
-}
-function initDashMatch() {
-  if (!getToken()) return;
-  if (localStorage.getItem('raceMatchPending') !== '1') return;
-  fetch('/api/race/match/status', { headers: apiHeaders() })
-    .then(res => readJson(res).then(data => ({ res, data })))
-    .then(({ res, data }) => {
-      if (!res.ok) return;
-      if (data && data.status === 'matched' && data.code) {
-        window.location.href = 'race.html?code=' + encodeURIComponent(data.code);
-        return;
-      }
-      if (data && data.status === 'waiting') {
-        const since = Date.now() - (Number(data.elapsed) || 0);
-        try { localStorage.setItem('raceMatchPendingSince', String(since)); } catch (e) {}
-        setDashMatching(true, since);
-      } else {
-        cancelDashMatch();
-      }
-    })
-    .catch(() => {});
-}
-function initDashboardData() {
-  const token = getToken();
-  const name = currentUser ? (currentUser.nickname || currentUser.username) : '游客';
-  if (dashEl('dash-username')) dashEl('dash-username').textContent = name;
-  if (dashEl('dash-profile-name')) dashEl('dash-profile-name').textContent = name;
-  if (dashEl('dash-avatar')) dashEl('dash-avatar').textContent = currentUser ? name.slice(0, 1) : '游';
-  if (dashEl('dash-logout')) dashEl('dash-logout').querySelector('.dash-row-label').textContent = currentUser ? '退出账号登录' : '登录账号';
-  if (dashEl('dash-profile-link') && !currentUser) dashEl('dash-profile-link').href = '#';
-  fetch('/api/version').then(res => readJson(res)).then(v => {
-    if (v && v.version && dashEl('dash-version')) dashEl('dash-version').textContent = 'Typing-' + v.version;
-  }).catch(() => {});
-  if (!token) {
-    ['dash-stat-practices', 'dash-stat-chars', 'dash-stat-speed', 'dash-stat-winrate'].forEach(id => { if (dashEl(id)) dashEl(id).textContent = '—'; });
-    if (dashEl('dash-continue-desc')) dashEl('dash-continue-desc').textContent = '先去选一篇文章';
-    return;
-  }
-  fetch('/api/user/profile', { headers: apiHeaders() }).then(res => readJson(res)).then(p => {
-    if (!p) return;
-    const display = p.nickname || p.username;
-    if (dashEl('dash-username')) dashEl('dash-username').textContent = display;
-    if (dashEl('dash-profile-name')) dashEl('dash-profile-name').textContent = display;
-    if (dashEl('dash-avatar')) {
-      if (p.avatar) dashEl('dash-avatar').innerHTML = '<img src="' + escapeHtml(p.avatar + '?t=' + Date.now()) + '" alt="">';
-      else dashEl('dash-avatar').textContent = display.slice(0, 1);
-    }
-  }).catch(() => {});
-  Promise.all([
-    fetch('/api/user/stats', { headers: apiHeaders() }).then(res => readJson(res)).catch(() => null),
-    fetch('/api/user/race-stats', { headers: apiHeaders() }).then(res => readJson(res)).catch(() => null)
-  ]).then(([st, rs]) => {
-    if (st) {
-      if (dashEl('dash-stat-practices')) dashEl('dash-stat-practices').textContent = String(st.totalPractices || 0);
-      if (dashEl('dash-stat-chars')) dashEl('dash-stat-chars').textContent = dashCompactNumber(st.totalKeystrokes || 0);
-      const speed = st.totalTimeSeconds > 0 ? Math.round((st.totalKeystrokes || 0) / st.totalTimeSeconds * 60) : 0;
-      if (dashEl('dash-stat-speed')) dashEl('dash-stat-speed').textContent = speed ? String(speed) : '—';
-    }
-    if (rs && dashEl('dash-stat-winrate')) dashEl('dash-stat-winrate').textContent = rs.finishedCount > 0 ? Math.round(rs.winRate) + '%' : '—';
-  }).catch(() => {});
-  try {
-    const saved = JSON.parse(localStorage.getItem('lastPractice') || 'null');
-    if (saved && saved.articleId != null) {
-      dashContinueId = saved.articleId;
-      if (dashEl('dash-continue-desc')) dashEl('dash-continue-desc').textContent = '退出前的练习';
-      return;
-    }
-  } catch (e) {}
-  fetch('/api/user/history?limit=1', { headers: apiHeaders() }).then(res => readJson(res)).then(data => {
-    const row = data && data.scores && data.scores[0];
-    if (row && row.article_id != null) {
-      dashContinueId = row.article_id;
-      if (dashEl('dash-continue-desc')) dashEl('dash-continue-desc').textContent = '退出前的练习';
-    } else if (dashEl('dash-continue-desc')) {
-      dashEl('dash-continue-desc').textContent = '先去选一篇文章';
-    }
-  }).catch(() => {});
-}
-function bindDashboard() {
-  const home = dashEl('dash-home');
-  if (home) home.addEventListener('click', showDashboard);
-  const back = dashEl('back-dashboard');
-  if (back) back.addEventListener('click', showDashboard);
-  const cont = dashEl('dash-continue');
-  if (cont) cont.addEventListener('click', () => showPractice(dashContinueId));
-  const quick = dashEl('dash-quick');
-  if (quick) quick.addEventListener('click', startDashMatch);
-  const lb = dashEl('dash-lb');
-  if (lb) lb.addEventListener('click', () => { if (lbBtn) lbBtn.click(); });
-  const logout = dashEl('dash-logout');
-  if (logout) logout.addEventListener('click', () => {
-    if (!currentUser) { loginBtn.click(); return; }
-    if (logoutBtn) logoutBtn.click();
-  });
-  const profileLink = dashEl('dash-profile-link');
-  if (profileLink) profileLink.addEventListener('click', (e) => {
-    if (!currentUser) { e.preventDefault(); loginBtn.click(); }
-  });
-  window.addEventListener('resize', scheduleDashFit);
-  window.addEventListener('orientationchange', scheduleDashFit);
-  fitDashboard();
-  initDashMatch();
-  initDashboardData();
-}
-
 async function init() {
   try {
     loadVersion();
@@ -1640,10 +1419,10 @@ async function init() {
     const isBootstrapping = await loadBootstrapStatus();
     if (isBootstrapping) return;
     await checkAuth().catch(() => {});
-    bindDashboard();
     await fetchCategories().catch(() => {});
     // 分类返回后即可移除 loading，文章列表在后台继续加载
     hideLoadingOverlay();
+    applyPageIntent();
     fetchArticles().catch(() => {});
     checkErrorPracticeMode();
     if ('serviceWorker' in navigator) {

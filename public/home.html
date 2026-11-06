@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Typing · 首页</title>
+<link rel="stylesheet" href="style.css">
+<script src="announcement-bar.js" defer></script>
+<script src="home.js" defer></script>
+</head>
+<body class="dashboard-mode home-page">
+<header class="home-topbar" id="home-topbar" role="banner" aria-label="站点通知">
+  <div class="home-announce-slot" id="home-announce-slot"></div>
+  <button class="home-bell" id="home-bell" type="button" aria-label="通知中心" aria-expanded="false">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+  </button>
+  <a class="home-login" id="home-login" href="index.html?login=1" style="display:none">登录</a>
+</header>
+
+<section id="view-dashboard">
+  <div class="dash-viewport" id="dash-viewport">
+    <div class="dash-stage" id="dash-stage">
+      <picture class="dash-bg">
+        <source srcset="assets/bg-photo.webp" type="image/webp">
+        <img src="assets/bg-photo.jpg" alt="">
+      </picture>
+      <div class="dash-dim"></div>
+      <div class="dash-panel-gradient"></div>
+
+      <a class="dash-home" id="dash-home" href="index.html" aria-label="进入练习首页">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3.75 7.5V17.5H16.25V7.5L10 2.5L3.75 7.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.92 12.08V17.5H12.08V12.08H7.92Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3.75 17.5H16.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>进入首页</span>
+      </a>
+
+      <div class="dash-greeting">欢迎回来，</div>
+      <div class="dash-username" id="dash-username">游客</div>
+
+      <div class="dash-actions">
+        <button class="dash-action glass" id="dash-continue" type="button">
+          <span class="dash-icon"><svg width="25" height="25" viewBox="0 0 25 25" fill="none"><path d="M3.03 3.5V7.29H6.82" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.08 12.5a10.42 10.42 0 1 0 1.4-5.21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 6.25v6.25l4.42 4.42" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dash-action-title">继续上次的练习</span>
+          <span class="dash-action-desc" id="dash-continue-desc">退出前的练习</span>
+          <span class="dash-chev"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M5.94 3.75 9.69 7.5l-3.75 3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </button>
+        <button class="dash-action glass" id="dash-quick" type="button" aria-live="polite">
+          <span class="dash-icon"><svg width="25" height="25" viewBox="0 0 25 25" fill="none"><circle cx="12.5" cy="12.5" r="10.42" stroke="currentColor" stroke-width="2"/><path d="m11.98 7.29-2.6 5.21h6.25l-2.6 5.21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dash-action-title" id="dash-quick-title">快速开始</span>
+          <span class="dash-action-desc" id="dash-quick-desc">进行 SOLO 匹配</span>
+          <span class="dash-chev" id="dash-quick-chev"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M5.94 3.75 9.69 7.5l-3.75 3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dash-match-close" id="dash-quick-close"><svg width="21" height="21" viewBox="0 0 21 21" fill="none"><path d="m6.13 6.13 8.74 8.74M6.14 14.87l8.74-8.74" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </button>
+        <a class="dash-action glass" href="race.html">
+          <span class="dash-icon"><svg width="25" height="25" viewBox="0 0 25 25" fill="none"><path d="M3.13 3.13h18.75v18.75H3.13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.13 3.13v18.75L12.5 18.75V6.25L3.13 3.13Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
+          <span class="dash-action-title">加入比赛房间</span>
+          <span class="dash-action-desc">跳转到比赛页面</span>
+          <span class="dash-chev"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M5.94 3.75 9.69 7.5l-3.75 3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </a>
+      </div>
+
+      <div class="dash-version" id="dash-version">Typing-…</div>
+
+      <aside class="dash-profile glass">
+        <div class="dash-profile-content">
+          <div class="dash-avatar" id="dash-avatar">游</div>
+          <div class="dash-profile-name" id="dash-profile-name">游客</div>
+          <div class="dash-stats">
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-practices">—</div><div class="dash-stat-label">练习次数</div></div>
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-chars">—</div><div class="dash-stat-label">累计字数</div></div>
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-speed">—</div><div class="dash-stat-label">平均速度</div></div>
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-winrate">—</div><div class="dash-stat-label">胜率</div></div>
+          </div>
+          <div class="dash-rows" role="navigation" aria-label="个人链接">
+            <button class="dash-row glass" id="dash-lb" type="button"><span class="dash-row-label">排行榜</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+            <button class="dash-row glass" id="dash-submit" type="button"><span class="dash-row-label">我的投稿</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+            <a class="dash-row glass" id="dash-profile-link" href="profile.html"><span class="dash-row-label">查看个人数据</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+            <a class="dash-row glass" id="dash-admin-link" href="admin.html" style="display:none"><span class="dash-row-label">管理面板</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+          </div>
+        </div>
+      </aside>
+
+      <div class="dash-status-bar" id="home-match-bar" role="status" aria-live="polite">
+        <div class="dash-status-bg"></div>
+        <span class="dash-status-title">正在进行 SOLO 匹配</span>
+        <span class="dash-status-timer" id="home-match-timer">00:00</span>
+        <button class="dash-status-close" id="home-match-close" type="button" aria-label="取消匹配">
+          <svg width="21" height="21" viewBox="0 0 21 21" fill="none"><path d="m6.13 6.13 8.74 8.74M6.14 14.87l8.74-8.74" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<aside class="home-notify-panel" id="home-notify-panel" role="dialog" aria-label="通知中心" style="display:none">
+  <div class="home-notify-head">
+    <span class="home-notify-title">通知中心</span>
+    <button class="home-notify-close" id="home-notify-close" type="button" aria-label="关闭通知">&times;</button>
+  </div>
+  <div class="home-notify-list" id="home-notify-list"></div>
+</aside>
+
+<div class="toast-container" id="toast-container"></div>
+</body>
+</html>
