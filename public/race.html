@@ -49,12 +49,19 @@
               <input id="create-password" class="race-input" inputmode="numeric" maxlength="4" placeholder="例如 1234">
             </label>
             <label>人数上限
-              <select id="create-max" class="race-input">
-                <option value="2">2 人</option>
-                <option value="4">4 人</option>
-                <option value="6">6 人</option>
-                <option value="8" selected>8 人</option>
-              </select>
+              <div class="race-max-control">
+                <input id="create-max" class="race-input race-max-input" type="number" min="2" max="100" step="1" value="8">
+                <div class="race-max-quick" id="create-max-quick">
+                  <button type="button" class="race-max-quick-btn" data-max="2">2</button>
+                  <button type="button" class="race-max-quick-btn" data-max="4">4</button>
+                  <button type="button" class="race-max-quick-btn" data-max="8">8</button>
+                  <button type="button" class="race-max-quick-btn" data-max="16">16</button>
+                  <button type="button" class="race-max-quick-btn" data-max="32">32</button>
+                  <button type="button" class="race-max-quick-btn" data-max="64">64</button>
+                  <button type="button" class="race-max-quick-btn" data-max="100">100</button>
+                </div>
+              </div>
+              <span class="race-max-hint" id="create-max-hint">2–100 人，观战席自动为约 10%</span>
             </label>
             <label class="race-checkbox"><input type="checkbox" id="create-public" checked> 公开房间（出现在大厅列表）</label>
             <button class="race-btn race-btn-primary" id="btn-create">创建比赛</button>

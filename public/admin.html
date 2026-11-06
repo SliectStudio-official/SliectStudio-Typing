@@ -441,11 +441,19 @@
             <div class="stat-label">房间数上限</div>
             <div class="stat-value" id="race-stat-limit">20</div>
           </div>
+          <div class="stat-item">
+            <div class="stat-label">活动房间总席位</div>
+            <div class="stat-value" id="race-stat-seats">0 / 200</div>
+          </div>
         </div>
         <div class="race-admin-toolbar">
           <div class="filter-group">
             <label for="race-max-rooms">最大房间数（1–50）</label>
             <input type="number" id="race-max-rooms" min="1" max="50" step="1" value="20" style="width:100px">
+          </div>
+          <div class="filter-group">
+            <label for="race-max-total">总席位上限（1–500）</label>
+            <input type="number" id="race-max-total" min="1" max="500" step="1" value="200" style="width:100px">
           </div>
           <label class="race-admin-check"><input type="checkbox" id="race-enabled"> 允许建房</label>
           <button class="btn-primary" id="race-settings-save">保存设置</button>

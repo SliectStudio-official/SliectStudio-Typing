@@ -2078,7 +2078,7 @@ async function loadVersion() {
 
 let raceRoomsCache = [];
 let raceMembersCode = null;
-let raceSettingsCache = { maxRooms: 20, enabled: true };
+let raceSettingsCache = { maxRooms: 20, enabled: true, maxTotalPlayers: 200 };
 
 function setRaceListMsg(text, isError) {
   const el = document.getElementById('race-list-msg');
@@ -2108,11 +2108,13 @@ function raceStatusText(status) {
 function renderRaceSummary() {
   const totalPlayers = raceRoomsCache.reduce((sum, r) => sum + (r.playerCount || 0), 0);
   const maxPlayers = raceRoomsCache.reduce((max, r) => Math.max(max, r.playerCount || 0), 0);
+  const totalSeats = raceRoomsCache.reduce((sum, r) => sum + (r.maxPlayers || 0), 0);
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
   set('race-stat-rooms', raceRoomsCache.length);
   set('race-stat-players', totalPlayers);
   set('race-stat-max-players', maxPlayers);
   set('race-stat-limit', raceSettingsCache.maxRooms);
+  set('race-stat-seats', totalSeats + ' / ' + (raceSettingsCache.maxTotalPlayers || 200));
 }
 
 function renderRaceRooms() {
@@ -2178,7 +2180,7 @@ async function loadRaceRooms() {
     if (empty) empty.style.display = 'none';
     if (wrap) wrap.style.display = 'none';
     hideRaceMembers();
-    ['race-stat-rooms', 'race-stat-players', 'race-stat-max-players', 'race-stat-limit'].forEach(id => {
+    ['race-stat-rooms', 'race-stat-players', 'race-stat-max-players', 'race-stat-limit', 'race-stat-seats'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = '—';
     });
@@ -2191,10 +2193,12 @@ async function loadRaceSettings() {
     const res = await fetch('/api/admin/race-settings', { headers: apiHeaders() });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false };
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200 };
     const input = document.getElementById('race-max-rooms');
+    const totalInput = document.getElementById('race-max-total');
     const check = document.getElementById('race-enabled');
     if (input) input.value = raceSettingsCache.maxRooms;
+    if (totalInput) totalInput.value = raceSettingsCache.maxTotalPlayers;
     if (check) check.checked = raceSettingsCache.enabled;
     setRaceSettingsMsg('', false);
   } catch (e) {
@@ -2204,21 +2208,28 @@ async function loadRaceSettings() {
 
 async function saveRaceSettings() {
   const input = document.getElementById('race-max-rooms');
+  const totalInput = document.getElementById('race-max-total');
   const check = document.getElementById('race-enabled');
   const maxRooms = Number(input && input.value);
+  const maxTotalPlayers = Number(totalInput && totalInput.value);
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) {
     setRaceSettingsMsg('房间数上限必须在 1 到 50 之间', true);
+    return;
+  }
+  if (!Number.isInteger(maxTotalPlayers) || maxTotalPlayers < 1 || maxTotalPlayers > 500) {
+    setRaceSettingsMsg('总席位上限必须在 1 到 500 之间', true);
     return;
   }
   try {
     const res = await fetch('/api/admin/race-settings', {
       method: 'PUT', headers: apiHeaders(),
-      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked) })
+      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked), maxTotalPlayers: maxTotalPlayers })
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false };
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200 };
     if (input) input.value = raceSettingsCache.maxRooms;
+    if (totalInput) totalInput.value = raceSettingsCache.maxTotalPlayers;
     if (check) check.checked = raceSettingsCache.enabled;
     renderRaceSummary();
     setRaceSettingsMsg('设置已保存', false);

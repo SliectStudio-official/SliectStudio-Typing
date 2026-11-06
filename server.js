@@ -788,10 +788,13 @@ async function attemptMatch() {
 async function getRaceSettings() {
   const maxRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_rooms'");
   const enabledRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_enabled'");
+  const totalRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_total_players'");
   let maxRooms = maxRow ? parseInt(maxRow.value, 10) : 20;
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) maxRooms = 20;
+  let maxTotalPlayers = totalRow ? parseInt(totalRow.value, 10) : 200;
+  if (!Number.isInteger(maxTotalPlayers) || maxTotalPlayers < 1 || maxTotalPlayers > 500) maxTotalPlayers = 200;
   const enabled = enabledRow ? enabledRow.value === 'true' : true;
-  return { maxRooms, enabled };
+  return { maxRooms, enabled, maxTotalPlayers };
 }
 
 async function setSetting(key, value) {
@@ -842,8 +845,9 @@ function checkListRate(ip) {
   return entry.count <= RACE_LIST_MAX_HITS;
 }
 
-function buildSnapshot(room, player, spectator) {
+function buildSnapshot(room, player, spectator, options) {
   initSpectatorState(room);
+  var includeContent = !options || options.includeContent !== false;
   const sorted = Array.from(room.players.values()).sort((a, b) => {
     if (a.rank && b.rank) return a.rank - b.rank;
     if (a.rank) return -1;
@@ -852,18 +856,33 @@ function buildSnapshot(room, player, spectator) {
   });
   const isHost = (player && player.userId !== null && player.userId === room.hostUserId) ||
     isSpectatorHost(room, spectator);
-  const spectatorList = Array.from(room.spectators.values()).map(s => ({
-    userId: s.userId == null ? null : s.userId,
-    guestId: s.guestId || null,
-    nickname: s.nickname,
-    isGuest: !!s.isGuest,
-    isHost: isSpectatorHost(room, s),
-    fromPlayer: !!s.fromPlayer,
-    joinedAt: s.joinedAt || null,
-    seatJoinedAt: s.seatJoinedAt || s.joinedAt || null
-  }));
-  return {
-    race: {
+  const spectatorEntries = Array.from(room.spectators.entries());
+  const spectatorTotal = spectatorEntries.length;
+  var shownSpectators = spectatorEntries;
+  if (spectatorTotal > 20) {
+    shownSpectators = spectatorEntries.slice(0, 20);
+    if (spectator) {
+      const selfKey = spectatorMapKey(spectator);
+      if (!shownSpectators.some(function (entry) { return entry[0] === selfKey; })) {
+        const selfEntry = spectatorEntries.find(function (entry) { return entry[0] === selfKey; });
+        if (selfEntry) shownSpectators = shownSpectators.concat([selfEntry]);
+      }
+    }
+  }
+  const spectatorList = shownSpectators.map(function (entry) {
+    const s = entry[1];
+    return {
+      userId: s.userId == null ? null : s.userId,
+      guestId: s.guestId || null,
+      nickname: s.nickname,
+      isGuest: !!s.isGuest,
+      isHost: isSpectatorHost(room, s),
+      fromPlayer: !!s.fromPlayer,
+      joinedAt: s.joinedAt || null,
+      seatJoinedAt: s.seatJoinedAt || s.joinedAt || null
+    };
+  });
+  const race = {
       code: room.code,
       status: room.status,
       articleId: room.articleId,
@@ -883,8 +902,12 @@ function buildSnapshot(room, player, spectator) {
       spectatorCount: room.spectators.size,
       isHost: !!isHost,
       mySeat: player ? 'player' : (spectator ? 'spectator' : null),
+      spectatorTotal: spectatorTotal,
       serverNow: Date.now()
-    },
+    };
+  if (!includeContent) delete race.content;
+  return {
+    race: race,
     isHost: !!isHost,
     mySeat: player ? 'player' : (spectator ? 'spectator' : null),
     spectator: spectator ? {
@@ -902,7 +925,21 @@ function buildSnapshot(room, player, spectator) {
       finishedAt: player.finishedAt,
       rank: player.rank
     } : null,
-    players: sorted.map(p => ({
+    players: options && options.compactPlayers ? sorted.map(p => {
+      const out = { n: p.nickname };
+      if (p.userId != null) out.u = p.userId;
+      if (p.guestId) out.g = p.guestId;
+      if (p.userId !== null && p.userId === room.hostUserId) out.h = 1;
+      if (p.isGuest) out.i = 1;
+      if (p.ready) out.r = 1;
+      if (p.progress) out.p = p.progress;
+      if (p.finishedAt) out.f = 1;
+      if (p.rank != null) out.k = p.rank;
+      if (p.speed != null) out.s = p.speed;
+      if (p.accuracy != null) out.a = p.accuracy;
+      if (p.timeSeconds != null) out.t = p.timeSeconds;
+      return out;
+    }) : sorted.map(p => ({
       userId: p.userId,
       guestId: p.guestId,
       nickname: p.nickname,
@@ -917,7 +954,9 @@ function buildSnapshot(room, player, spectator) {
       timeSeconds: p.timeSeconds || null,
       lastSeen: p.lastSeen || null
     })),
+    compactPlayers: !!(options && options.compactPlayers),
     spectators: spectatorList,
+    spectatorTotal: spectatorTotal,
     abandonedPlayers: Array.from(room.abandonedPlayers || []).map(function (p) {
       return { nickname: p.nickname, isGuest: !!p.isGuest, atChar: p.atChar || 0 };
     }),
@@ -1131,8 +1170,14 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: '房间密码必须是 4 位数字' });
     }
     const mp = maxPlayers === undefined ? 8 : parseInt(maxPlayers, 10);
-    if (!Number.isInteger(mp) || mp < 2 || mp > 8) {
-      return res.status(400).json({ error: '房间人数上限必须在 2 到 8 之间' });
+    if (!Number.isInteger(mp) || mp < 2 || mp > 100) {
+      return res.status(400).json({ error: '房间人数上限必须在 2 到 100 之间' });
+    }
+    const usedSeats = Array.from(roomRegistry.values())
+      .filter(function (r) { return isActiveRoom(r); })
+      .reduce(function (sum, r) { return sum + (r.maxPlayers || 0); }, 0);
+    if (usedSeats + mp > settings.maxTotalPlayers) {
+      return res.status(400).json({ error: '当前总席位已满（已用 ' + usedSeats + ' / 上限 ' + settings.maxTotalPlayers + '），请稍后再建房' });
     }
     const aid = parseInt(articleId, 10);
     if (!Number.isInteger(aid)) {
@@ -1878,10 +1923,13 @@ app.post('/api/race/tick', raceAuth, async (req, res) => {
     }
     updateRoomPhase(room);
     expireDissolveIfNeeded(room, Date.now());
+    const wantContent = !!(req.body && req.body.wantContent);
+    const includeContent = wantContent || (room.status === 'racing' && !room.contentSent);
+    if (room.status === 'racing' && includeContent) room.contentSent = true;
     if (spectator) {
       spectator.lastSeen = Date.now();
       if (isSpectatorHost(room, spectator)) room.hostLastSeen = spectator.lastSeen;
-      return res.json(buildSnapshot(room, null, spectator));
+      return res.json(buildSnapshot(room, null, spectator, { includeContent: includeContent, compactPlayers: room.players.size > 20 }));
     }
     player.lastSeen = Date.now();
     if (!player.isGuest && room.hostUserId === player.userId) room.hostLastSeen = Date.now();
@@ -1891,7 +1939,7 @@ app.post('/api/race/tick', raceAuth, async (req, res) => {
         player.progress = Math.max(player.progress || 0, Math.min(Math.floor(p), room.charCount));
       }
     }
-    res.json(buildSnapshot(room, player));
+    res.json(buildSnapshot(room, player, undefined, { includeContent: includeContent, compactPlayers: room.players.size > 20 }));
   } catch (e) {
     res.status(500).json({ error: '获取比赛状态失败: ' + e.message });
   }
@@ -2104,7 +2152,8 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
     const body = req.body || {};
     const maxRaw = body.maxRooms !== undefined ? body.maxRooms : body.race_max_rooms;
     const enabledRaw = body.enabled !== undefined ? body.enabled : body.race_enabled;
-    if (maxRaw === undefined && enabledRaw === undefined) {
+    const totalRaw = body.maxTotalPlayers !== undefined ? body.maxTotalPlayers : body.race_max_total_players;
+    if (maxRaw === undefined && enabledRaw === undefined && totalRaw === undefined) {
       return res.status(400).json({ error: '没有要更新的字段' });
     }
     if (maxRaw !== undefined) {
@@ -2121,6 +2170,13 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
         return res.status(400).json({ error: '开关值必须是 true 或 false' });
       }
       await setSetting('race_enabled', isTrue ? 'true' : 'false');
+    }
+    if (totalRaw !== undefined) {
+      const n = parseInt(totalRaw, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 500) {
+        return res.status(400).json({ error: '总席位上限必须在 1 到 500 之间' });
+      }
+      await setSetting('race_max_total_players', String(n));
     }
     res.json(await getRaceSettings());
   } catch (e) {

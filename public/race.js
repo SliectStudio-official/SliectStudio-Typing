@@ -11,7 +11,9 @@
     finished: false, focusNick: null, lastRank: {},
     tickFailures: 0, reconnectShown: false,
     countdownTimer: null, countdownOffset: 0, countdownHideTimer: null,
-    lastDissolveNoticeAt: 0
+    lastDissolveNoticeAt: 0,
+    polling: false, tickInFlight: false, raceContent: null, needContent: false,
+    rankExpanded: false
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -160,8 +162,24 @@
   }
 
   /* ---------- 建房 / 加入 ---------- */
+  function validateCreateMax(showToast) {
+    var input = $('create-max');
+    var value = Number(input.value);
+    var valid = Number.isInteger(value) && value >= 2 && value <= 100;
+    var hint = $('create-max-hint');
+    if (hint) hint.textContent = valid ? '2–100 人，观战席自动为约 10%' : '请输入 2–100 之间的整数';
+    var btn = $('btn-create');
+    if (btn) btn.disabled = !valid;
+    var quick = document.querySelectorAll('#create-max-quick .race-max-quick-btn');
+    for (var i = 0; i < quick.length; i++) {
+      quick[i].classList.toggle('active', Number(quick[i].dataset.max) === value);
+    }
+    if (!valid && showToast) toast('房间人数上限必须在 2 到 100 之间');
+    return valid;
+  }
   function doCreate() {
     if (!state.token) { toast('请先登录后再创建比赛'); return; }
+    if (!validateCreateMax(true)) return;
     var password = $('create-password').value.trim();
     if (!/^\d{4}$/.test(password)) { toast('密码必须是 4 位数字'); return; }
     api('/api/race/create', {
@@ -200,6 +218,9 @@
     state.code = code;
     state.finished = false;
     state.engineReady = false;
+    state.raceContent = null;
+    state.needContent = true;
+    state.rankExpanded = false;
     if (state.engine) { state.engine.destroy(); state.engine = null; }
     showView(state.isSpectator ? 'spectate' : 'room');
     $('race-subnav-center').style.display = 'block';
@@ -211,11 +232,38 @@
     persistRaceRestore();
     startPolling();
   }
-  function startPolling() { stopPolling(); state.pollTimer = setInterval(tick, 1200); tick(); }
-  function stopPolling() { if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; } }
+  function pollDelay() {
+    var snap = state.snap;
+    if (!snap) return 1200;
+    if (state.needContent) return 1200;
+    var st = snap.race.status;
+    if (st === 'countdown') return 1200;
+    if (st === 'racing' && !state.isSpectator && state.engine) {
+      var engineState = state.engine.state();
+      if (engineState.typed > 0 && engineState.typed < snap.race.charCount && !state.finished) return 1200;
+    }
+    var n = snap.players ? snap.players.length : 0;
+    if (n <= 8) return 1200;
+    if (n <= 32) return 2000;
+    return 3000;
+  }
+  function scheduleNextPoll() {
+    if (!state.polling) return;
+    if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
+    state.pollTimer = setTimeout(tick, pollDelay());
+  }
+  function startPolling() { stopPolling(); state.polling = true; tick(); }
+  function stopPolling() {
+    state.polling = false;
+    if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
+  }
 
   function tick() {
+    if (state.tickInFlight) return;
+    state.tickInFlight = true;
+    if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
     var body = {};
+    if (state.needContent) body.wantContent = true;
     if (!state.isSpectator && state.engine && state.snap && state.snap.race.status === 'racing') {
       body.progress = state.engine.state().typed;
     }
@@ -225,8 +273,14 @@
         setReconnectBanner(false);
         toast('已重新连接');
       }
-      state.snap = snap;
-      state.isSpectator = mySeat(snap) === 'spectator';
+      if (snap.race && snap.race.content) {
+        state.raceContent = snap.race.content;
+        state.needContent = false;
+      } else if (!state.raceContent && snap.race && snap.race.status === 'racing') {
+        state.needContent = true;
+      }
+      state.snap = normalizeSnapshot(snap);
+      state.isSpectator = mySeat(state.snap) === 'spectator';
       persistRaceRestore();
       render();
     }).catch(function (e) {
@@ -240,6 +294,9 @@
       }
       state.tickFailures += 1;
       if (state.tickFailures >= 3) setReconnectBanner(true);
+    }).finally(function () {
+      state.tickInFlight = false;
+      scheduleNextPoll();
     });
   }
 
@@ -278,6 +335,28 @@
   }
 
   /* ---------- 等待房间 ---------- */
+  function normalizeSnapshot(snap) {
+    if (!snap || !snap.compactPlayers || !Array.isArray(snap.players)) return snap;
+    snap.players = snap.players.map(function (x) {
+      return {
+        userId: x.u == null ? null : x.u,
+        guestId: x.g || null,
+        nickname: x.n,
+        isHost: !!x.h,
+        isGuest: !!x.i,
+        ready: !!x.r,
+        progress: x.p || 0,
+        finishedAt: x.f ? 1 : null,
+        rank: x.k == null ? null : x.k,
+        speed: x.s == null ? null : x.s,
+        accuracy: x.a == null ? null : x.a,
+        timeSeconds: x.t == null ? null : x.t,
+        lastSeen: null
+      };
+    });
+    return snap;
+  }
+
   function mySeat(snap) {
     if (snap.race && snap.race.mySeat) return snap.race.mySeat;
     if (snap.me) return 'player';
@@ -331,9 +410,9 @@
         var toSpec = document.createElement('button');
         toSpec.className = 'race-btn race-btn-small race-btn-ghost';
         toSpec.textContent = '转观战';
-        toSpec.disabled = !race.spectatorEnabled || snap.spectators.length >= cap;
+        toSpec.disabled = !race.spectatorEnabled || race.spectatorCount >= cap;
         if (!race.spectatorEnabled) toSpec.title = '请先开启观战';
-        else if (snap.spectators.length >= cap) toSpec.title = '观战席已满';
+        else if (race.spectatorCount >= cap) toSpec.title = '观战席已满';
         toSpec.onclick = function () { assignSeat(p, 'spectator'); };
         row.appendChild(toSpec);
         row.appendChild(makeKickButton(p));
@@ -364,7 +443,7 @@
   function renderSpectatorPanel(snap, isHost, seat) {
     var race = snap.race;
     var cap = spectatorCapacity(race);
-    var count = snap.spectators.length;
+    var count = race.spectatorCount || 0;
     $('spec-seats-count').textContent = count + '/' + cap;
     $('spec-mode-note').textContent = !race.spectatorEnabled
       ? '观战已关闭'
@@ -482,7 +561,7 @@
     var cap = spectatorCapacity(race);
     $('race-spectator-live-count').textContent = !race.spectatorEnabled
       ? '观战已关闭'
-      : ('观战 ' + snap.spectators.length + '/' + cap + ' 人');
+      : ('观战 ' + (race.spectatorCount || 0) + '/' + cap + ' 人');
     var box = $('race-spectator-live-list');
     box.innerHTML = '';
     snap.spectators.forEach(function (s) {
@@ -580,8 +659,13 @@
 
   function mountEngine(snap, enable) {
     if (!state.engine) {
+      var text = snap.race.content || state.raceContent;
+      if (!text) {
+        state.needContent = true;
+        return;
+      }
       state.engine = window.TypingEngine.create($('race-typing'), {
-        text: snap.race.content || '',
+        text: text,
         enabled: false,
         onChange: function (st) {
           if (state.snap && state.snap.me) {
@@ -607,16 +691,46 @@
   function renderRank(snap) {
     var box = $('race-rank');
     box.innerHTML = '';
-    snap.players.forEach(function (p, i) {
+    var players = snap.players;
+    var shown = [];
+    var more = 0;
+    if (players.length > 20 && !state.rankExpanded) {
+      var extras = [];
+      players.forEach(function (p, i) {
+        var isMe = snap.me && ((p.userId != null && p.userId === snap.me.userId) ||
+          (p.guestId && p.guestId === snap.me.guestId));
+        if (isMe || p.isHost) extras.push({ p: p, i: i });
+        else if (shown.length < 20) shown.push({ p: p, i: i });
+      });
+      shown = shown.concat(extras).sort(function (a, b) { return a.i - b.i; });
+      more = players.length - shown.length;
+    } else {
+      players.forEach(function (p, i) { shown.push({ p: p, i: i }); });
+    }
+    shown.forEach(function (entry) {
+      var p = entry.p;
       var pct = Math.round((p.progress || 0) / Math.max(1, snap.race.charCount) * 100);
       var row = document.createElement('div');
       row.className = 'race-rank-row' + (snap.me && p.nickname === snap.me.nickname ? ' race-rank-me' : '');
-      row.innerHTML = '<span class="race-rank-no">' + (i + 1) + '</span>' +
+      row.innerHTML = '<span class="race-rank-no">' + (entry.i + 1) + '</span>' +
         '<span class="race-rank-name">' + esc(p.nickname) + '</span>' +
         '<span class="race-rank-bar"><i style="width:' + pct + '%"></i></span>' +
         '<span class="race-rank-pct">' + (p.finishedAt ? '完成' : pct + '%') + '</span>';
       box.appendChild(row);
     });
+    if (more > 0) {
+      var moreBtn = document.createElement('button');
+      moreBtn.className = 'race-btn race-btn-small race-rank-more';
+      moreBtn.textContent = '还有 ' + more + ' 人';
+      moreBtn.onclick = function () { state.rankExpanded = true; renderRank(snap); };
+      box.appendChild(moreBtn);
+    } else if (players.length > 20 && state.rankExpanded) {
+      var lessBtn = document.createElement('button');
+      lessBtn.className = 'race-btn race-btn-small race-rank-more';
+      lessBtn.textContent = '收起排名';
+      lessBtn.onclick = function () { state.rankExpanded = false; renderRank(snap); };
+      box.appendChild(lessBtn);
+    }
     snap.spectators.filter(function (s) { return s.fromPlayer; }).forEach(function (s) {
       var row = document.createElement('div');
       row.className = 'race-rank-row race-rank-spectating';
@@ -700,7 +814,7 @@
     if (!snap.players.length) board.innerHTML = '<div class="race-empty">还没有选手</div>';
 
     var cap = spectatorCapacity(r);
-    var audience = '<div class="race-spectate-live-head">观战 ' + (r.spectatorEnabled ? (snap.spectators.length + '/' + cap) : '已关闭') + '</div>' +
+    var audience = '<div class="race-spectate-live-head">观战 ' + (r.spectatorEnabled ? ((r.spectatorCount || 0) + '/' + cap) : '已关闭') + '</div>' +
       '<div class="race-spectate-live-self">你正在观战：' + esc(snap.spectator ? snap.spectator.nickname : '') + '</div>';
     if (snap.spectators.length) {
       audience += '<div class="race-spectate-live-list">';
@@ -953,6 +1067,7 @@
     if (state.engine) { state.engine.destroy(); state.engine = null; }
     state.snap = null; state.code = null; state.raceToken = state.token;
     state.finished = false; state.isSpectator = false; state.focusNick = null;
+    state.raceContent = null; state.needContent = false; state.rankExpanded = false;
     $('race-subnav-center').style.display = 'none';
     $('btn-exit-race').style.display = 'none';
     var db = $('btn-dissolve-race'); if (db) db.style.display = 'none';
@@ -1019,6 +1134,15 @@
   function bind() {
     $('btn-quick-match').onclick = startQuickMatch;
     $('btn-create').onclick = doCreate;
+    $('create-max').addEventListener('input', function () { validateCreateMax(false); });
+    var maxQuick = document.querySelectorAll('#create-max-quick .race-max-quick-btn');
+    for (var qi = 0; qi < maxQuick.length; qi++) {
+      maxQuick[qi].addEventListener('click', function () {
+        $('create-max').value = this.dataset.max;
+        validateCreateMax(false);
+      });
+    }
+    validateCreateMax(false);
     $('btn-join').onclick = function () {
       var code = ($('join-code').value || '').trim().toUpperCase();
       var pw = ($('join-password').value || '').trim();
