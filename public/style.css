@@ -47,8 +47,8 @@
   --toast-error: #b53333;
   --toast-warning: #b57b1a;
   --toast-info: #3898ec;
-  --font-display: Georgia, 'Times New Roman', serif;
-  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --font-display: var(--font-body);
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --ring-warm: #d1cfc5;
   --ring-deep: #c2c0b6;
