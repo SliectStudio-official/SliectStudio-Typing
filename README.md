@@ -16,7 +16,7 @@
 
 ## 环境要求
 
-- **Node.js v22 LTS**（⚠️ 不支持 v23/v24，better-sqlite3 无预编译包）
+- **Node.js 25.3.0**（版本真值见项目根目录 `VERSION` 与 `AGENTS.md` 冻结清单）
 - Python 3.x（可选，用于文章爬虫功能）
 
 ## 快速启动
@@ -25,7 +25,7 @@
 
 双击 `start.bat` 即可一键启动，脚本会自动完成：
 
-1. 检测/安装 Node.js v22 LTS 环境
+1. 检测/安装 Node.js 25.3.0 环境
 2. 安装 npm 依赖
 3. 启动服务器并打开浏览器
 
@@ -64,21 +64,18 @@ npm start
 
 **原因**：Node.js 未安装或未加入 PATH。
 
-**解决**：双击 `start.bat`，脚本会自动检测并安装 Node.js v22 LTS。
+**解决**：双击 `start.bat`，脚本会自动检测并安装 Node.js 25.3.0。
 
 ### 问题2：better-sqlite3 编译失败 / gyp ERR!
 
-**原因**：安装了 Node.js v23 或 v24，better-sqlite3 对这些版本没有预编译二进制包，需要从源码编译，而系统缺少 C++ 编译工具链。
+**原因**：`better-sqlite3` 是原生模块，当前环境没有可用的预编译二进制包或本地编译产物时，会尝试从源码编译；缺少 C++ 编译工具链就会失败。
 
 **解决**：
 
-1. 卸载当前 Node.js（控制面板 → 卸载 Node.js）
-2. 安装 Node.js **v22 LTS**：https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi
-3. 或使用国内镜像：https://cdn.npmmirror.com/binaries/node/v22.14.0/node-v22.14.0-x64.msi
-4. 安装时勾选 **Add to PATH**
-5. 重新双击 `start.bat`
+1. 安装 **Visual Studio Build Tools**（勾选 C++ 桌面开发），然后重新运行 `npm install`。
+2. 或把已编译好的 `node_modules` 整体拷入项目根目录（适合离线部署）。
 
-**离线安装**：如果部署机无法联网，将 `node-v22.14.0-x64.msi` 放到项目根目录，双击 `start.bat` 会自动检测并安装。
+**离线安装**：离线装机请把对应版本的 `node-v25.3.0-x64.msi` 放到项目根目录，`start.bat` / `launcher.ps1` 会按目标版本自动识别。
 
 ### 问题3：npm install 网络超时
 
