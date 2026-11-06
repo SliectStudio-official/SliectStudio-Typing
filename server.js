@@ -66,24 +66,59 @@ function recordLoginFailure(key) {
 
 const publicDir = path.join(__dirname, 'public');
 
+const assetFileMeta = new Map();
+
+function hashFile(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex').slice(0, 8);
+}
+
 function buildAssetHashes() {
   const hashes = {};
   const entries = fs.readdirSync(publicDir, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isFile() || entry.name === 'service-worker.js' || !/\.(js|css)$/i.test(entry.name)) continue;
-    const content = fs.readFileSync(path.join(publicDir, entry.name));
-    hashes['/' + entry.name] = crypto.createHash('sha256').update(content).digest('hex').slice(0, 8);
+    const filePath = path.join(publicDir, entry.name);
+    const stat = fs.statSync(filePath);
+    hashes['/' + entry.name] = hashFile(filePath);
+    assetFileMeta.set('/' + entry.name, { mtimeMs: stat.mtimeMs, size: stat.size });
   }
   return hashes;
 }
 
 const assetHashes = buildAssetHashes();
-const assetVersion = crypto.createHash('sha256')
-  .update(Object.keys(assetHashes).sort().map(name => assetHashes[name]).join(''))
-  .digest('hex')
-  .slice(0, 12);
 
-const HTML_PAGES = ['/', '/index.html', '/admin.html', '/profile.html', '/setup.html'];
+function computeAssetVersion() {
+  return crypto.createHash('sha256')
+    .update(Object.keys(assetHashes).sort().map(name => assetHashes[name]).join(''))
+    .digest('hex')
+    .slice(0, 12);
+}
+let assetVersion = computeAssetVersion();
+
+// 改完 public/ 不必重启：HTML 引用资源时按 mtimeMs+size 检查，变了才重算哈希
+function getAssetHash(key, checkedKeys) {
+  const cached = assetHashes[key];
+  if (!cached) return undefined;
+  if (checkedKeys && checkedKeys.has(key)) return cached;
+  if (checkedKeys) checkedKeys.add(key);
+  const filePath = path.join(publicDir, key.slice(1));
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (e) {
+    return cached;
+  }
+  const meta = assetFileMeta.get(key);
+  if (meta && meta.mtimeMs === stat.mtimeMs && meta.size === stat.size) return cached;
+  const nextHash = hashFile(filePath);
+  assetHashes[key] = nextHash;
+  assetFileMeta.set(key, { mtimeMs: stat.mtimeMs, size: stat.size });
+  assetVersion = computeAssetVersion();
+  console.log(`[资源指纹] 检测到资源变更：${key.slice(1)} → ${nextHash}`);
+  return nextHash;
+}
+
+const HTML_PAGES = ['/', '/index.html', '/admin.html', '/profile.html', '/setup.html', '/race.html'];
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -105,11 +140,12 @@ app.get(HTML_PAGES, (req, res, next) => {
   const fileName = req.path === '/' ? 'index.html' : req.path.slice(1);
   fs.readFile(path.join(publicDir, fileName), 'utf8', (err, html) => {
     if (err) return next();
+    const checkedKeys = new Set();
     const rewritten = html.replace(/(href|src)="([^"]+)"/g, (match, attr, value) => {
       if (/^(?:https?:)?\/\//.test(value) || value.startsWith('data:')) return match;
       const clean = value.split(/[?#]/)[0];
       const key = clean.startsWith('/') ? clean : '/' + clean.replace(/^\.\//, '');
-      const hash = assetHashes[key];
+      const hash = getAssetHash(key, checkedKeys);
       if (!hash) return match;
       return `${attr}="${clean}?v=${hash}"`;
     });
@@ -480,7 +516,7 @@ function checkListRate(ip) {
   return entry.count <= RACE_LIST_MAX_HITS;
 }
 
-function buildSnapshot(room, player) {
+function buildSnapshot(room, player, spectator) {
   const sorted = Array.from(room.players.values()).sort((a, b) => {
     if (a.rank && b.rank) return a.rank - b.rank;
     if (a.rank) return -1;
@@ -491,15 +527,20 @@ function buildSnapshot(room, player) {
     race: {
       code: room.code,
       status: room.status,
+      articleId: room.articleId,
       articleTitle: room.articleTitle,
       charCount: room.charCount,
+      content: room.content,
       maxPlayers: room.maxPlayers,
       hostUserId: room.hostUserId,
       startsAt: room.startsAt,
       finishedAt: room.finishedAt,
       cancelledReason: room.cancelledReason || null,
+      allowSpectator: room.allowSpectator !== false,
+      spectatorCount: room.spectators ? room.spectators.size : 0,
       serverNow: Date.now()
     },
+    spectator: spectator ? { nickname: spectator.nickname, isGuest: !!spectator.isGuest } : null,
     me: player ? {
       userId: player.userId,
       guestId: player.guestId,
@@ -518,7 +559,11 @@ function buildSnapshot(room, player) {
       ready: p.ready,
       progress: p.progress,
       finishedAt: p.finishedAt,
-      rank: p.rank
+      rank: p.rank,
+      speed: p.speed || null,
+      accuracy: p.accuracy || null,
+      timeSeconds: p.timeSeconds || null,
+      lastSeen: p.lastSeen || null
     }))
   };
 }
@@ -620,12 +665,22 @@ function findRaceContext(req) {
   if (req.raceIsGuest) {
     const room = req.raceRoom;
     const player = room ? room.players.get('g:' + req.racePlayer.guestId) : null;
-    return { room, player };
+    let spectator = null;
+    if (!player && room && room.spectators) spectator = room.spectators.get('sg:' + req.racePlayer.guestId) || null;
+    return { room: player || spectator ? room : null, player, spectator };
   }
-  if (!req.user) return { room: null, player: null };
+  if (!req.user) return { room: null, player: null, spectator: null };
   const room = findRoomByUser(req.user.id, true) || findRoomByUser(req.user.id, false);
-  const player = room ? room.players.get('u:' + req.user.id) : null;
-  return { room, player };
+  if (room) {
+    const player = room.players.get('u:' + req.user.id);
+    if (player) return { room, player, spectator: null };
+  }
+  for (const r of roomRegistry.values()) {
+    if (r.spectators && r.spectators.has('su:' + req.user.id)) {
+      return { room: r, player: null, spectator: r.spectators.get('su:' + req.user.id) };
+    }
+  }
+  return { room: null, player: null, spectator: null };
 }
 
 async function raceAuth(req, res, next) {
@@ -642,12 +697,14 @@ async function raceAuth(req, res, next) {
   if (decoded && decoded.role === 'guest') {
     const room = findRoomByCode(decoded.raceCode);
     const player = room ? room.players.get('g:' + decoded.guestId) : null;
-    if (!player) {
+    const spectator = room && room.spectators ? room.spectators.get('sg:' + decoded.guestId) : null;
+    if (!player && !spectator) {
       return res.status(401).json({ error: '已不在该房间' });
     }
     req.raceIsGuest = true;
     req.raceRoom = room;
-    req.racePlayer = player;
+    // 观战者没有 player 记录，用 token 里的 guestId 兜住身份
+    req.racePlayer = player || { guestId: decoded.guestId };
     return next();
   }
   return authMiddleware(req, res, next);
@@ -699,8 +756,10 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
       articleId: aid, articleTitle: article.title, content: article.content, charCount: article.content.length,
       maxPlayers: mp, isPublic: isPublic !== false, passwordHash: bcrypt.hashSync(password, 10),
       createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
-      cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map()
+      cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
+      allowSpectator: isPublic === undefined ? true : true, spectators: new Map()
     };
+    room.allowSpectator = req.body && req.body.allowSpectator === false ? false : true;
     room.players.set('u:' + req.user.id, {
       userId: req.user.id, guestId: null, nickname: hostNickname, isGuest: false, ready: false,
       progress: 0, finishedAt: null, speed: null, accuracy: null, timeSeconds: null, rank: null,
@@ -768,6 +827,42 @@ app.post('/api/race/join', async (req, res) => {
       recordJoinFailure(limitKey);
       return res.status(400).json({ error: '房间不存在或密码错误' });
     }
+    // 观战身份：不受比赛名额与阶段限制
+    if (req.body && req.body.asSpectator) {
+      if (room.allowSpectator === false) {
+        return res.status(400).json({ error: '房主未开放观战' });
+      }
+      if (!room.spectators) room.spectators = new Map();
+      const maxSpec = room.maxSpectators || 8;
+      if (room.spectators.size >= maxSpec) {
+        return res.status(400).json({ error: '观战席已满' });
+      }
+      const now2 = Date.now();
+      if (realUser) {
+        const finalNick = realUser.nickname || realUser.username;
+        room.spectators.set('su:' + realUser.id, {
+          userId: realUser.id, guestId: null, nickname: finalNick, isGuest: false, joinedAt: now2, lastSeen: now2, ip
+        });
+        raceJoinFailures.delete(limitKey);
+        return res.json({ token: auth.slice(7), nickname: finalNick, raceId: room.raceId, spectator: true, state: buildSnapshot(room, null, room.spectators.get('su:' + realUser.id)) });
+      }
+      if (!nickname) {
+        return res.status(400).json({ error: '观战也需要填写昵称' });
+      }
+      const specNick = await buildGuestNickname(nickname, room);
+      if (!specNick) {
+        return res.status(400).json({ error: '昵称长度必须为 2~12 个字符' });
+      }
+      const specGuestId = generateGuestId();
+      const specExpires = Math.max(1, Math.floor((room.createdAt + RACE_GUEST_TOKEN_TTL_MS - Date.now()) / 1000));
+      const specToken = jwt.sign({ role: 'guest', guestId: specGuestId, nickname: specNick, raceCode: room.code, spectator: true }, JWT_SECRET, { expiresIn: specExpires });
+      room.spectators.set('sg:' + specGuestId, {
+        userId: null, guestId: specGuestId, nickname: specNick, isGuest: true, joinedAt: now2, lastSeen: now2, ip
+      });
+      raceJoinFailures.delete(limitKey);
+      return res.json({ token: specToken, nickname: specNick, raceId: room.raceId, spectator: true, state: buildSnapshot(room, null, room.spectators.get('sg:' + specGuestId)) });
+    }
+
     if (room.status !== 'waiting') {
       return res.status(400).json({ error: '比赛已开始，无法加入' });
     }
@@ -822,8 +917,16 @@ app.post('/api/race/join', async (req, res) => {
 
 app.post('/api/race/leave', raceAuth, async (req, res) => {
   try {
-    const { room, player } = findRaceContext(req);
-    if (!room || !player) {
+    const { room, player, spectator } = findRaceContext(req);
+    if (!room) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    if (spectator) {
+      if (spectator.isGuest) room.spectators.delete('sg:' + spectator.guestId);
+      else room.spectators.delete('su:' + spectator.userId);
+      return res.json({ success: true });
+    }
+    if (!player) {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
     if (!player.isGuest && room.hostUserId === player.userId) {
@@ -841,7 +944,7 @@ app.post('/api/race/ready', raceAuth, async (req, res) => {
   try {
     const { room, player } = findRaceContext(req);
     if (!room || !player) {
-      return res.status(400).json({ error: '你不在任何房间中' });
+      return res.status(400).json({ error: '观战身份不能准备' });
     }
     if (room.status !== 'waiting') {
       return res.status(400).json({ error: '当前阶段不能修改准备状态' });
@@ -852,6 +955,23 @@ app.post('/api/race/ready', raceAuth, async (req, res) => {
     res.json({ success: true, ready: player.ready });
   } catch (e) {
     res.status(500).json({ error: '准备操作失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/spectator-setting', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '你不在主持比赛' });
+    }
+    if (room.status === 'finished' || room.status === 'cancelled') {
+      return res.status(400).json({ error: '比赛已结束' });
+    }
+    room.allowSpectator = !!(req.body && req.body.allow);
+    room.hostLastSeen = Date.now();
+    res.json({ success: true, allowSpectator: room.allowSpectator });
+  } catch (e) {
+    res.status(500).json({ error: '设置失败: ' + e.message });
   }
 });
 
@@ -877,10 +997,17 @@ app.post('/api/race/kick', authMiddleware, async (req, res) => {
     } else {
       return res.status(400).json({ error: '请选择要踢出的玩家' });
     }
-    if (!room.players.has(key)) {
-      return res.status(404).json({ error: '玩家不在房间中' });
+    if (room.players.has(key)) {
+      room.players.delete(key);
+      room.hostLastSeen = Date.now();
+      return res.json({ success: true });
     }
-    room.players.delete(key);
+    if (room.spectators && room.spectators.has('s' + key)) {
+      room.spectators.delete('s' + key);
+      room.hostLastSeen = Date.now();
+      return res.json({ success: true });
+    }
+    return res.status(404).json({ error: '玩家不在房间中' });
     room.hostLastSeen = Date.now();
     res.json({ success: true });
   } catch (e) {
@@ -929,11 +1056,15 @@ app.post('/api/race/start', authMiddleware, async (req, res) => {
 
 app.post('/api/race/tick', raceAuth, async (req, res) => {
   try {
-    const { room, player } = findRaceContext(req);
-    if (!room || !player) {
+    const { room, player, spectator } = findRaceContext(req);
+    if (!room || (!player && !spectator)) {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
     updateRoomPhase(room);
+    if (spectator) {
+      spectator.lastSeen = Date.now();
+      return res.json(buildSnapshot(room, null, spectator));
+    }
     player.lastSeen = Date.now();
     if (!player.isGuest && room.hostUserId === player.userId) room.hostLastSeen = Date.now();
     if (room.status === 'racing' && !player.finishedAt && req.body && req.body.progress !== undefined) {
@@ -952,7 +1083,7 @@ app.post('/api/race/finish', raceAuth, async (req, res) => {
   try {
     const { room, player } = findRaceContext(req);
     if (!room || !player) {
-      return res.status(400).json({ error: '你不在任何房间中' });
+      return res.status(400).json({ error: '观战身份不能提交成绩' });
     }
     if (player.finishedAt) {
       return res.json({ rank: player.rank });
@@ -1044,6 +1175,7 @@ app.get('/api/race/:code', async (req, res) => {
       charCount: room.charCount, maxPlayers: room.maxPlayers, playerCount: room.players.size,
       hostUserId: room.hostUserId, hostNickname: room.hostNickname, isPublic: room.isPublic,
       createdAt: room.createdAt, cancelledReason: room.cancelledReason || null,
+      allowSpectator: room.allowSpectator !== false, spectatorCount: room.spectators ? room.spectators.size : 0,
       players: Array.from(room.players.values()).map(p => ({
         userId: p.userId, guestId: p.guestId, nickname: p.nickname,
         isHost: p.userId !== null && p.userId === room.hostUserId,
