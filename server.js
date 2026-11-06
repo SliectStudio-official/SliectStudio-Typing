@@ -193,20 +193,25 @@ if (!fs.existsSync(avatarDir)) {
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, avatarDir),
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = avatarExtension(file) || '.jpg';
     const safeId = String(req.user.id).replace(/[^0-9]/g, '');
     const name = safeId + '_' + Date.now() + ext;
     cb(null, name);
   }
 });
+const AVATAR_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const AVATAR_MIME_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+function avatarExtension(file) {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  if (ext) return AVATAR_EXTENSIONS.includes(ext) ? ext : '';
+  return AVATAR_MIME_EXT[String(file.mimetype || '').toLowerCase()] || '';
+}
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.gif'];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error('仅支持 jpg/png/gif 格式'));
+    if (avatarExtension(file)) cb(null, true);
+    else cb(new Error('仅支持 JPG/PNG/WebP 格式'));
   }
 });
 
@@ -2209,6 +2214,9 @@ app.put('/api/user/profile', authMiddleware, async (req, res) => {
 app.post('/api/user/avatar', authMiddleware, (req, res) => {
   upload.single('avatar')(req, res, async (err) => {
     if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: '图片不能超过 5MB' });
+      }
       return res.status(400).json({ error: err.message || '上传失败' });
     }
     if (!req.file) {
