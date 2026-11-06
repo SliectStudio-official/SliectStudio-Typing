@@ -412,33 +412,7 @@ function getDifficultyLabel(d) {
   return '';
 }
 
-function splitTextIntoSegments(text) {
-  const maxLineLength = 32; // 桌面端一行约 32 个字符，确保视觉上一行
-  const breakChars = /[\s，。！？、；：""''（）【】《》.,!?;:'"()\[\]{}]/;
-  const segs = [];
-  let start = 0;
-  while (start < text.length) {
-    // 剩余文字不足一行，直接作为最后一段
-    if (start + maxLineLength >= text.length) {
-      segs.push(text.slice(start));
-      break;
-    }
-    let end = start + maxLineLength;
-    // 强制限制长度，避免某一段过长导致换行
-    let breakAt = end;
-    // 向前查找合适的断点（至少保留一半长度，避免某行太短）
-    const minBreakAt = start + Math.floor(maxLineLength * 0.65);
-    for (let i = end; i >= minBreakAt; i--) {
-      if (breakChars.test(text[i])) {
-        breakAt = i + 1;
-        break;
-      }
-    }
-    segs.push(text.slice(start, breakAt));
-    start = breakAt;
-  }
-  return segs;
-}
+const splitTextIntoSegments = window.TypingEngine.splitTextIntoSegments;
 
 function calculateRecommendedTime(text, difficulty) {
   const charCount = text.length;

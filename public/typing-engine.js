@@ -8,23 +8,176 @@
   'use strict';
 
   var MAX_LINE = 32;
-  var BREAK_CHARS = /[\s，。！？、；：""''（）【】《》.,!?;:'"()\[\]{}]/;
+  var MIN_RATIO = 0.6;
+  var SENTENCE_ENDS = '。！？…．；.!?';
+  var COMMA_ENDS = '，、；：,;:';
+  var CLOSING = '，。！？、；：）】》”’」』〕〉,.;:!?)]}';
+  var OPENING = '（【《“‘「『〔〈([{-–—';
+  var WORD_CHAR = /[A-Za-z0-9_’'\-]/;
+  var COMBINING = /\p{M}/u;
 
-  function splitTextIntoSegments(text) {
-    var segs = [];
-    var start = 0;
-    while (start < text.length) {
-      if (start + MAX_LINE >= text.length) { segs.push(text.slice(start)); break; }
-      var end = start + MAX_LINE;
-      var breakAt = end;
-      var minBreakAt = start + Math.floor(MAX_LINE * 0.65);
-      for (var i = end; i >= minBreakAt; i--) {
-        if (BREAK_CHARS.test(text[i])) { breakAt = i + 1; break; }
-      }
-      segs.push(text.slice(start, breakAt));
-      start = breakAt;
+  function isSpace(ch) { return ch === ' ' || ch === '\t' || ch === '\u00a0'; }
+  function trimRight(s) { return s.replace(/[ \t\u00a0]+$/, ''); }
+  function codePointAdvance(text, i) {
+    if (i >= text.length) return text.length;
+    var c = text.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < text.length) return i + 2;
+    return i + 1;
+  }
+  function safeCut(text, cut, start) {
+    if (cut < start) cut = start;
+    if (cut > text.length) cut = text.length;
+    // 不要切在代理对中间
+    if (cut > start && cut < text.length) {
+      var c = text.charCodeAt(cut);
+      if (c >= 0xDC00 && c <= 0xDFFF) cut++;
     }
-    return segs;
+    // 组合字符跟着基字符走
+    while (cut < text.length && COMBINING.test(text[cut])) cut++;
+    return cut;
+  }
+  function consumeSpaces(text, i) {
+    while (i < text.length && isSpace(text[i])) i++;
+    return i;
+  }
+  function isValidCut(text, start, cut, segment) {
+    if (cut <= start || !segment) return false;
+    var prev = segment.charAt(segment.length - 1);
+    if (OPENING.indexOf(prev) >= 0) return false;
+    var next = text.slice(cut).replace(/^[ \t\u00a0]+/, '').charAt(0);
+    if (next && CLOSING.indexOf(next) >= 0) return false;
+    return true;
+  }
+
+  function splitTextIntoSegments(text, maxLen) {
+    var max = Math.max(4, parseInt(maxLen, 10) || MAX_LINE);
+    var minLen = Math.ceil(max * MIN_RATIO);
+    var blocks = String(text == null ? '' : text).split(/\r?\n/);
+    var result = [];
+
+    function splitBlock(block) {
+      var segs = [];
+      var start = 0;
+      function tailOk(cut) {
+        var rest = block.length - cut;
+        return rest === 0 || rest >= minLen;
+      }
+      while (start < block.length) {
+        var remaining = block.length - start;
+        if (remaining <= max || remaining < minLen * 2) {
+          var tail = trimRight(block.slice(start));
+          if (tail) segs.push(tail);
+          break;
+        }
+
+        var cut = null;
+
+        // a. 句末标点：断在标点之后，其后空白一并 trim 掉
+        for (var i = Math.min(block.length - 1, start + max - 1); i >= start + minLen - 1; i--) {
+          if (SENTENCE_ENDS.indexOf(block[i]) >= 0) {
+            var next = i + 1;
+            if (next >= block.length || isSpace(block[next])) {
+              var c = safeCut(block, consumeSpaces(block, i + 1), start);
+              var seg = trimRight(block.slice(start, c));
+              if (seg.length >= minLen && seg.length <= max && tailOk(c) && isValidCut(block, start, c, seg)) {
+                cut = c;
+                break;
+              }
+            }
+          }
+        }
+
+        // b. 逗号类
+        if (cut === null) {
+          for (var j = Math.min(block.length - 1, start + max - 1); j >= start + minLen - 1; j--) {
+            if (COMMA_ENDS.indexOf(block[j]) >= 0) {
+              var c2 = safeCut(block, consumeSpaces(block, j + 1), start);
+              var seg2 = trimRight(block.slice(start, c2));
+              if (seg2.length >= minLen && seg2.length <= max && tailOk(c2) && isValidCut(block, start, c2, seg2)) {
+                cut = c2;
+                break;
+              }
+            }
+          }
+        }
+
+        // c. 空白：断在空白之前，空白留在本段右端统一 trim
+        if (cut === null) {
+          for (var k = Math.min(block.length - 1, start + max); k >= start + minLen; k--) {
+            if (isSpace(block[k])) {
+              var c3 = safeCut(block, consumeSpaces(block, k), start);
+              var seg3 = trimRight(block.slice(start, c3));
+              if (seg3.length >= minLen && seg3.length <= max && tailOk(c3) && isValidCut(block, start, c3, seg3)) {
+                cut = c3;
+                break;
+              }
+            }
+          }
+        }
+
+        // d/e. 没有标点/空白：尽量在 [minLen, max] 内找一个不切单词的硬断点
+        if (cut === null) {
+          var upper = Math.min(block.length, start + max);
+          for (var h = upper; h >= start + minLen; h--) {
+            var hc = safeCut(block, h, start);
+            var hs = trimRight(block.slice(start, hc));
+            if (hs.length < minLen || hs.length > max) continue;
+            if (!tailOk(hc)) continue;
+            if (!isValidCut(block, start, hc, hs)) continue;
+            if (hc < block.length && WORD_CHAR.test(block.charAt(hc - 1)) && WORD_CHAR.test(block.charAt(hc))) continue;
+            cut = hc;
+            break;
+          }
+          // 整个窗口都在一个超长单词里：退到词首或整词过行，不切断拉丁词
+          if (cut === null) {
+            cut = safeCut(block, upper, start);
+            if (cut < block.length) {
+              var prevCh = block.charAt(cut - 1);
+              var nextCh = block.charAt(cut);
+              if (WORD_CHAR.test(prevCh) && WORD_CHAR.test(nextCh)) {
+                var wordStart = cut - 1;
+                while (wordStart > start && WORD_CHAR.test(block.charAt(wordStart - 1))) wordStart--;
+                var wordEnd = cut;
+                while (wordEnd < block.length && WORD_CHAR.test(block.charAt(wordEnd))) wordEnd++;
+                if (wordStart > start && wordStart - start >= minLen) {
+                  cut = wordStart;
+                } else if (wordEnd > cut) {
+                  cut = wordEnd;
+                }
+              }
+            }
+            cut = safeCut(block, cut, start);
+            while (cut < block.length && CLOSING.indexOf(block.charAt(cut)) >= 0) cut++;
+            while (cut > start && OPENING.indexOf(block.charAt(cut - 1)) >= 0) cut--;
+            while (cut > start && isSpace(block.charAt(cut - 1))) cut--;
+            while (cut < block.length && isSpace(block.charAt(cut))) cut++;
+          }
+        }
+
+        if (cut <= start) cut = Math.min(block.length, start + codePointAdvance(block, start));
+        var piece = trimRight(block.slice(start, cut));
+        if (!piece) {
+          cut = Math.min(block.length, start + codePointAdvance(block, start));
+          piece = block.slice(start, cut);
+        }
+        segs.push(piece);
+        start = cut;
+      }
+
+      // 孤行保护：末段不足 minLen 时并入前一段
+      if (segs.length > 1 && segs[segs.length - 1].length < minLen) {
+        segs[segs.length - 2] += segs.pop();
+      }
+      return segs;
+    }
+
+    for (var b = 0; b < blocks.length; b++) {
+      if (blocks[b]) {
+        var part = splitBlock(blocks[b]);
+        for (var p = 0; p < part.length; p++) result.push(part[p]);
+      }
+    }
+    return result;
   }
 
   function escapeChar(ch) {
