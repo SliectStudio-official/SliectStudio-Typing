@@ -1,4 +1,4 @@
-const CACHE_NAME = 'typing-practice-v7';
+let CACHE_NAME = 'typing-fallback';
 
 const CRITICAL_ASSETS = [
   '/index.html',
@@ -7,6 +7,23 @@ const CRITICAL_ASSETS = [
   '/custom-select.js',
   '/loading-indicator.js?v=2'
 ];
+
+let PRECACHE_ASSETS = CRITICAL_ASSETS;
+
+async function resolveCacheConfig() {
+  try {
+    const res = await fetch('/api/asset-version', { cache: 'no-store' });
+    if (!res.ok) throw new Error('asset-version ' + res.status);
+    const data = await res.json();
+    if (!data || !data.version || !data.files) throw new Error('asset-version invalid');
+    CACHE_NAME = 'typing-' + data.version;
+    PRECACHE_ASSETS = Object.keys(data.files).map(p => p + '?v=' + data.files[p]);
+    if (!PRECACHE_ASSETS.includes('/index.html')) PRECACHE_ASSETS.push('/index.html');
+  } catch (e) {
+    CACHE_NAME = 'typing-fallback';
+    PRECACHE_ASSETS = CRITICAL_ASSETS;
+  }
+}
 
 // 状态检测接口：仅走网络，不缓存，服务器不可达时返回 503 以触发离线提示
 const NETWORK_ONLY_API = [
@@ -181,9 +198,10 @@ async function syncPendingScores() {
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
+      await resolveCacheConfig();
       try {
         const cache = await caches.open(CACHE_NAME);
-        await cache.addAll(CRITICAL_ASSETS);
+        await cache.addAll(PRECACHE_ASSETS);
       } catch (e) {
         console.error('SW install failed:', e);
       }
@@ -199,7 +217,7 @@ self.addEventListener('activate', (event) => {
       await caches.keys().then((names) =>
         Promise.all(
           names
-            .filter((name) => name !== CACHE_NAME)
+            .filter((name) => name.startsWith('typing-') && name !== CACHE_NAME)
             .map((name) => caches.delete(name))
         )
       );
