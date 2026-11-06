@@ -32,6 +32,10 @@
       '</button>';
     // 首页的投稿按钮也由导航提供（script.js 按 id 控制显隐），其它页面保持隐藏
     right += '<button class="nav-btn" id="submit-article-btn" style="display:none;margin-right:10px">投稿</button>';
+    // 游客没有头像菜单，用单独的通知入口看公告；登录后改用头像菜单里的「通知中心」
+    right += '<button class="nav-notify-btn" id="nav-notify-btn" aria-label="通知中心" title="通知中心" style="display:' + (token ? 'none' : 'inline-flex') + '">' +
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>' +
+      '</button>';
     // 两个容器都渲染：首页 script.js 会直接读写 auth-area / user-area 的 style，
     // 少渲染一个就会在 updateAuthUI() 里抛空指针，导致加载遮罩永不消失（K-29）。
     right +=
@@ -56,6 +60,9 @@
             '<div class="user-stat"><b id="stat-chars">—</b><span>累计字数</span></div>' +
             '<div class="user-stat"><b id="stat-speed">—</b><span>平均速度</span></div>' +
           '</div>' +
+          '<button class="user-menu-item user-menu-notify" id="notify-entry" role="menuitem">' +
+            '<span>通知中心</span><span class="notify-badge" id="notify-badge" style="display:none"></span>' +
+          '</button>' +
           '<a class="user-menu-item" href="profile.html" role="menuitem">查看数据</a>' +
           '<a class="user-menu-item" href="race.html" role="menuitem">比赛大厅</a>' +
           '<button class="user-menu-item user-menu-danger" id="logout-btn" role="menuitem">退出登录</button>' +
@@ -81,6 +88,19 @@
         '<ul class="nav-links-mobile" id="mobile-nav-items">' + mobileItems + '</ul>' +
       '</div>';
 
+    var notifyDrawer =
+      '<div class="notify-drawer" id="notify-drawer" role="dialog" aria-label="通知中心" style="display:none">' +
+        '<div class="notify-drawer-head">' +
+          '<span class="notify-drawer-title">通知中心</span>' +
+          '<div class="notify-drawer-actions">' +
+            '<button class="notify-read-all" id="notify-read-all">全部标为已读</button>' +
+            '<button class="notify-close" id="notify-close" aria-label="关闭通知">&times;</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="notify-list" id="notify-list"></div>' +
+        '<div class="notify-guest-hint" id="notify-guest-hint" style="display:none">注册后可保留比赛记录</div>' +
+      '</div>';
+
     var mount = document.getElementById('site-nav');
     if (!mount) return;
     mount.innerHTML =
@@ -88,7 +108,7 @@
         '<button class="mobile-menu-toggle" id="mobile-menu-toggle" aria-label="打开菜单">' +
           '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>' +
         '</button>' + desktop +
-      '</nav>' + drawer;
+      '</nav>' + notifyDrawer + drawer;
   }
 
   function addItem(html) {
@@ -151,11 +171,160 @@
     var ch = s[0];
     return /[a-z]/.test(ch) ? ch.toUpperCase() : ch;
   }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
 
   var accountMenu = document.getElementById('user-menu');
   var avatarBtn = document.getElementById('avatar-btn');
   var menuLoaded = false;
   var appliedToken = null;
+
+  /* ---------- 通知中心 ---------- */
+  var NOTIFY_READ_KEY = 'notification_read_ids';
+  var notifyItems = [];
+  var notifyError = '';
+  var notifyLoadedAt = 0;
+  var notifyLoadedToken = null;
+  var notifyFetching = false;
+
+  function readNotifyIds() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(NOTIFY_READ_KEY) || '[]');
+      return Array.isArray(raw) ? raw : [];
+    } catch (e) { return []; }
+  }
+  function saveNotifyIds(ids) {
+    var uniq = [];
+    for (var i = 0; i < ids.length; i++) if (uniq.indexOf(ids[i]) < 0) uniq.push(ids[i]);
+    if (uniq.length > 200) uniq = uniq.slice(uniq.length - 200);
+    try { localStorage.setItem(NOTIFY_READ_KEY, JSON.stringify(uniq)); } catch (e) {}
+  }
+  function markNotifyRead(ids) {
+    if (!ids || !ids.length) return;
+    saveNotifyIds(readNotifyIds().concat(ids));
+    renderNotifyBadge();
+  }
+  function unreadNotifyCount() {
+    var read = readNotifyIds();
+    var count = 0;
+    notifyItems.forEach(function (item) { if (read.indexOf(item.id) < 0) count++; });
+    return count;
+  }
+  function renderNotifyBadge() {
+    var badge = document.getElementById('notify-badge');
+    if (!badge) return;
+    if (!localStorage.getItem('token') || notifyError) { badge.style.display = 'none'; return; }
+    var count = unreadNotifyCount();
+    if (!count) { badge.style.display = 'none'; return; }
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.style.display = 'inline-flex';
+  }
+  function renderNotifyList() {
+    var list = document.getElementById('notify-list');
+    var hint = document.getElementById('notify-guest-hint');
+    if (!list) return;
+    if (hint) hint.style.display = localStorage.getItem('token') ? 'none' : 'block';
+    if (notifyError) {
+      list.innerHTML = '<div class="notify-empty notify-error">' + esc(notifyError) + '</div>';
+      return;
+    }
+    if (!notifyItems.length) {
+      list.innerHTML = '<div class="notify-empty">暂时没有通知</div>';
+      return;
+    }
+    list.innerHTML = '';
+    notifyItems.forEach(function (item) {
+      var el = document.createElement(item.link ? 'a' : 'div');
+      el.className = 'notify-item';
+      if (item.link) el.href = item.link;
+      el.innerHTML =
+        '<div class="notify-item-title">' + esc(item.title) + '</div>' +
+        '<div class="notify-item-body">' + esc(item.body) + '</div>' +
+        '<div class="notify-item-time">' + esc(item.time) + '</div>';
+      el.addEventListener('click', function () { markNotifyRead([item.id]); });
+      list.appendChild(el);
+    });
+  }
+  function fetchNotifications(force) {
+    var tk = localStorage.getItem('token');
+    if (!tk) return Promise.resolve();
+    if (!force && notifyLoadedAt && Date.now() - notifyLoadedAt < 60000) return Promise.resolve();
+    if (notifyFetching) return Promise.resolve();
+    notifyFetching = true;
+    return fetch('/api/notifications?limit=20', { headers: { Authorization: 'Bearer ' + tk } })
+      .then(function (r) {
+        return r.json().catch(function () { return null; }).then(function (data) {
+          if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+          return data || {};
+        });
+      })
+      .then(function (data) {
+        if (localStorage.getItem('token') !== tk) return;
+        notifyItems = Array.isArray(data.items) ? data.items : [];
+        notifyError = '';
+        notifyLoadedAt = Date.now();
+        renderNotifyBadge();
+        if (document.getElementById('notify-drawer').style.display !== 'none') {
+          renderNotifyList();
+          markNotifyRead(notifyItems.map(function (item) { return item.id; }));
+        }
+      })
+      .catch(function (e) {
+        notifyItems = [];
+        notifyError = e.message || '获取通知失败';
+        renderNotifyBadge();
+        if (document.getElementById('notify-drawer').style.display !== 'none') renderNotifyList();
+      })
+      .then(function () { notifyFetching = false; });
+  }
+  function loadGuestNotifications() {
+    return fetch('/api/announcement', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        notifyError = '';
+        notifyItems = data && data.id ? [{
+          id: 'announcement:' + data.id,
+          type: 'announcement',
+          title: data.title || '站点公告',
+          body: data.content || '',
+          time: data.created_at || '',
+          link: null
+        }] : [];
+        renderNotifyList();
+      })
+      .catch(function (e) {
+        notifyItems = [];
+        notifyError = e.message || '获取公告失败';
+        renderNotifyList();
+      });
+  }
+  function openNotifyDrawer() {
+    var drawer = document.getElementById('notify-drawer');
+    if (!drawer) return;
+    closeUserMenu();
+    drawer.style.display = 'block';
+    var tk = localStorage.getItem('token');
+    if (!tk) { loadGuestNotifications(); return; }
+    if (notifyLoadedToken !== tk) {
+      notifyLoadedToken = tk;
+      notifyItems = [];
+      notifyError = '';
+      notifyLoadedAt = 0;
+    }
+    renderNotifyList();
+    fetchNotifications(false).then(function () {
+      if (drawer.style.display === 'none') return;
+      renderNotifyList();
+      markNotifyRead(notifyItems.map(function (item) { return item.id; }));
+    });
+  }
+  function closeNotifyDrawer() {
+    var drawer = document.getElementById('notify-drawer');
+    if (drawer) drawer.style.display = 'none';
+  }
 
   function openUserMenu() {
     if (!accountMenu || !avatarBtn) return;
@@ -202,8 +371,16 @@
 
   function resetAccount() {
     closeUserMenu();
+    closeNotifyDrawer();
     menuLoaded = false;
     appliedToken = null;
+    notifyLoadedToken = null;
+    notifyItems = [];
+    notifyError = '';
+    notifyLoadedAt = 0;
+    renderNotifyBadge();
+    var guestNotify = document.getElementById('nav-notify-btn');
+    if (guestNotify) guestNotify.style.display = 'inline-flex';
     var p = document.getElementById('stat-practices');
     var c = document.getElementById('stat-chars');
     var v = document.getElementById('stat-speed');
@@ -252,6 +429,15 @@
     if (roleEl) roleEl.textContent = me.role === 'admin' ? '管理员' : '普通用户';
     if (avatarBtn) avatarBtn.title = name + (me.role === 'admin' ? '（管理员）' : '');
     setNavRoleLinks(me.role === 'admin');
+    var guestNotify = document.getElementById('nav-notify-btn');
+    if (guestNotify) guestNotify.style.display = 'none';
+    if (notifyLoadedToken !== appliedToken) {
+      notifyLoadedToken = appliedToken;
+      notifyItems = [];
+      notifyError = '';
+      notifyLoadedAt = 0;
+      fetchNotifications();
+    }
   }
 
   // 首页登录/退出走弹窗与脚本内状态更新，不会重载页面；监听容器显隐变化补初始化头像菜单
@@ -289,8 +475,29 @@
       var w = document.getElementById('user-area');
       if (w && !w.contains(e.target)) closeUserMenu();
     });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeUserMenu(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { closeUserMenu(); closeNotifyDrawer(); }
+    });
   }
+
+  var notifyEntry = document.getElementById('notify-entry');
+  var guestNotifyBtn = document.getElementById('nav-notify-btn');
+  var notifyReadAll = document.getElementById('notify-read-all');
+  var notifyCloseBtn = document.getElementById('notify-close');
+  if (notifyEntry) notifyEntry.addEventListener('click', function (e) { e.stopPropagation(); openNotifyDrawer(); });
+  if (guestNotifyBtn) guestNotifyBtn.addEventListener('click', function (e) { e.stopPropagation(); openNotifyDrawer(); });
+  if (notifyReadAll) notifyReadAll.addEventListener('click', function () {
+    markNotifyRead(notifyItems.map(function (item) { return item.id; }));
+    renderNotifyList();
+  });
+  if (notifyCloseBtn) notifyCloseBtn.addEventListener('click', closeNotifyDrawer);
+  document.addEventListener('click', function (e) {
+    var drawer = document.getElementById('notify-drawer');
+    if (!drawer || drawer.style.display === 'none') return;
+    if (drawer.contains(e.target)) return;
+    if ((notifyEntry && notifyEntry.contains(e.target)) || (guestNotifyBtn && guestNotifyBtn.contains(e.target))) return;
+    closeNotifyDrawer();
+  });
 
   var userAreaEl = document.getElementById('user-area');
   if (userAreaEl && window.MutationObserver) {

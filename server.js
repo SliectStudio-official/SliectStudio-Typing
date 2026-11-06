@@ -2388,6 +2388,53 @@ app.get('/api/announcement', async (req, res) => {
   }
 });
 
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+    const items = [];
+    const announcement = await getActiveAnnouncement();
+    if (announcement) {
+      items.push({
+        id: 'announcement:' + announcement.id,
+        type: 'announcement',
+        title: announcement.title || '站点公告',
+        body: announcement.content || '',
+        time: announcement.created_at || '',
+        link: null
+      });
+    }
+    const rows = await db.all(
+      `SELECT r.code, r.status, r.char_count, r.finished_at, r.created_at,
+              rp.rank_no, rp.speed, rp.accuracy,
+              (SELECT COUNT(*) FROM race_participants rp2 WHERE rp2.race_id = r.id) AS total_players
+       FROM race_participants rp
+       JOIN races r ON r.id = rp.race_id
+       WHERE rp.user_id = ? AND r.status IN ('finished', 'aborted')
+       ORDER BY r.finished_at DESC, r.id DESC
+       LIMIT 10`,
+      req.user.id
+    );
+    for (const row of rows) {
+      const rank = row.rank_no == null ? '—' : row.rank_no;
+      const speed = row.speed == null ? '—' : Math.round(row.speed);
+      const accuracy = row.accuracy == null ? '—' : Math.round(row.accuracy);
+      items.push({
+        id: 'race:' + row.code,
+        type: 'race',
+        title: '比赛 ' + row.code + (row.status === 'aborted' ? ' 已中断' : ' 已结束'),
+        body: '你第 ' + rank + ' 名 / 共 ' + (row.total_players || 0) + ' 人 · ' +
+          (row.char_count || 0) + ' 字 · ' + speed + ' 字/分 · ' + accuracy + '%',
+        time: row.finished_at || row.created_at || '',
+        link: 'race.html?code=' + encodeURIComponent(row.code)
+      });
+    }
+    items.sort((a, b) => String(b.time).localeCompare(String(a.time)));
+    res.json({ items: items.slice(0, limit) });
+  } catch (e) {
+    res.status(500).json({ error: '获取通知失败' });
+  }
+});
+
 app.get('/api/admin/announcements', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const rows = await db.all(`SELECT * FROM announcements ORDER BY ${coalesceEmptyDesc('created_at', db)} DESC, id DESC`);
