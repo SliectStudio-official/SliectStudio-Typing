@@ -64,6 +64,27 @@ function recordLoginFailure(key) {
   }
 }
 
+const publicDir = path.join(__dirname, 'public');
+
+function buildAssetHashes() {
+  const hashes = {};
+  const entries = fs.readdirSync(publicDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || entry.name === 'service-worker.js' || !/\.(js|css)$/i.test(entry.name)) continue;
+    const content = fs.readFileSync(path.join(publicDir, entry.name));
+    hashes['/' + entry.name] = crypto.createHash('sha256').update(content).digest('hex').slice(0, 8);
+  }
+  return hashes;
+}
+
+const assetHashes = buildAssetHashes();
+const assetVersion = crypto.createHash('sha256')
+  .update(Object.keys(assetHashes).sort().map(name => assetHashes[name]).join(''))
+  .digest('hex')
+  .slice(0, 12);
+
+const HTML_PAGES = ['/', '/index.html', '/admin.html', '/profile.html', '/setup.html'];
+
 app.use(compression({
   level: 9,
   threshold: 256,
@@ -73,7 +94,23 @@ app.use(compression({
   }
 }));
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public'), {
+app.get(HTML_PAGES, (req, res, next) => {
+  const fileName = req.path === '/' ? 'index.html' : req.path.slice(1);
+  fs.readFile(path.join(publicDir, fileName), 'utf8', (err, html) => {
+    if (err) return next();
+    const rewritten = html.replace(/(href|src)="([^"]+)"/g, (match, attr, value) => {
+      if (/^(?:https?:)?\/\//.test(value) || value.startsWith('data:')) return match;
+      const clean = value.split(/[?#]/)[0];
+      const key = clean.startsWith('/') ? clean : '/' + clean.replace(/^\.\//, '');
+      const hash = assetHashes[key];
+      if (!hash) return match;
+      return `${attr}="${clean}?v=${hash}"`;
+    });
+    res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    res.type('html').send(rewritten);
+  });
+});
+app.use(express.static(publicDir, {
   maxAge: '7d',
   etag: true,
   lastModified: true,
@@ -1778,6 +1815,10 @@ try {
 
 app.get('/api/version', (req, res) => {
   res.json(versionInfo);
+});
+
+app.get('/api/asset-version', (req, res) => {
+  res.json({ version: assetVersion, files: assetHashes });
 });
 
 app.use((err, req, res, next) => {
