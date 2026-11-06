@@ -254,6 +254,17 @@
       list.appendChild(el);
     });
   }
+  function readJson(res, url) {
+    var ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.indexOf('application/json') < 0) {
+      console.error('[接口] 非 JSON 响应', url || res.url, res.status);
+      return Promise.reject(new Error('接口返回异常（HTTP ' + res.status + '），请刷新重试'));
+    }
+    return res.json().catch(function () {
+      console.error('[接口] JSON 解析失败', url || res.url, res.status);
+      throw new Error('接口返回异常（HTTP ' + res.status + '），请刷新重试');
+    });
+  }
   function fetchNotifications(force) {
     var tk = localStorage.getItem('token');
     if (!tk) return Promise.resolve();
@@ -262,7 +273,7 @@
     notifyFetching = true;
     return fetch('/api/notifications?limit=20', { headers: { Authorization: 'Bearer ' + tk } })
       .then(function (r) {
-        return r.json().catch(function () { return null; }).then(function (data) {
+        return readJson(r, '/api/notifications').then(function (data) {
           if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
           return data || {};
         });
@@ -288,7 +299,7 @@
   }
   function loadGuestNotifications() {
     return fetch('/api/announcement', { cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) { return r.ok ? readJson(r) : null; })
       .then(function (data) {
         notifyError = '';
         notifyItems = data && data.id ? [{
@@ -347,7 +358,7 @@
     var tk = localStorage.getItem('token');
     if (!tk) return;
     fetch('/api/user/stats', { headers: { Authorization: 'Bearer ' + tk } })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) { return r.ok ? readJson(r) : null; })
       .then(function (s) {
         if (!s) return;
         var practices = s.totalPractices || 0;
@@ -454,7 +465,7 @@
     appliedToken = tk;
     menuLoaded = false;
     fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + tk } })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) { return r.ok ? readJson(r) : null; })
       .then(function (me) {
         if (localStorage.getItem('token') !== tk) return;
         if (!me) { appliedToken = null; return; }
@@ -561,7 +572,7 @@
     if (!tk) { clearMatchBar(); return; }
     fetch('/api/race/match/status', { headers: { Authorization: 'Bearer ' + tk } })
       .then(function (r) {
-        return r.json().catch(function () { return null; }).then(function (data) {
+        return readJson(r, '/api/race/match/status').then(function (data) {
           if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
           return data;
         });

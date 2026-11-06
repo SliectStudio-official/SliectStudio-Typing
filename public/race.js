@@ -26,6 +26,17 @@
     clearTimeout(el._t);
     el._t = setTimeout(function () { el.style.display = 'none'; }, 2800);
   }
+  function readJson(res, url) {
+    var ct = (res.headers.get('content-type') || '').toLowerCase();
+    if (ct.indexOf('application/json') < 0) {
+      console.error('[接口] 非 JSON 响应', url || res.url, res.status);
+      return Promise.reject(new Error('接口返回异常（HTTP ' + res.status + '），请刷新重试'));
+    }
+    return res.json().catch(function () {
+      console.error('[接口] JSON 解析失败', url || res.url, res.status);
+      throw new Error('接口返回异常（HTTP ' + res.status + '），请刷新重试');
+    });
+  }
   function api(path, opts) {
     opts = opts || {};
     var headers = { 'Content-Type': 'application/json' };
@@ -35,9 +46,7 @@
       method: opts.method || 'GET', headers: headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body)
     }).then(function (r) {
-      return r.text().then(function (t) {
-        var data = null;
-        try { data = t ? JSON.parse(t) : null; } catch (e) { data = { error: t }; }
+      return readJson(r, path).then(function (data) {
         if (!r.ok) { var err = new Error((data && data.error) || ('HTTP ' + r.status)); err.status = r.status; throw err; }
         return data;
       });

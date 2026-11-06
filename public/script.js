@@ -34,6 +34,20 @@ const RENDER_BUFFER_BEFORE = 50;
 const RENDER_BUFFER_AFTER = 100;
 const VIRTUAL_THRESHOLD = 200;
 
+async function readJson(res, url) {
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  if (!ct.includes('application/json')) {
+    console.error('[接口] 非 JSON 响应', url || res.url, res.status);
+    throw new Error('接口返回异常（HTTP ' + res.status + '），请刷新重试');
+  }
+  try {
+    return await res.json();
+  } catch (e) {
+    console.error('[接口] JSON 解析失败', url || res.url, res.status);
+    throw new Error('接口返回异常（HTTP ' + res.status + '），请刷新重试');
+  }
+}
+
 const articleSelect = document.getElementById('article-select');
 const categoryFilter = document.getElementById('category-filter');
 const difficultyFilter = document.getElementById('difficulty-filter');
@@ -144,7 +158,7 @@ async function checkAuth() {
   try {
     const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } });
     if (res.ok) {
-      currentUser = await res.json();
+      currentUser = await readJson(res);
     } else {
       currentUser = null;
       localStorage.removeItem('token');
@@ -239,7 +253,7 @@ loginSubmit.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (res.ok) {
       localStorage.setItem('token', data.token);
       currentUser = data.user;
@@ -276,7 +290,7 @@ registerSubmit.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, email, password })
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (res.ok) {
       localStorage.setItem('token', data.token);
       currentUser = data.user;
@@ -298,7 +312,7 @@ logoutBtn.addEventListener('click', () => {
 
 async function fetchCategories() {
   const res = await fetch('/api/categories');
-  categories = await res.json();
+  categories = await readJson(res);
   renderCategoryFilter();
   renderLbCategoryFilter();
   renderSubmitCategorySelect();
@@ -381,7 +395,7 @@ async function fetchArticles(categoryId, difficulty) {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    articles = await res.json();
+    articles = await readJson(res);
     isOfflineArticles = false;
     // 在线时触发 SW 同步离线文章缓存，确保 IndexedDB 与数据库一致
     const ctrl = await getSWController();
@@ -398,7 +412,7 @@ async function fetchArticleDetail(id) {
   try {
     const res = await fetch('/api/articles/' + id);
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
+    return await readJson(res);
   } catch (e) {
     const cached = await getCachedArticlesFromSW();
     const article = cached.find(a => a.id == id && (!a.source || a.source === 'global'));
@@ -989,7 +1003,7 @@ submitScoreBtn.addEventListener('click', async () => {
       submitScoreBtn.disabled = true;
       if (currentUser) fetchMyScores();
     } else {
-      const data = await res.json();
+      const data = await readJson(res);
       submitMsg.textContent = '提交失败：' + (data.error || '未知错误');
     }
   } catch (e) {
@@ -1002,7 +1016,7 @@ async function fetchMyScores() {
   try {
     const res = await fetch('/api/my-scores', { headers: { 'Authorization': 'Bearer ' + getToken() } });
     if (res.ok) {
-      const scores = await res.json();
+      const scores = await readJson(res);
       renderHistory(scores);
     }
   } catch (e) {}
@@ -1036,7 +1050,7 @@ async function fetchPrivateArticles() {
   try {
     const res = await fetch('/api/user/private-articles', { headers: { 'Authorization': 'Bearer ' + getToken() } });
     if (res.ok) {
-      privateArticles = await res.json();
+      privateArticles = await readJson(res);
       renderPrivateArticleSelect();
     }
   } catch (e) {}
@@ -1152,7 +1166,7 @@ async function fetchLeaderboard() {
       url = '/api/leaderboard?' + params.join('&');
     }
     const res = await fetch(url);
-    const data = await res.json();
+    const data = await readJson(res);
     renderLeaderboard(data);
   } catch (e) {
     lbTbody.innerHTML = '';
@@ -1217,7 +1231,7 @@ submitArticleConfirm.addEventListener('click', async () => {
       headers: apiHeaders(),
       body: JSON.stringify({ title, category_id: categoryId, content })
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (res.ok) {
       submitArticleModal.style.display = 'none';
       alert('投稿成功，等待审核');
@@ -1296,7 +1310,7 @@ function checkErrorPracticeMode() {
 async function loadBootstrapStatus() {
   try {
     const res = await fetch('/api/bootstrap/status');
-    const data = await res.json();
+    const data = await readJson(res);
     if (data.needsBootstrap) {
       window.location.href = 'setup.html';
       return true;
@@ -1308,7 +1322,7 @@ async function loadBootstrapStatus() {
 async function loadVersion() {
   try {
     const res = await fetch('/api/version');
-    const data = await res.json();
+    const data = await readJson(res);
     const footer = document.getElementById('site-footer');
     if (footer && data.fullName) {
       footer.textContent = data.fullName;
