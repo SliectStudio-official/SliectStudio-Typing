@@ -311,10 +311,7 @@
     if (st === 'cancelled') {
       stopPolling();
       var reason = snap.race.cancelledReason;
-      var reasonText = '房间已解散' + (reason === 'admin' ? '（管理员操作）' : '');
-      if (reason === 'all_disconnected') reasonText = '房间因所有选手离线已结束';
-      else if (reason === 'all_left') reasonText = '所有选手已退出，房间已结束';
-      else if (reason === 'vote_dissolved') reasonText = '房主发起的解散投票已通过，本局结束';
+      var reasonText = CANCELLED_TEXT[reason] || '房间已结束';
       toast(reasonText);
       backToLobby();
       return;
@@ -860,56 +857,90 @@
   }
 
   /* ---------- 顶部退出入口 ---------- */
+  var CANCELLED_TEXT = {
+    host_leave: '房主已解散房间',
+    host_disconnect: '房主长时间离线，房间已解散',
+    all_left: '选手都已离开，房间已结束',
+    all_disconnected: '所有选手离线，房间已结束',
+    time_limit: '比赛超时，已结束',
+    dissolve_direct: '房主已解散本局',
+    vote_dissolved: '解散投票已通过，本局结束',
+    admin: '管理员已解散房间'
+  };
+
   function exitConfig(snap) {
     var isHost = !!snap && isHostSnap(snap);
     var seat = snap ? mySeat(snap) : (state.isSpectator ? 'spectator' : 'player');
     var st = snap && snap.race ? snap.race.status : 'waiting';
-    if (!isHost && seat === 'spectator') {
-      return {
-        label: '退出观战', confirm: '退出观战',
-        title: '退出观战',
-        text: '退出后不再占用观战席，比赛照常进行。'
-      };
+    var playerCount = snap && snap.players ? snap.players.length : 0;
+    var spectatorFromPlayer = !!(snap && snap.spectator && snap.spectator.fromPlayer);
+    if (seat === 'spectator') {
+      if (st === 'waiting' && (isHost || spectatorFromPlayer)) {
+        return { label: '回到选手席', confirm: '', title: '', text: '', action: 'spectateLeave', danger: false };
+      }
+      if (!isHost) {
+        return {
+          label: '退出观战', confirm: '退出观战', title: '退出观战',
+          text: '退出后不再占用观战席，比赛照常进行。', action: 'leave', danger: false
+        };
+      }
     }
-    if (st === 'waiting' && isHost) {
+    if (st === 'waiting' && isHost && seat === 'player') {
+      if (playerCount >= 3) {
+        return { label: '发起解散投票', confirm: '', title: '', text: '', action: 'dissolve', danger: true };
+      }
       return {
-        label: '退出比赛', confirm: '退出并解散',
-        title: '退出并解散房间',
-        text: '你是房主，退出后<strong>房间将解散</strong>，其他选手会被请回大厅。'
+        label: '解散房间', confirm: '解散房间', title: '解散房间',
+        text: '你是房主，解散后<strong>所有选手会被请回大厅</strong>，本局不产生成绩。',
+        action: 'leave', danger: true
       };
     }
     if (st === 'waiting') {
       return {
-        label: '退出比赛', confirm: '退出',
-        title: '退出比赛',
-        text: '退出后本局不再保留你的席位。'
+        label: '退出比赛', confirm: '退出', title: '退出比赛',
+        text: '退出后本局不再保留你的席位。', action: 'leave', danger: false
       };
     }
     if (st === 'countdown' || st === 'racing') {
+      var text = '比赛已开始，退出后本局记为<strong>中途退出</strong>：不计名次、不计成绩，且不能重新加入本局。';
+      if (isHost) text += '房主身份将转给剩余选手中最早加入的一位，<strong>房间不会解散</strong>。';
       return {
-        label: '退出比赛', confirm: '确认退出',
-        title: '退出比赛',
-        text: '比赛已开始，退出后本局记为<strong>中途退出</strong>：不计名次、不计成绩，且不能重新加入本局。'
+        label: '退出比赛', confirm: '确认退出', title: '退出比赛',
+        text: text, action: 'leave', danger: false
       };
     }
     return {
-      label: '退出比赛', confirm: '退出',
-      title: '退出比赛',
-      text: '返回大厅并关闭本房间。'
+      label: '退出', confirm: '退出', title: '退出比赛',
+      text: '返回大厅并关闭本房间。', action: 'leave', danger: false
     };
   }
   function updateRaceChrome() {
     var hasRoom = !!state.code;
     $('race-subnav-center').style.display = hasRoom ? 'block' : 'none';
-    $('btn-exit-race').style.display = hasRoom ? 'inline-flex' : 'none';
-    var canDissolve = hasRoom && state.snap && isHostSnap(state.snap) &&
-      ['waiting', 'countdown', 'racing'].indexOf(state.snap.race.status) >= 0;
+    var snap = state.snap;
+    var isHost = !!(snap && isHostSnap(snap));
+    var seat = snap ? mySeat(snap) : (state.isSpectator ? 'spectator' : 'player');
+    var st = snap && snap.race ? snap.race.status : 'waiting';
+    var playerCount = snap && snap.players ? snap.players.length : 0;
+    var hostWaitingVote = isHost && seat === 'player' && st === 'waiting' && playerCount >= 3;
+    var canDissolve = hasRoom && isHost && ((hostWaitingVote) || st === 'countdown' || st === 'racing');
     var dissolveBtn = $('btn-dissolve-race');
-    if (dissolveBtn) dissolveBtn.style.display = canDissolve ? 'inline-flex' : 'none';
+    if (dissolveBtn) {
+      dissolveBtn.style.display = canDissolve ? 'inline-flex' : 'none';
+      dissolveBtn.textContent = '发起解散投票';
+    }
+    var showExit = hasRoom && !(isHost && seat === 'player' && st === 'waiting' && playerCount >= 3);
+    $('btn-exit-race').style.display = showExit ? 'inline-flex' : 'none';
     if (!hasRoom) return;
-    var label = exitConfig(state.snap).label;
-    if (window.innerWidth <= 480) label = '退出';
+    var cfg = exitConfig(state.snap);
+    var label = cfg.label;
+    if (window.innerWidth <= 480) {
+      if (cfg.danger) label = '解散';
+      else if (label === '回到选手席') label = '返回';
+      else if (label !== '退出观战') label = '退出';
+    }
     $('btn-exit-race').textContent = label;
+    $('btn-exit-race').classList.toggle('race-btn-danger', !!cfg.danger);
   }
   var exitReturnFocus = null;
   function openExitDialog() {
@@ -930,6 +961,8 @@
   }
   function confirmExitRace() {
     closeExitDialog(false);
+    var cfg = exitConfig(state.snap);
+    if (cfg.action === 'spectateLeave') { spectateSelf('leave'); return; }
     leaveRoom();
   }
 
@@ -1158,7 +1191,12 @@
     };
     $('btn-leave2').onclick = leaveRoom;
     $('btn-back-lobby').onclick = leaveRoom;
-    $('btn-exit-race').onclick = openExitDialog;
+    $('btn-exit-race').onclick = function () {
+      var cfg = exitConfig(state.snap);
+      if (cfg.action === 'spectateLeave') { spectateSelf('leave'); return; }
+      if (cfg.action === 'dissolve') { openDissolveDialog(); return; }
+      openExitDialog();
+    };
     $('btn-dissolve-race').onclick = openDissolveDialog;
     $('race-dissolve-cancel').onclick = function () { closeDissolveDialog(true); };
     $('race-dissolve-confirm').onclick = confirmDissolve;

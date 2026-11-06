@@ -4520,3 +4520,17 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 .race-max-quick-btn:hover { background: var(--glass-bg-hover); color: var(--ink); }
 .race-max-quick-btn.active { border-color: var(--primary); color: var(--primary-active); background: var(--primary-lightest); }
 .race-max-hint { font-size: 12px; color: var(--body); }
+
+/* P21.1：危险按钮必须压过通用 .race-btn / .btn-primary 的表面样式 */
+.race-btn.race-btn-danger,
+.btn-primary.race-btn-danger {
+  background: transparent;
+  border: 1px solid var(--semantic-error);
+  color: var(--semantic-error);
+}
+.race-btn.race-btn-danger:hover:not(:disabled),
+.btn-primary.race-btn-danger:hover:not(:disabled) {
+  background: var(--primary-lightest);
+  border-color: var(--semantic-error);
+  color: var(--semantic-error);
+}
