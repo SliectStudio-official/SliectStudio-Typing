@@ -145,7 +145,6 @@ body {
   .pending-article-item,
   .private-article-item,
   .profile-header,
-  .sidebar,
   .modal,
   .auth-modal,
   .chart-container,
@@ -1145,6 +1144,42 @@ textarea {
   min-height: 0; overflow-y: auto; padding: 14px 18px 18px;
 }
 .lb-table-wrap { min-width: 0; }
+.lb-table { table-layout: fixed; }
+.lb-table .lb-col-rank { width: 6%; }
+.lb-table .lb-col-name { width: 23%; }
+.lb-table .lb-col-speed { width: 14%; }
+.lb-table .lb-col-acc { width: 12%; }
+.lb-table .lb-col-article { width: 31%; }
+.lb-table .lb-col-date { width: 14%; }
+.lb-table th.lb-col-speed, .lb-table td.lb-col-speed,
+.lb-table th.lb-col-acc, .lb-table td.lb-col-acc { white-space: nowrap; }
+.lb-table th.lb-col-name, .lb-table td.lb-col-name,
+.lb-table th.lb-col-article, .lb-table td.lb-col-article {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lb-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-strong);
+}
+.lb-avatar, .lb-guest-avatar { flex: 0 0 auto; }
+@media (max-width: 768px) {
+  .lb-table .lb-col-article, .lb-table .lb-col-date { display: none; }
+  .lb-table .lb-col-rank { width: 8%; }
+  .lb-table .lb-col-name { width: 48%; }
+  .lb-table .lb-col-speed { width: 24%; }
+  .lb-table .lb-col-acc { width: 20%; }
+  .lb-modal { width: min(960px, 94vw); }
+}
+@media (max-width: 480px) {
+  .lb-modal { width: calc(100vw - 24px); max-height: 86vh; }
+  .lb-table .lb-col-acc { display: none; }
+  .lb-table .lb-col-rank { width: 12%; }
+  .lb-table .lb-col-name { width: 56%; }
+  .lb-table .lb-col-speed { width: 32%; }
+  .lb-modal-header, .lb-modal-body { padding-left: 12px; padding-right: 12px; }
+}
+
 .lb-table {
   width: 100%;
   border-collapse: collapse;
@@ -4359,7 +4394,6 @@ button:focus-visible,
 .user-menu-danger { color: var(--primary-active); }
 .user-menu-danger:hover { background: var(--primary-lightest); }
 .user-menu-race-stats { margin-top: 0; }
-.user-menu-race-stats .user-stat span { color: var(--body); }
 .user-menu-notify { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notify-badge {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
@@ -4450,4 +4484,25 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .user-menu, .user-menu.open { transition: none; filter: none; transform: none; }
+}
+
+/* ===== 解散比赛投票（H 组） ===== */
+.race-dissolve-card { color: var(--body); }
+.race-dissolve-title { font-family: var(--font-display); font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.race-dissolve-blocks { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.race-dissolve-seg { flex: 1 1 0; min-width: 18px; height: 8px; border-radius: 6px; background: var(--hairline-strong); }
+.race-dissolve-seg.filled { background: var(--primary); }
+.race-dissolve-count { font-size: 13px; color: var(--body); }
+.race-dissolve-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.race-dissolve-actions .race-btn { white-space: nowrap; }
+.race-dissolve-agree.is-selected,
+.race-dissolve-reject.is-selected { color: var(--ink); background: var(--primary-lightest); border-color: var(--primary); }
+.race-dissolve-reject.is-selected { border-color: var(--muted-soft); background: var(--surface-strong); }
+.race-dissolve-readonly { font-size: 12.5px; color: var(--body); }
+.race-dissolve-withdraw { margin-left: auto; }
+@media (max-width: 480px) {
+  .race-dissolve-actions { flex-wrap: nowrap; }
+  .race-dissolve-actions .race-btn { flex: 1 1 0; min-width: 0; }
+  .race-dissolve-withdraw { margin-left: 0; }
+  .race-dissolve-blocks { flex-wrap: wrap; }
 }

@@ -17,6 +17,7 @@
       <span class="race-code-chip" id="race-code-chip"></span>
     </div>
     <div class="race-subnav-actions" id="race-subnav-actions">
+      <button class="race-btn race-btn-small race-btn-danger" id="btn-dissolve-race" style="display:none">解散比赛</button>
       <button class="race-btn race-btn-small race-btn-danger" id="btn-exit-race" style="display:none">退出比赛</button>
     </div>
   </div>
@@ -124,6 +125,7 @@
           </aside>
         </div>
       </div>
+      <div class="section-card race-dissolve-wait" id="race-dissolve-wait" style="display:none"></div>
     </section>
 
     <!-- 比赛中 -->
@@ -148,6 +150,7 @@
             <div class="race-side-meta" id="race-spectator-live-count"></div>
             <div class="race-mine" id="race-spectator-live-list"></div>
           </div>
+          <div class="race-side-block race-dissolve-block" id="race-dissolve-block" style="display:none"></div>
         </aside>
         <div class="race-main">
           <div class="race-countdown" id="race-countdown" style="display:none"></div>
@@ -176,6 +179,7 @@
             <div class="race-side-label">观战席</div>
             <div class="race-mine" id="spec-audience"></div>
           </div>
+          <div class="race-side-block race-dissolve-block" id="race-dissolve-spectate" style="display:none"></div>
         </aside>
         <div class="race-main">
           <div class="race-side-label" style="margin-bottom:12px">全场实时战况</div>
@@ -199,6 +203,18 @@
   </div>
 
   <div id="race-toast" class="race-toast" style="display:none"></div>
+
+  <!-- 解散比赛二次确认 -->
+  <div class="modal-overlay race-exit-overlay" id="race-dissolve-overlay" style="display:none">
+    <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="race-dissolve-title">
+      <h3 id="race-dissolve-title">解散比赛</h3>
+      <p id="race-dissolve-text"></p>
+      <div class="btn-group">
+        <button class="btn-secondary" id="race-dissolve-cancel">取消</button>
+        <button class="btn-primary race-btn-danger" id="race-dissolve-confirm">发起解散</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 退出比赛二次确认 -->
   <div class="modal-overlay race-exit-overlay" id="race-exit-overlay" style="display:none">

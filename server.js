@@ -383,6 +383,7 @@ const RACE_GUEST_LIMIT = 4;
 const RACE_OFFLINE_RACING_MS = 60 * 1000;
 const RACE_OFFLINE_COUNTDOWN_MS = 30 * 1000;
 const RACE_OFFLINE_WAITING_MS = 120 * 1000;
+const RACE_DISSOLVE_MS = 30 * 1000;
 const roomRegistry = new Map();
 const raceJoinFailures = new Map();
 const raceListHits = new Map();
@@ -587,6 +588,81 @@ function markAbandoned(room, player) {
   });
 }
 
+function dissolveNeeded(total) {
+  return Math.floor(total / 2) + 1;
+}
+
+function dissolveAgreed(room) {
+  if (!room.dissolve) return 0;
+  let n = 0;
+  for (const vote of room.dissolve.voters.values()) if (vote === 'agree') n += 1;
+  return n;
+}
+
+function dissolveView(room, player) {
+  const d = room.dissolve;
+  if (!d) return null;
+  return {
+    active: true,
+    needed: d.needed,
+    agreed: dissolveAgreed(room),
+    total: d.total,
+    expiresAt: d.expiresAt,
+    myVote: player && d.voters.has(playerMapKey(player)) ? d.voters.get(playerMapKey(player)) : null,
+    initiatorNickname: d.byNickname
+  };
+}
+
+function setDissolveNotice(room, type, reason) {
+  const d = room.dissolve;
+  room.dissolveNotice = {
+    type: type,
+    reason: reason || null,
+    agreed: d ? dissolveAgreed(room) : 0,
+    needed: d ? d.needed : 0,
+    total: d ? d.total : 0,
+    at: Date.now()
+  };
+}
+
+function invalidateDissolve(room, type, reason) {
+  if (!room.dissolve) return false;
+  setDissolveNotice(room, type || 'cancelled', reason || null);
+  room.dissolve = null;
+  return true;
+}
+
+function expireDissolveIfNeeded(room, now) {
+  if (!room.dissolve) return false;
+  if (now < room.dissolve.expiresAt) return false;
+  setDissolveNotice(room, 'expired', 'timeout');
+  console.warn('[解散投票] 超时未通过', {
+    code: room.code, agreed: dissolveAgreed(room), needed: room.dissolve.needed, total: room.dissolve.total
+  });
+  room.dissolve = null;
+  return true;
+}
+
+function refreshDissolveForRoster(room) {
+  if (!room.dissolve) return false;
+  const keys = new Set(Array.from(room.players.keys()));
+  for (const key of Array.from(room.dissolve.voters.keys())) {
+    if (!keys.has(key)) room.dissolve.voters.delete(key);
+  }
+  room.dissolve.total = room.players.size;
+  room.dissolve.needed = dissolveNeeded(room.players.size);
+  if (room.dissolve.total < 3) return true;
+  return dissolveAgreed(room) >= room.dissolve.needed;
+}
+
+async function afterDissolveRosterChange(room) {
+  if (!room.dissolve) return;
+  if (refreshDissolveForRoster(room)) {
+    room.dissolve = null;
+    await cancelRoom(room, 'vote_dissolved', null);
+  }
+}
+
 async function isNicknameTakenByUser(lower) {
   const row = await db.get('SELECT id FROM users WHERE LOWER(username) = ? OR LOWER(nickname) = ? LIMIT 1', lower, lower);
   return !!row;
@@ -636,7 +712,8 @@ async function createMatchedRoom(first, second, article) {
     maxPlayers: 2, isPublic: false, passwordHash: null,
     createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
-    allowSpectator: true, spectators: new Map(), matchmade: true, abandonedPlayers: []
+    allowSpectator: true, spectators: new Map(), matchmade: true, abandonedPlayers: [],
+    dissolve: null, dissolveNotice: null
   };
   initSpectatorState(room);
   [first, second].forEach(function (entry) {
@@ -843,7 +920,9 @@ function buildSnapshot(room, player, spectator) {
     spectators: spectatorList,
     abandonedPlayers: Array.from(room.abandonedPlayers || []).map(function (p) {
       return { nickname: p.nickname, isGuest: !!p.isGuest, atChar: p.atChar || 0 };
-    })
+    }),
+    dissolve: dissolveView(room, player),
+    dissolveNotice: room.dissolveNotice || null
   };
 }
 
@@ -896,6 +975,7 @@ async function upsertParticipant(room, player) {
 
 async function finalizeRoom(room, reason) {
   if (room.status === 'finished' || room.status === 'cancelled') return;
+  room.dissolve = null;
   updateRoomPhase(room);
   const players = Array.from(room.players.values());
   const finished = players.filter(p => p.finishedAt).sort((a, b) => a.rank - b.rank);
@@ -945,6 +1025,7 @@ async function cleanupRooms() {
       if (room.status === 'racing' && room.charCount > 0 && now - room.startsAt > room.charCount * 2 * 60 * 1000) {
         await finalizeRoom(room, 'time_limit');
       }
+      if (room.dissolve) expireDissolveIfNeeded(room, now);
     }
     if ((room.status === 'finished' && room.finishedAt && now - room.finishedAt > RACE_ROOM_GRACE_MS) ||
         (room.status === 'cancelled' && room.cancelledAt && now - room.cancelledAt > RACE_ROOM_GRACE_MS)) {
@@ -1081,7 +1162,7 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
       createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
       cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
       allowSpectator: isPublic === undefined ? true : true, spectators: new Map(),
-      abandonedPlayers: []
+      abandonedPlayers: [], dissolve: null, dissolveNotice: null
     };
     room.allowSpectator = req.body && req.body.allowSpectator === false ? false : true;
     room.spectatorEnabled = room.allowSpectator;
@@ -1352,6 +1433,7 @@ app.post('/api/race/leave', raceAuth, async (req, res) => {
       const isHost = isSpectatorHost(room, spectator);
       room.spectators.delete(spectatorMapKey(spectator));
       if (isHost) {
+        invalidateDissolve(room, 'cancelled', 'host_leave');
         if (room.status === 'waiting') {
           await cancelRoom(room, 'host_leave', spectator.userId);
         } else {
@@ -1369,9 +1451,12 @@ app.post('/api/race/leave', raceAuth, async (req, res) => {
     if (room.status === 'waiting') {
       room.players.delete(key);
       if (wasHost) {
+        invalidateDissolve(room, 'cancelled', 'host_leave');
         await cancelRoom(room, 'host_leave', player.userId);
       } else if (room.players.size === 0) {
         await cancelRoom(room, 'all_left', null);
+      } else {
+        await afterDissolveRosterChange(room);
       }
       return res.json({ success: true });
     }
@@ -1381,9 +1466,14 @@ app.post('/api/race/leave', raceAuth, async (req, res) => {
     }
     markAbandoned(room, player);
     room.players.delete(key);
-    if (wasHost) transferHostToEarliest(room, now);
+    if (wasHost) {
+      invalidateDissolve(room, 'cancelled', 'host_leave');
+      transferHostToEarliest(room, now);
+    }
     if (room.players.size === 0) {
       await cancelRoom(room, 'all_left', null);
+    } else if (!wasHost) {
+      await afterDissolveRosterChange(room);
     }
     res.json({ success: true });
   } catch (e) {
@@ -1611,6 +1701,95 @@ app.post('/api/race/spectate/assign', authMiddleware, async (req, res) => {
   }
 });
 
+app.post('/api/race/dissolve/start', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '只有房主可以发起解散' });
+    }
+    if (room.status === 'finished' || room.status === 'cancelled') {
+      return res.status(400).json({ error: '房间已结束' });
+    }
+    const now = Date.now();
+    expireDissolveIfNeeded(room, now);
+    if (room.dissolve) {
+      return res.json({
+        result: 'voting', needed: room.dissolve.needed, agreed: dissolveAgreed(room),
+        total: room.dissolve.total, expiresAt: room.dissolve.expiresAt
+      });
+    }
+    const total = room.players.size;
+    if (total < 3) {
+      await cancelRoom(room, 'dissolve_direct', req.user.id);
+      return res.json({ result: 'cancelled', reason: 'dissolve_direct' });
+    }
+    const needed = dissolveNeeded(total);
+    const hostKey = 'u:' + req.user.id;
+    const voters = new Map();
+    if (room.players.has(hostKey)) voters.set(hostKey, 'agree');
+    room.dissolve = {
+      byKey: hostKey, byNickname: room.hostNickname, startedAt: now,
+      needed: needed, total: total, voters: voters, expiresAt: now + RACE_DISSOLVE_MS
+    };
+    room.dissolveNotice = null;
+    room.hostLastSeen = now;
+    res.json({ result: 'voting', needed: needed, agreed: dissolveAgreed(room), total: total, expiresAt: room.dissolve.expiresAt });
+  } catch (e) {
+    res.status(500).json({ error: '发起解散失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/dissolve/vote', raceAuth, async (req, res) => {
+  try {
+    const ctx = findRaceContext(req);
+    if (!ctx.room) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    if (!ctx.player) {
+      return res.status(403).json({ error: '观战者不参与投票' });
+    }
+    const room = ctx.room;
+    if (room.status === 'finished' || room.status === 'cancelled') {
+      return res.status(400).json({ error: '房间已结束' });
+    }
+    const now = Date.now();
+    expireDissolveIfNeeded(room, now);
+    if (!room.dissolve) {
+      return res.status(400).json({ error: '没有进行中的解散投票' });
+    }
+    const agree = !!(req.body && req.body.agree);
+    room.dissolve.voters.set(playerMapKey(ctx.player), agree ? 'agree' : 'no');
+    const passed = refreshDissolveForRoster(room);
+    const result = {
+      agreed: dissolveAgreed(room), needed: room.dissolve.needed,
+      total: room.dissolve.total, passed: passed, expiresAt: room.dissolve.expiresAt
+    };
+    if (passed) {
+      room.dissolve = null;
+      await cancelRoom(room, 'vote_dissolved', null);
+    }
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: '解散投票失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/dissolve/cancel', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '只有房主可以撤回解散' });
+    }
+    if (room.status === 'finished' || room.status === 'cancelled') {
+      return res.status(400).json({ error: '房间已结束' });
+    }
+    if (room.dissolve) invalidateDissolve(room, 'cancelled', 'host_withdraw');
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '撤回解散失败: ' + e.message });
+  }
+});
+
 app.post('/api/race/kick', authMiddleware, async (req, res) => {
   try {
     const room = findRoomByHost(req.user.id, true);
@@ -1636,6 +1815,7 @@ app.post('/api/race/kick', authMiddleware, async (req, res) => {
     if (room.players.has(key)) {
       room.players.delete(key);
       room.hostLastSeen = Date.now();
+      await afterDissolveRosterChange(room);
       return res.json({ success: true });
     }
     if (room.spectators && room.spectators.has('s' + key)) {
@@ -1697,6 +1877,7 @@ app.post('/api/race/tick', raceAuth, async (req, res) => {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
     updateRoomPhase(room);
+    expireDissolveIfNeeded(room, Date.now());
     if (spectator) {
       spectator.lastSeen = Date.now();
       if (isSpectatorHost(room, spectator)) room.hostLastSeen = spectator.lastSeen;
@@ -1738,7 +1919,7 @@ app.post('/api/race/finish', raceAuth, async (req, res) => {
     if (elapsedMs <= 0) {
       return res.status(400).json({ error: '比赛尚未开始' });
     }
-    const speed = Math.round(room.charCount * 60000 / elapsedMs);
+    const speed = room.charCount * 60000 / elapsedMs;
     const timeSeconds = Math.round(elapsedMs / 1000);
     player.finishedAt = now;
     player.speed = speed;
@@ -2633,8 +2814,7 @@ app.post('/api/leaderboard', async (req, res) => {
 
     const finalSource = hasArticle ? (source || 'normal') : 'unverified';
     const ip = req.ip || req.connection.remoteAddress || '';
-    const storedSpeed = Math.round(speed);
-    const result = await db.run('INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', userId, effectiveNickname, storedSpeed, accuracy, time_seconds || 0, hasArticle ? article_id : null, ip, finalSource);
+    const result = await db.run('INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', userId, effectiveNickname, speed, accuracy, time_seconds || 0, hasArticle ? article_id : null, ip, finalSource);
     const score = await db.get('SELECT s.*, a.title as article_title FROM scores s LEFT JOIN articles a ON s.article_id = a.id WHERE s.id = ?', result.lastInsertRowid);
     res.json(score);
   } catch (e) {

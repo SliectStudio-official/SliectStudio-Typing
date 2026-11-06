@@ -10,7 +10,8 @@
     isSpectator: false, engine: null, engineReady: false,
     finished: false, focusNick: null, lastRank: {},
     tickFailures: 0, reconnectShown: false,
-    countdownTimer: null, countdownOffset: 0, countdownHideTimer: null
+    countdownTimer: null, countdownOffset: 0, countdownHideTimer: null,
+    lastDissolveNoticeAt: 0
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -248,6 +249,8 @@
     var st = snap.race.status;
     var seat = mySeat(snap);
     state.isSpectator = seat === 'spectator';
+    processDissolveNotice(snap);
+    renderDissolve(snap);
     if (st === 'cancelled') {
       stopPolling();
       var reason = snap.race.cancelledReason;
@@ -785,6 +788,10 @@
     var hasRoom = !!state.code;
     $('race-subnav-center').style.display = hasRoom ? 'block' : 'none';
     $('btn-exit-race').style.display = hasRoom ? 'inline-flex' : 'none';
+    var canDissolve = hasRoom && state.snap && isHostSnap(state.snap) &&
+      ['waiting', 'countdown', 'racing'].indexOf(state.snap.race.status) >= 0;
+    var dissolveBtn = $('btn-dissolve-race');
+    if (dissolveBtn) dissolveBtn.style.display = canDissolve ? 'inline-flex' : 'none';
     if (!hasRoom) return;
     var label = exitConfig(state.snap).label;
     if (window.innerWidth <= 480) label = '退出';
@@ -812,6 +819,119 @@
     leaveRoom();
   }
 
+  /* ---------- 解散比赛投票（H 组） ---------- */
+  function dissolveRemaining(snap) {
+    var d = snap.dissolve;
+    if (!d) return 0;
+    var offset = (snap.race.serverNow || Date.now()) - Date.now();
+    return Math.max(0, Math.ceil((d.expiresAt - (Date.now() + offset)) / 1000));
+  }
+  function processDissolveNotice(snap) {
+    var notice = snap.dissolveNotice;
+    if (!notice || !notice.at || notice.at === state.lastDissolveNoticeAt) return;
+    state.lastDissolveNoticeAt = notice.at;
+    if (notice.type === 'expired') toast('解散投票未通过（' + notice.agreed + '/' + notice.total + '）');
+    else toast('解散投票已取消');
+  }
+  function dissolveCardHtml(snap, d, seat, isHost) {
+    var blocks = '';
+    for (var i = 0; i < d.needed; i++) {
+      blocks += '<span class="race-dissolve-seg' + (i < d.agreed ? ' filled' : '') + '"></span>';
+    }
+    var buttons = '';
+    var myVote = d.myVote || null;
+    if (seat === 'player') {
+      buttons += '<button class="race-btn race-btn-small race-dissolve-agree' + (myVote === 'agree' ? ' is-selected' : '') + '" aria-pressed="' + (myVote === 'agree') + '"' + (myVote ? ' disabled' : '') + '>同意</button>';
+      buttons += '<button class="race-btn race-btn-small race-dissolve-reject' + (myVote === 'no' ? ' is-selected' : '') + '" aria-pressed="' + (myVote === 'no') + '"' + (myVote ? ' disabled' : '') + '>拒绝</button>';
+    } else {
+      buttons += '<div class="race-dissolve-readonly">观战者不参与投票</div>';
+    }
+    if (isHost) buttons += '<button class="race-btn race-btn-small race-btn-ghost race-dissolve-withdraw">撤回</button>';
+    return '<div class="race-dissolve-card">' +
+      '<div class="race-dissolve-title">房主发起了解散投票</div>' +
+      '<div class="race-dissolve-blocks" id="race-dissolve-blocks" role="progressbar" aria-valuenow="' + d.agreed + '" aria-valuemin="0" aria-valuemax="' + d.needed + '">' + blocks + '</div>' +
+      '<div class="race-dissolve-count">' + d.agreed + '/' + d.needed + ' 人同意 · 剩余 ' + dissolveRemaining(snap) + 's</div>' +
+      '<div class="race-dissolve-actions">' + buttons + '</div>' +
+      '</div>';
+  }
+  function renderDissolve(snap) {
+    var ids = ['race-dissolve-wait', 'race-dissolve-block', 'race-dissolve-spectate'];
+    ids.forEach(function (id) {
+      var el = $(id);
+      if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+    });
+    if (!snap || !snap.dissolve) return;
+    var seat = mySeat(snap);
+    var isHost = isHostSnap(snap);
+    var st = snap.race.status;
+    var target = 'race-dissolve-block';
+    if (st === 'waiting') target = 'race-dissolve-wait';
+    else if (seat === 'spectator') target = 'race-dissolve-spectate';
+    var el = $(target);
+    if (!el) return;
+    el.innerHTML = dissolveCardHtml(snap, snap.dissolve, seat, isHost);
+    el.style.display = 'block';
+    var agree = el.querySelector('.race-dissolve-agree');
+    var reject = el.querySelector('.race-dissolve-reject');
+    var withdraw = el.querySelector('.race-dissolve-withdraw');
+    if (agree) agree.onclick = function () { voteDissolve(true); };
+    if (reject) reject.onclick = function () { voteDissolve(false); };
+    if (withdraw) withdraw.onclick = function () { withdrawDissolve(); };
+  }
+  function voteDissolve(agree) {
+    var d = state.snap && state.snap.dissolve;
+    if (!d || d.myVote) return;
+    var prev = d.myVote;
+    if (prev === 'agree') d.agreed -= 1;
+    d.myVote = agree ? 'agree' : 'no';
+    if (agree && prev !== 'agree') d.agreed += 1;
+    renderDissolve(state.snap);
+    api('/api/race/dissolve/vote', { method: 'POST', body: { agree: agree } })
+      .then(function (r) {
+        if (state.snap && state.snap.dissolve && r) {
+          state.snap.dissolve.agreed = r.agreed;
+          state.snap.dissolve.needed = r.needed;
+          state.snap.dissolve.total = r.total;
+          renderDissolve(state.snap);
+        }
+        tick();
+      })
+      .catch(function (e) { toast(e.message); tick(); });
+  }
+  function withdrawDissolve() {
+    api('/api/race/dissolve/cancel', { method: 'POST', body: {} })
+      .then(function () { tick(); })
+      .catch(function (e) { toast(e.message); });
+  }
+  var dissolveReturnFocus = null;
+  function openDissolveDialog() {
+    var snap = state.snap;
+    if (!snap) return;
+    var count = snap.players.length;
+    $('race-dissolve-text').innerHTML = count < 3
+      ? '房间内不足 3 人，确认后<strong>立即解散本局</strong>。'
+      : '发起后需要<strong>超过一半的人同意</strong>（当前需 ' + (Math.floor(count / 2) + 1) + ' 人）才能解散，投票 30 秒内有效。';
+    dissolveReturnFocus = document.activeElement;
+    $('race-dissolve-overlay').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    $('race-dissolve-cancel').focus();
+  }
+  function closeDissolveDialog(restoreFocus) {
+    $('race-dissolve-overlay').style.display = 'none';
+    document.body.style.overflow = '';
+    if (restoreFocus && dissolveReturnFocus && dissolveReturnFocus.focus) dissolveReturnFocus.focus();
+    dissolveReturnFocus = null;
+  }
+  function confirmDissolve() {
+    closeDissolveDialog(false);
+    api('/api/race/dissolve/start', { method: 'POST', body: {} })
+      .then(function (r) {
+        if (r && r.result === 'cancelled') toast('房间已解散');
+        tick();
+      })
+      .catch(function (e) { toast(e.message); });
+  }
+
   /* ---------- 视图 ---------- */
   function showView(name) {
     ['lobby', 'room', 'race', 'spectate', 'result'].forEach(function (v) {
@@ -835,6 +955,10 @@
     state.finished = false; state.isSpectator = false; state.focusNick = null;
     $('race-subnav-center').style.display = 'none';
     $('btn-exit-race').style.display = 'none';
+    var db = $('btn-dissolve-race'); if (db) db.style.display = 'none';
+    ['race-dissolve-wait', 'race-dissolve-block', 'race-dissolve-spectate'].forEach(function (id) {
+      var el = $(id); if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+    });
     try {
       localStorage.removeItem('raceMatchPending');
       localStorage.removeItem('raceMatchPendingSince');
@@ -911,6 +1035,12 @@
     $('btn-leave2').onclick = leaveRoom;
     $('btn-back-lobby').onclick = leaveRoom;
     $('btn-exit-race').onclick = openExitDialog;
+    $('btn-dissolve-race').onclick = openDissolveDialog;
+    $('race-dissolve-cancel').onclick = function () { closeDissolveDialog(true); };
+    $('race-dissolve-confirm').onclick = confirmDissolve;
+    $('race-dissolve-overlay').addEventListener('click', function (e) {
+      if (e.target === $('race-dissolve-overlay')) closeDissolveDialog(true);
+    });
     $('race-exit-cancel').onclick = function () { closeExitDialog(true); };
     $('race-exit-confirm').onclick = confirmExitRace;
     $('race-exit-overlay').addEventListener('click', function (e) {
@@ -920,6 +1050,9 @@
       if (e.key === 'Escape' && $('race-exit-overlay').style.display !== 'none') {
         e.preventDefault();
         closeExitDialog(true);
+      } else if (e.key === 'Escape' && $('race-dissolve-overlay').style.display !== 'none') {
+        e.preventDefault();
+        closeDissolveDialog(true);
       }
     });
     $('spec-enabled').onchange = function () {
