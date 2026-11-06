@@ -213,6 +213,7 @@
     var bar = $('home-match-bar');
     if (!card || !title || !desc) return;
     card.classList.toggle('is-matching', active);
+    document.body.classList.toggle('is-matching', active);
     if (active) {
       card.classList.add('fx-was-matching');
       try {
