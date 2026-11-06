@@ -4105,7 +4105,7 @@ button:focus-visible,
   border-color: var(--hairline-soft);
   box-shadow: none;
 }
-#race-typing .typing-line-text { font-size: 20px; white-space: normal; overflow: visible; text-overflow: clip; }
+#race-typing .typing-line-text { font-size: 20px; }
 #race-typing .typing-line-input { font-size: 18px; }
 /* 打字区禁止动效（与首页红线一致） */
 #race-typing, #race-typing * { animation: none !important; }
