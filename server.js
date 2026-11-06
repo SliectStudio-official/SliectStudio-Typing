@@ -445,8 +445,121 @@ function findRoomByHost(userId, activeOnly = true) {
   return null;
 }
 
+function findRoomBySpectator(userId, activeOnly = true) {
+  for (const room of roomRegistry.values()) {
+    if (activeOnly && !isActiveRoom(room)) continue;
+    if (room.spectators && room.spectators.has('su:' + userId)) return room;
+  }
+  return null;
+}
+
 function playerMapKey(player) {
   return player.isGuest ? 'g:' + player.guestId : 'u:' + player.userId;
+}
+
+function spectatorCap(maxPlayers) {
+  return Math.max(1, Math.floor((Number(maxPlayers) || 2) * 0.1));
+}
+
+function initSpectatorState(room) {
+  if (!room.spectators) room.spectators = new Map();
+  room.maxSpectators = spectatorCap(room.maxPlayers);
+  if (!Number.isInteger(room.spectatorSeats) || room.spectatorSeats < 1 || room.spectatorSeats > room.maxSpectators) {
+    room.spectatorSeats = room.maxSpectators;
+  }
+  if (room.spectatorMode !== 'free' && room.spectatorMode !== 'host') room.spectatorMode = 'free';
+  if (typeof room.spectatorEnabled !== 'boolean') room.spectatorEnabled = room.allowSpectator !== false;
+  room.allowSpectator = room.spectatorEnabled;
+  return room;
+}
+
+function spectatorMapKey(spectator) {
+  return spectator.isGuest ? 'sg:' + spectator.guestId : 'su:' + spectator.userId;
+}
+
+function playerKeyFromSpectator(spectator) {
+  return spectator.isGuest ? 'g:' + spectator.guestId : 'u:' + spectator.userId;
+}
+
+function spectatorFromPlayer(player, now) {
+  return {
+    userId: player.userId, guestId: player.guestId, nickname: player.nickname,
+    isGuest: player.isGuest, joinedAt: player.joinedAt, lastSeen: now, ip: player.ip || '',
+    fromPlayer: true, seatJoinedAt: now,
+    progress: player.progress || 0, finishedAt: player.finishedAt || null,
+    speed: player.speed == null ? null : player.speed,
+    accuracy: player.accuracy == null ? null : player.accuracy,
+    timeSeconds: player.timeSeconds == null ? null : player.timeSeconds,
+    rank: player.rank == null ? null : player.rank
+  };
+}
+
+function playerFromSpectator(spectator, now) {
+  return {
+    userId: spectator.userId == null ? null : spectator.userId,
+    guestId: spectator.guestId || null,
+    nickname: spectator.nickname, isGuest: !!spectator.isGuest, ready: false,
+    progress: spectator.progress || 0, finishedAt: spectator.finishedAt || null,
+    speed: spectator.speed == null ? null : spectator.speed,
+    accuracy: spectator.accuracy == null ? null : spectator.accuracy,
+    timeSeconds: spectator.timeSeconds == null ? null : spectator.timeSeconds,
+    rank: spectator.rank == null ? null : spectator.rank,
+    joinedAt: spectator.joinedAt || now, ip: spectator.ip || '', lastSeen: now
+  };
+}
+
+function isSpectatorHost(room, spectator) {
+  return !!(spectator && spectator.userId != null && spectator.userId === room.hostUserId);
+}
+
+function movePlayerToSpectator(room, key, player, now) {
+  room.players.delete(key);
+  const spec = spectatorFromPlayer(player, now);
+  room.spectators.set(spectatorMapKey(spec), spec);
+  if (!spec.isGuest && spec.userId === room.hostUserId) room.hostLastSeen = now;
+  return spec;
+}
+
+function moveSpectatorToPlayer(room, spectator, now) {
+  const key = spectatorMapKey(spectator);
+  room.spectators.delete(key);
+  const player = playerFromSpectator(spectator, now);
+  room.players.set(playerKeyFromSpectator(spectator), player);
+  if (!player.isGuest && player.userId === room.hostUserId) room.hostLastSeen = now;
+  return player;
+}
+
+function sortedSpectatorEntries(room) {
+  return Array.from(room.spectators.entries()).sort(function (a, b) {
+    return (a[1].seatJoinedAt || a[1].joinedAt || 0) - (b[1].seatJoinedAt || b[1].joinedAt || 0);
+  });
+}
+
+function evictSpectatorsForSeats(room, targetSeats, now) {
+  const entries = sortedSpectatorEntries(room);
+  if (entries.length <= targetSeats) return null;
+  const evicted = entries.slice(targetSeats);
+  const needPlayerSeats = evicted.filter(function (entry) { return entry[1].fromPlayer; }).length;
+  if (room.players.size + needPlayerSeats > room.maxPlayers) {
+    return '选手席已满，无法减少观战席';
+  }
+  for (let i = evicted.length - 1; i >= 0; i--) {
+    const entry = evicted[i];
+    if (entry[1].fromPlayer) moveSpectatorToPlayer(room, entry[1], now);
+    else room.spectators.delete(entry[0]);
+  }
+  return null;
+}
+
+function clearAllSpectators(room, now) {
+  const entries = Array.from(room.spectators.values());
+  const needPlayerSeats = entries.filter(function (s) { return s.fromPlayer; }).length;
+  if (room.players.size + needPlayerSeats > room.maxPlayers) return false;
+  for (const s of entries) {
+    if (s.fromPlayer) moveSpectatorToPlayer(room, s, now);
+    else room.spectators.delete(spectatorMapKey(s));
+  }
+  return true;
 }
 
 async function isNicknameTakenByUser(lower) {
@@ -461,6 +574,7 @@ async function buildGuestNickname(raw, room) {
   if (hit) base = base.split(hit).join('***');
   const existing = new Set();
   for (const p of room.players.values()) existing.add(p.nickname.toLowerCase());
+  if (room.spectators) for (const s of room.spectators.values()) existing.add(s.nickname.toLowerCase());
   let candidate = base;
   let n = 1;
   while (existing.has(candidate.toLowerCase()) || await isNicknameTakenByUser(candidate.toLowerCase())) {
@@ -499,6 +613,7 @@ async function createMatchedRoom(first, second, article) {
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
     allowSpectator: true, spectators: new Map(), matchmade: true
   };
+  initSpectatorState(room);
   [first, second].forEach(function (entry) {
     room.players.set('u:' + entry.userId, {
       userId: entry.userId, guestId: null, nickname: entry.nickname || entry.username,
@@ -626,12 +741,25 @@ function checkListRate(ip) {
 }
 
 function buildSnapshot(room, player, spectator) {
+  initSpectatorState(room);
   const sorted = Array.from(room.players.values()).sort((a, b) => {
     if (a.rank && b.rank) return a.rank - b.rank;
     if (a.rank) return -1;
     if (b.rank) return 1;
     return b.progress - a.progress;
   });
+  const isHost = (player && player.userId !== null && player.userId === room.hostUserId) ||
+    isSpectatorHost(room, spectator);
+  const spectatorList = Array.from(room.spectators.values()).map(s => ({
+    userId: s.userId == null ? null : s.userId,
+    guestId: s.guestId || null,
+    nickname: s.nickname,
+    isGuest: !!s.isGuest,
+    isHost: isSpectatorHost(room, s),
+    fromPlayer: !!s.fromPlayer,
+    joinedAt: s.joinedAt || null,
+    seatJoinedAt: s.seatJoinedAt || s.joinedAt || null
+  }));
   return {
     race: {
       code: room.code,
@@ -645,11 +773,24 @@ function buildSnapshot(room, player, spectator) {
       startsAt: room.startsAt,
       finishedAt: room.finishedAt,
       cancelledReason: room.cancelledReason || null,
-      allowSpectator: room.allowSpectator !== false,
-      spectatorCount: room.spectators ? room.spectators.size : 0,
+      allowSpectator: room.spectatorEnabled,
+      spectatorEnabled: room.spectatorEnabled,
+      spectatorMode: room.spectatorMode,
+      spectatorSeats: room.spectatorSeats,
+      maxSpectators: room.maxSpectators,
+      spectatorCount: room.spectators.size,
+      isHost: !!isHost,
+      mySeat: player ? 'player' : (spectator ? 'spectator' : null),
       serverNow: Date.now()
     },
-    spectator: spectator ? { nickname: spectator.nickname, isGuest: !!spectator.isGuest } : null,
+    isHost: !!isHost,
+    mySeat: player ? 'player' : (spectator ? 'spectator' : null),
+    spectator: spectator ? {
+      nickname: spectator.nickname,
+      isGuest: !!spectator.isGuest,
+      isHost: isSpectatorHost(room, spectator),
+      fromPlayer: !!spectator.fromPlayer
+    } : null,
     me: player ? {
       userId: player.userId,
       guestId: player.guestId,
@@ -673,7 +814,8 @@ function buildSnapshot(room, player, spectator) {
       accuracy: p.accuracy || null,
       timeSeconds: p.timeSeconds || null,
       lastSeen: p.lastSeen || null
-    }))
+    })),
+    spectators: spectatorList
   };
 }
 
@@ -849,7 +991,7 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     if (activeRoomCount() >= settings.maxRooms) {
       return res.status(400).json({ error: `当前比赛房间已满（${settings.maxRooms}/${settings.maxRooms}）` });
     }
-    if (findRoomByUser(req.user.id, true)) {
+    if (findRoomByUser(req.user.id, true) || findRoomBySpectator(req.user.id, true)) {
       return res.status(400).json({ error: '你已在其他比赛房间中' });
     }
     const { articleId, password, maxPlayers, isPublic } = req.body || {};
@@ -890,6 +1032,10 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
       allowSpectator: isPublic === undefined ? true : true, spectators: new Map()
     };
     room.allowSpectator = req.body && req.body.allowSpectator === false ? false : true;
+    room.spectatorEnabled = room.allowSpectator;
+    room.spectatorMode = 'free';
+    room.spectatorSeats = spectatorCap(mp);
+    room.maxSpectators = room.spectatorSeats;
     room.players.set('u:' + req.user.id, {
       userId: req.user.id, guestId: null, nickname: hostNickname, isGuest: false, ready: false,
       progress: 0, finishedAt: null, speed: null, accuracy: null, timeSeconds: null, rank: null,
@@ -913,7 +1059,7 @@ app.post('/api/race/match/join', authMiddleware, async (req, res) => {
     if (!settings.enabled) {
       return res.status(400).json({ error: '管理员已暂停创建比赛' });
     }
-    if (findRoomByUser(req.user.id, true)) {
+    if (findRoomByUser(req.user.id, true) || findRoomBySpectator(req.user.id, true)) {
       return res.status(400).json({ error: '你已在其他比赛房间中' });
     }
     let entry = findMatchEntry(req.user.id);
@@ -1022,32 +1168,48 @@ app.post('/api/race/join', async (req, res) => {
       const player = room.players.get('u:' + realUser.id);
       return res.json({ token: auth.slice(7), nickname: player.nickname, raceId: room.raceId, state: buildSnapshot(room, player) });
     }
+    if (realUser && room.spectators && room.spectators.has('su:' + realUser.id)) {
+      raceJoinFailures.delete(limitKey);
+      const sp = room.spectators.get('su:' + realUser.id);
+      return res.json({ token: auth.slice(7), nickname: sp.nickname, raceId: room.raceId, spectator: true, state: buildSnapshot(room, null, sp) });
+    }
     if (guestToken && guestToken.raceCode === room.code) {
       const gp = room.players.get('g:' + guestToken.guestId);
       if (gp) {
         raceJoinFailures.delete(limitKey);
         return res.json({ token: auth.slice(7), nickname: gp.nickname, raceId: room.raceId, state: buildSnapshot(room, gp) });
       }
+      const gs = room.spectators ? room.spectators.get('sg:' + guestToken.guestId) : null;
+      if (gs) {
+        raceJoinFailures.delete(limitKey);
+        return res.json({ token: auth.slice(7), nickname: gs.nickname, raceId: room.raceId, spectator: true, state: buildSnapshot(room, null, gs) });
+      }
     }
     if (room.passwordHash && !bcrypt.compareSync(String(password || ''), room.passwordHash)) {
       recordJoinFailure(limitKey);
       return res.status(400).json({ error: '房间不存在或密码错误' });
     }
+    if (realUser && (findRoomByUser(realUser.id, true) || findRoomBySpectator(realUser.id, true))) {
+      return res.status(400).json({ error: '你已在其他比赛房间中' });
+    }
     // 观战身份：不受比赛名额与阶段限制
     if (req.body && req.body.asSpectator) {
-      if (room.allowSpectator === false) {
-        return res.status(400).json({ error: '房主未开放观战' });
+      initSpectatorState(room);
+      if (!room.spectatorEnabled) {
+        return res.status(400).json({ error: '本房间未开放观战' });
       }
-      if (!room.spectators) room.spectators = new Map();
-      const maxSpec = room.maxSpectators || 8;
-      if (room.spectators.size >= maxSpec) {
-        return res.status(400).json({ error: '观战席已满' });
+      if (room.spectatorMode === 'host') {
+        return res.status(400).json({ error: '本房间观战需房主安排' });
+      }
+      if (room.spectators.size >= room.spectatorSeats) {
+        return res.status(400).json({ error: '观战席已满（' + room.spectators.size + '/' + room.spectatorSeats + '）' });
       }
       const now2 = Date.now();
       if (realUser) {
         const finalNick = realUser.nickname || realUser.username;
         room.spectators.set('su:' + realUser.id, {
-          userId: realUser.id, guestId: null, nickname: finalNick, isGuest: false, joinedAt: now2, lastSeen: now2, ip
+          userId: realUser.id, guestId: null, nickname: finalNick, isGuest: false,
+          joinedAt: now2, lastSeen: now2, ip, seatJoinedAt: now2
         });
         raceJoinFailures.delete(limitKey);
         return res.json({ token: auth.slice(7), nickname: finalNick, raceId: room.raceId, spectator: true, state: buildSnapshot(room, null, room.spectators.get('su:' + realUser.id)) });
@@ -1063,7 +1225,8 @@ app.post('/api/race/join', async (req, res) => {
       const specExpires = Math.max(1, Math.floor((room.createdAt + RACE_GUEST_TOKEN_TTL_MS - Date.now()) / 1000));
       const specToken = jwt.sign({ role: 'guest', guestId: specGuestId, nickname: specNick, raceCode: room.code, spectator: true }, JWT_SECRET, { expiresIn: specExpires });
       room.spectators.set('sg:' + specGuestId, {
-        userId: null, guestId: specGuestId, nickname: specNick, isGuest: true, joinedAt: now2, lastSeen: now2, ip
+        userId: null, guestId: specGuestId, nickname: specNick, isGuest: true,
+        joinedAt: now2, lastSeen: now2, ip, seatJoinedAt: now2
       });
       raceJoinFailures.delete(limitKey);
       return res.json({ token: specToken, nickname: specNick, raceId: room.raceId, spectator: true, state: buildSnapshot(room, null, room.spectators.get('sg:' + specGuestId)) });
@@ -1076,7 +1239,7 @@ app.post('/api/race/join', async (req, res) => {
       return res.status(400).json({ error: '房间已满' });
     }
     if (realUser) {
-      if (findRoomByUser(realUser.id, true)) {
+      if (findRoomByUser(realUser.id, true) || findRoomBySpectator(realUser.id, true)) {
         return res.status(400).json({ error: '你已在其他比赛房间中' });
       }
       const finalNickname = realUser.nickname || realUser.username;
@@ -1128,8 +1291,11 @@ app.post('/api/race/leave', raceAuth, async (req, res) => {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
     if (spectator) {
-      if (spectator.isGuest) room.spectators.delete('sg:' + spectator.guestId);
-      else room.spectators.delete('su:' + spectator.userId);
+      if (isSpectatorHost(room, spectator)) {
+        await cancelRoom(room, 'host_leave', spectator.userId);
+      } else {
+        room.spectators.delete(spectatorMapKey(spectator));
+      }
       return res.json({ success: true });
     }
     if (!player) {
@@ -1173,11 +1339,196 @@ app.post('/api/race/spectator-setting', authMiddleware, async (req, res) => {
     if (room.status === 'finished' || room.status === 'cancelled') {
       return res.status(400).json({ error: '比赛已结束' });
     }
-    room.allowSpectator = !!(req.body && req.body.allow);
+    const nextAllow = !!(req.body && req.body.allow);
+    room.allowSpectator = nextAllow;
+    room.spectatorEnabled = nextAllow;
+    initSpectatorState(room);
+    if (!room.spectatorEnabled) {
+      const fromPlayers = Array.from(room.spectators.values()).filter(s => s.fromPlayer);
+      if (room.players.size + fromPlayers.length > room.maxPlayers) {
+        room.spectatorEnabled = true;
+        room.allowSpectator = true;
+        return res.status(400).json({ error: '选手席已满，无法清空观战席' });
+      }
+      const now = Date.now();
+      for (const s of fromPlayers) moveSpectatorToPlayer(room, s, now);
+      for (const [key, s] of Array.from(room.spectators.entries())) {
+        if (!s.fromPlayer) room.spectators.delete(key);
+      }
+    }
     room.hostLastSeen = Date.now();
     res.json({ success: true, allowSpectator: room.allowSpectator });
   } catch (e) {
     res.status(500).json({ error: '设置失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/spectate/settings', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '你不在主持比赛' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '比赛已开始，不能换席' });
+    }
+    initSpectatorState(room);
+    const body = req.body || {};
+    const cap = room.maxSpectators;
+    let nextEnabled = room.spectatorEnabled;
+    let nextMode = room.spectatorMode;
+    let nextSeats = room.spectatorSeats;
+    if (body.enabled !== undefined) nextEnabled = !!body.enabled;
+    if (body.mode !== undefined) {
+      if (body.mode !== 'free' && body.mode !== 'host') {
+        return res.status(400).json({ error: '观战模式必须是 free 或 host' });
+      }
+      nextMode = body.mode;
+    }
+    if (body.seats !== undefined) {
+      const seats = parseInt(body.seats, 10);
+      if (!Number.isInteger(seats) || seats < 1 || seats > cap) {
+        return res.status(400).json({ error: '观战席位数必须在 1 到 ' + cap + ' 之间' });
+      }
+      nextSeats = seats;
+    }
+    const now = Date.now();
+    if (!nextEnabled) {
+      if (!clearAllSpectators(room, now)) {
+        return res.status(400).json({ error: '选手席已满，无法清空观战席' });
+      }
+    } else if (body.seats !== undefined) {
+      const evictError = evictSpectatorsForSeats(room, nextSeats, now);
+      if (evictError) return res.status(400).json({ error: evictError });
+    }
+    room.spectatorEnabled = nextEnabled;
+    room.allowSpectator = nextEnabled;
+    room.spectatorMode = nextMode;
+    room.spectatorSeats = nextEnabled ? nextSeats : room.spectatorSeats;
+    room.hostLastSeen = now;
+    res.json({
+      success: true, enabled: room.spectatorEnabled, mode: room.spectatorMode,
+      seats: room.spectatorSeats, cap: cap, spectatorCount: room.spectators.size
+    });
+  } catch (e) {
+    res.status(500).json({ error: '观战设置失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/spectate/self', raceAuth, async (req, res) => {
+  try {
+    const ctx = findRaceContext(req);
+    const room = ctx.room;
+    if (!room || (!ctx.player && !ctx.spectator)) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '比赛已开始，不能换席' });
+    }
+    initSpectatorState(room);
+    const action = req.body && req.body.action;
+    if (action !== 'enter' && action !== 'leave') {
+      return res.status(400).json({ error: '无效的换席操作' });
+    }
+    const now = Date.now();
+    const isHost = (ctx.player && ctx.player.userId !== null && ctx.player.userId === room.hostUserId) ||
+      isSpectatorHost(room, ctx.spectator);
+
+    if (action === 'enter') {
+      if (ctx.spectator) {
+        return res.json({ success: true, seat: 'spectator', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size, state: buildSnapshot(room, null, ctx.spectator) });
+      }
+      if (!room.spectatorEnabled) {
+        return res.status(400).json({ error: '本房间未开放观战' });
+      }
+      if (room.spectatorMode === 'host' && !isHost) {
+        return res.status(400).json({ error: '观战由房主安排' });
+      }
+      if (room.spectators.size >= room.spectatorSeats) {
+        return res.status(400).json({ error: '观战席已满（' + room.spectators.size + '/' + room.spectatorSeats + '）' });
+      }
+      const spec = movePlayerToSpectator(room, playerMapKey(ctx.player), ctx.player, now);
+      return res.json({ success: true, seat: 'spectator', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size, state: buildSnapshot(room, null, spec) });
+    }
+
+    if (!ctx.spectator) {
+      return res.json({ success: true, seat: 'player', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size, state: buildSnapshot(room, ctx.player) });
+    }
+    if (room.spectatorMode === 'host' && !isHost) {
+      return res.status(400).json({ error: '观战由房主安排' });
+    }
+    if (room.players.size >= room.maxPlayers) {
+      return res.status(400).json({ error: '选手席已满' });
+    }
+    const player = moveSpectatorToPlayer(room, ctx.spectator, now);
+    return res.json({ success: true, seat: 'player', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size, state: buildSnapshot(room, player) });
+  } catch (e) {
+    res.status(500).json({ error: '换席失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/spectate/assign', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '你不在主持比赛' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '比赛已开始，不能换席' });
+    }
+    initSpectatorState(room);
+    const body = req.body || {};
+    const targetType = body.targetType;
+    const to = body.to;
+    if (to !== 'spectator' && to !== 'player') {
+      return res.status(400).json({ error: '目标席位必须是 spectator 或 player' });
+    }
+    let playerKey = null;
+    let specKey = null;
+    if (targetType === 'user') {
+      const id = parseInt(body.targetId, 10);
+      if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: '目标用户无效' });
+      playerKey = 'u:' + id;
+      specKey = 'su:' + id;
+    } else if (targetType === 'guest') {
+      const id = String(body.targetId || '');
+      if (!id) return res.status(400).json({ error: '目标游客无效' });
+      playerKey = 'g:' + id;
+      specKey = 'sg:' + id;
+    } else {
+      return res.status(400).json({ error: 'targetType 必须是 user 或 guest' });
+    }
+    const targetPlayer = room.players.get(playerKey);
+    const targetSpectator = room.spectators.get(specKey);
+    if (!targetPlayer && !targetSpectator) {
+      return res.status(400).json({ error: '目标不在房间中' });
+    }
+    const now = Date.now();
+    if (to === 'spectator') {
+      if (targetSpectator) {
+        return res.json({ success: true, seat: 'spectator', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size });
+      }
+      if (!room.spectatorEnabled) {
+        return res.status(400).json({ error: '本房间未开放观战' });
+      }
+      if (room.spectators.size >= room.spectatorSeats) {
+        return res.status(400).json({ error: '观战席已满（' + room.spectators.size + '/' + room.spectatorSeats + '）' });
+      }
+      movePlayerToSpectator(room, playerKey, targetPlayer, now);
+      room.hostLastSeen = now;
+      return res.json({ success: true, seat: 'spectator', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size });
+    }
+    if (targetPlayer) {
+      return res.json({ success: true, seat: 'player', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size });
+    }
+    if (room.players.size >= room.maxPlayers) {
+      return res.status(400).json({ error: '选手席已满' });
+    }
+    moveSpectatorToPlayer(room, targetSpectator, now);
+    room.hostLastSeen = now;
+    res.json({ success: true, seat: 'player', spectatorSeats: room.spectatorSeats, spectatorCount: room.spectators.size });
+  } catch (e) {
+    res.status(500).json({ error: '指定席位失败: ' + e.message });
   }
 });
 
@@ -1232,7 +1583,7 @@ app.post('/api/race/start', authMiddleware, async (req, res) => {
     }
     const players = Array.from(room.players.values());
     if (players.length < 1) {
-      return res.status(400).json({ error: '房间内没有玩家' });
+      return res.status(400).json({ error: '没有选手，无法开始' });
     }
     const notReady = players.filter(p => !p.ready).map(p => p.nickname);
     if (notReady.length > 0) {
@@ -1269,6 +1620,7 @@ app.post('/api/race/tick', raceAuth, async (req, res) => {
     updateRoomPhase(room);
     if (spectator) {
       spectator.lastSeen = Date.now();
+      if (isSpectatorHost(room, spectator)) room.hostLastSeen = spectator.lastSeen;
       return res.json(buildSnapshot(room, null, spectator));
     }
     player.lastSeen = Date.now();
@@ -1348,6 +1700,9 @@ app.get('/api/race/list', async (req, res) => {
       .map(r => ({
         code: r.code, hostNickname: r.hostNickname, articleTitle: r.articleTitle,
         charCount: r.charCount, playerCount: r.players.size, maxPlayers: r.maxPlayers,
+        spectatorEnabled: !!r.spectatorEnabled, spectatorMode: r.spectatorMode || 'free',
+        spectatorSeats: r.spectatorSeats || spectatorCap(r.maxPlayers),
+        spectatorCount: r.spectators ? r.spectators.size : 0,
         status: r.status, createdAt: r.createdAt
       }));
     res.json(list);
@@ -1409,6 +1764,8 @@ app.get('/api/race/:code', async (req, res) => {
       hostUserId: room.hostUserId, hostNickname: room.hostNickname, isPublic: room.isPublic,
       createdAt: room.createdAt, cancelledReason: room.cancelledReason || null,
       allowSpectator: room.allowSpectator !== false, spectatorCount: room.spectators ? room.spectators.size : 0,
+      spectatorEnabled: room.spectatorEnabled !== false, spectatorMode: room.spectatorMode || 'free',
+      spectatorSeats: room.spectatorSeats || spectatorCap(room.maxPlayers),
       players: Array.from(room.players.values()).map(p => ({
         userId: p.userId, guestId: p.guestId, nickname: p.nickname,
         isHost: p.userId !== null && p.userId === room.hostUserId,
