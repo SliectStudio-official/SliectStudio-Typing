@@ -13,7 +13,9 @@
     countdownTimer: null, countdownOffset: 0, countdownHideTimer: null,
     lastDissolveNoticeAt: 0,
     polling: false, tickInFlight: false, raceContent: null, needContent: false,
-    rankExpanded: false, miniPos: new Map(), miniRaf: null, miniAnims: new Map()
+    rankExpanded: false, miniPos: new Map(), miniRaf: null, miniAnims: new Map(),
+    fxPrevRank: null, fxSkipOvertake: false, fxOvertakeUntil: 0, fxOvertakeTimer: null, fxDropped: 0,
+    combo: 0, comboAnnounced: 0, selfNickname: null
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -204,6 +206,7 @@
     api('/api/race/join', { method: 'POST', body: payload }).then(function (r) {
       state.raceToken = r.token;
       state.isSpectator = !!r.spectator;
+      state.selfNickname = r.nickname;
       if (!state.token) sessionStorage.setItem('raceToken:' + opts.code.toUpperCase(), r.token);
       else sessionStorage.removeItem('raceToken:' + opts.code.toUpperCase());
       toast((state.isSpectator ? '已进入观战席：' : '已加入，你的昵称是 ') + r.nickname);
@@ -221,6 +224,9 @@
     state.raceContent = null;
     state.needContent = true;
     state.rankExpanded = false;
+    state.fxPrevRank = null;
+    state.fxSkipOvertake = false;
+    hideFx();
     if (state.engine) { state.engine.destroy(); state.engine = null; }
     showView(state.isSpectator ? 'spectate' : 'room');
     $('race-subnav-center').style.display = 'block';
@@ -272,6 +278,7 @@
       state.tickFailures = 0;
       if (state.reconnectShown) {
         setReconnectBanner(false);
+        state.fxSkipOvertake = true;
         toast('已重新连接');
       }
       if (snap.race && snap.race.content) {
@@ -282,6 +289,7 @@
       }
       state.snap = normalizeSnapshot(snap);
       state.isSpectator = mySeat(state.snap) === 'spectator';
+      if (state.snap.me && state.snap.me.nickname) state.selfNickname = state.snap.me.nickname;
       persistRaceRestore();
       render();
     }).catch(function (e) {
@@ -620,8 +628,154 @@
     }, 200);
   }
 
+  /* ---------- P24 比赛表现层：对决 / 超车 / 连击 / 冲刺 ---------- */
+  function samePlayer(a, b) {
+    if (!a || !b) return false;
+    if (a.userId != null || b.userId != null) return a.userId != null && a.userId === b.userId;
+    if (a.guestId || b.guestId) return !!a.guestId && a.guestId === b.guestId;
+    return a.nickname === b.nickname;
+  }
+  function findMyPlayer(snap) {
+    if (!snap || !snap.me) return null;
+    for (var i = 0; i < snap.players.length; i++) if (samePlayer(snap.players[i], snap.me)) return snap.players[i];
+    return null;
+  }
+  function removeDuel() {
+    var el = document.getElementById('race-duel');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+  function renderDuel(snap) {
+    var main = document.querySelector('#view-race .race-main');
+    var me = findMyPlayer(snap);
+    var show = !!(main && snap && snap.race.status === 'racing' && snap.players.length === 2 &&
+      snap.me && me && !state.isSpectator);
+    if (!show) { removeDuel(); return; }
+    var opp = snap.players[0] === me ? snap.players[1] : snap.players[0];
+    if (!opp) { removeDuel(); return; }
+    var mePct = Math.max(0, Math.min(100, Math.round((me.progress || 0) / Math.max(1, snap.race.charCount) * 100)));
+    var oppPct = Math.max(0, Math.min(100, Math.round((opp.progress || 0) / Math.max(1, snap.race.charCount) * 100)));
+    var el = document.getElementById('race-duel');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'race-duel';
+      el.className = 'race-fx-duel';
+      main.insertBefore(el, main.firstChild);
+    }
+    var myLeader = mePct >= oppPct;
+    var oppLeader = oppPct >= mePct;
+    el.innerHTML =
+      '<div class="race-fx-duel-head">' +
+        '<span class="race-fx-duel-me">' + esc(me.nickname) + ' · ' + mePct + '%</span>' +
+        '<span class="race-fx-duel-vs">VS</span>' +
+        '<span class="race-fx-duel-opp">' + esc(opp.nickname) + ' · ' + (opp.finishedAt ? '已完成' : oppPct + '%') + '</span>' +
+      '</div>' +
+      '<div class="race-fx-duel-track">' +
+        '<span class="race-fx-duel-fill race-fx-duel-fill-me' + (myLeader ? ' is-leader' : ' is-lag') + '" style="width:' + mePct + '%"></span>' +
+        '<span class="race-fx-duel-fill race-fx-duel-fill-opp' + (oppLeader ? ' is-leader' : ' is-lag') + '" style="width:' + oppPct + '%"></span>' +
+      '</div>';
+  }
+  function hideFx() {
+    removeDuel();
+    ['race-overtake', 'race-combo', 'race-sprint'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    var main = document.querySelector('#view-race .race-main');
+    if (main) main.classList.remove('race-fx-sprint');
+    if (state.fxOvertakeTimer) { clearTimeout(state.fxOvertakeTimer); state.fxOvertakeTimer = null; }
+    state.combo = 0;
+    state.comboAnnounced = 0;
+  }
+  function showOvertake(text) {
+    var el = document.getElementById('race-overtake');
+    if (!el) return;
+    var now = performance.now();
+    if (now < state.fxOvertakeUntil) {
+      state.fxDropped += 1;
+      el.setAttribute('data-dropped', String(state.fxDropped));
+      return;
+    }
+    state.fxOvertakeUntil = now + 800;
+    el.setAttribute('data-dropped', String(state.fxDropped));
+    el.textContent = text;
+    el.style.display = 'block';
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    if (state.fxOvertakeTimer) clearTimeout(state.fxOvertakeTimer);
+    state.fxOvertakeTimer = setTimeout(function () {
+      el.classList.remove('show');
+      el.style.display = 'none';
+      state.fxOvertakeTimer = null;
+    }, 700);
+  }
+  function updateOvertake(snap) {
+    if (!snap || state.isSpectator || snap.race.status !== 'racing' || !snap.me) {
+      state.fxPrevRank = null;
+      return;
+    }
+    var me = findMyPlayer(snap);
+    if (!me) { state.fxPrevRank = null; return; }
+    var rank = me.rank || (snap.players.indexOf(me) + 1);
+    if (state.fxSkipOvertake) {
+      state.fxSkipOvertake = false;
+      state.fxPrevRank = rank;
+      return;
+    }
+    if (state.fxPrevRank == null) { state.fxPrevRank = rank; return; }
+    if (me.finishedAt) { state.fxPrevRank = rank; return; }
+    var prev = state.fxPrevRank;
+    state.fxPrevRank = rank;
+    if (rank === prev) return;
+    var targetIndex = rank < prev ? rank : rank - 2;
+    if (targetIndex < 0 || targetIndex >= snap.players.length) targetIndex = rank < prev ? 0 : snap.players.length - 1;
+    var target = snap.players[targetIndex];
+    if (!target || samePlayer(target, me)) return;
+    showOvertake((rank < prev ? '超过 ' : '被 ') + target.nickname + (rank < prev ? '' : ' 超过'));
+  }
+  function updateCombo() {
+    var el = document.getElementById('race-combo');
+    if (!el) return;
+    var chars = document.querySelectorAll('#race-typing .typing-line-text .char');
+    var streak = 0;
+    for (var i = 0; i < chars.length; i++) {
+      if (chars[i].classList.contains('correct')) streak += 1;
+      else if (chars[i].classList.contains('wrong')) streak = 0;
+      else break;
+    }
+    state.combo = streak;
+    if (streak < 10) {
+      el.style.display = 'none';
+      state.comboAnnounced = 0;
+      return;
+    }
+    el.style.display = 'inline-flex';
+    el.textContent = '连击 ×' + streak;
+    if ((streak === 10 || streak === 25 || streak === 50 || streak === 100) && state.comboAnnounced !== streak) {
+      state.comboAnnounced = streak;
+      el.classList.remove('pop');
+      void el.offsetWidth;
+      el.classList.add('pop');
+    }
+  }
+  function updateSprint(snap) {
+    var main = document.querySelector('#view-race .race-main');
+    var label = document.getElementById('race-sprint');
+    if (!main || !label || !snap || state.isSpectator || !snap.me) {
+      if (main) main.classList.remove('race-fx-sprint');
+      if (label) label.style.display = 'none';
+      return;
+    }
+    var st = state.engine ? state.engine.state() : null;
+    var active = snap.race.status === 'racing' && !state.finished && !snap.me.finishedAt &&
+      st && snap.race.charCount > 0 && (st.typed / snap.race.charCount) >= 0.9;
+    main.classList.toggle('race-fx-sprint', !!active);
+    label.style.display = active ? 'inline-flex' : 'none';
+  }
+
   /* ---------- 比赛（与首页同一套打字交互） ---------- */
   function renderCountdown(snap) {
+    hideFx();
     $('race-article').textContent = snap.race.articleTitle;
     $('race-meta').textContent = snap.race.charCount + ' 字';
     var cd = $('race-countdown');
@@ -638,6 +792,10 @@
     $('race-article').textContent = snap.race.articleTitle;
     $('race-meta').textContent = snap.race.charCount + ' 字';
     mountEngine(snap, true);
+    renderDuel(snap);
+    updateOvertake(snap);
+    updateSprint(snap);
+    updateCombo();
     renderRank(snap);
     renderSpectatorLive(snap);
 
@@ -669,6 +827,8 @@
         onChange: function (st) {
           if (state.snap && state.snap.me) {
             renderMine(state.snap, st.typed, st.accuracy);
+            updateCombo();
+            updateSprint(state.snap);
           }
         },
         onFinish: function (st) {
@@ -864,6 +1024,7 @@
 
   /* ---------- 观战（导播台） ---------- */
   function renderSpectate(snap) {
+    hideFx();
     var r = snap.race;
     $('spec-article').textContent = r.articleTitle;
     $('spec-meta').textContent = r.charCount + ' 字 · ' + ({ waiting: '等待中', countdown: '倒计时', racing: '比赛中', finished: '已结束', aborted: '已中断' }[r.status] || r.status);
@@ -972,33 +1133,91 @@
   }
 
   /* ---------- 结算 ---------- */
+  function resultCard(p, index, me, isSpec) {
+    var mine = !!me && !isSpec && samePlayer(p, me);
+    var rank = p.rank == null ? (index + 1) : p.rank;
+    var speed = p.speed == null ? '—' : Math.round(p.speed);
+    var accuracy = p.accuracy == null ? '—' : Math.round(p.accuracy);
+    var time = p.timeSeconds == null ? '—' : Number(p.timeSeconds).toFixed(1);
+    var card = document.createElement('div');
+    card.className = 'race-result-card' + (mine ? ' is-me' : '');
+    card.style.animationDelay = Math.min(index * 60, 220) + 'ms';
+    card.innerHTML =
+      '<div class="race-result-card-rank">' + rank + '</div>' +
+      '<div class="race-result-card-main">' +
+        '<div class="race-result-card-name">' + esc(p.nickname) + (mine ? '（你）' : '') + '</div>' +
+        '<div class="race-result-card-stats">' +
+          '<span>速度 <b>' + speed + '</b> 字/分</span>' +
+          '<span>正确率 <b>' + accuracy + '</b>%</span>' +
+          '<span>用时 <b>' + time + '</b> 秒</span>' +
+        '</div>' +
+      '</div>';
+    return card;
+  }
   function renderResult(snap) {
+    hideFx();
     var box = $('result-list');
-    box.innerHTML = '';
-    if (mySeat(snap) === 'spectator') {
-      box.innerHTML = '<div class="race-empty">你以观战身份参与了本场比赛</div>';
-      return;
-    }
-    snap.players.forEach(function (p, i) {
-      var row = document.createElement('div');
-      row.className = 'race-result-row' + (snap.me && p.nickname === snap.me.nickname ? ' race-result-me' : '');
-      var medal = ['金', '银', '铜'][i] || '';
-      row.innerHTML = '<span class="race-result-rank">' + (i + 1) + (medal ? ' <em>' + medal + '</em>' : '') + '</span>' +
-        '<span class="race-result-name">' + esc(p.nickname) + '</span>' +
-        '<span class="race-result-stat">' + (p.finishedAt ? '完赛 ' + (p.timeSeconds || '?') + 's · ' + Math.round(p.speed || 0) + ' 字/分' : '未完赛') + '</span>';
-      box.appendChild(row);
+    var isSpec = mySeat(snap) === 'spectator';
+    var me = findMyPlayer(snap);
+    var players = snap.players.slice().sort(function (a, b) {
+      var ar = a.rank == null ? 999 : a.rank;
+      var br = b.rank == null ? 999 : b.rank;
+      return ar - br;
     });
+    box.innerHTML = '';
+    var winText = null;
+    var winClass = '';
+    if (!isSpec && me && players.length === 2) {
+      var myPos = players.indexOf(me);
+      if (myPos >= 0) {
+        var myRank = players[myPos].rank || (myPos + 1);
+        var oppPos = myPos === 0 ? 1 : 0;
+        var oppRank = players[oppPos].rank || (oppPos + 1);
+        if (myRank === oppRank) { winText = '平'; winClass = 'is-draw'; }
+        else if (myRank === 1) { winText = '胜'; winClass = 'is-win'; }
+        else if (myRank === 2) { winText = '负'; winClass = 'is-lose'; }
+      }
+    }
+    if (!isSpec && !winText && state.selfNickname && snap.abandonedPlayers &&
+      snap.abandonedPlayers.some(function (p) { return p.nickname === state.selfNickname; })) {
+      winText = '未完成';
+      winClass = 'is-incomplete';
+    }
+    if (winText) {
+      var win = document.createElement('div');
+      win.className = 'race-result-outcome ' + winClass;
+      win.textContent = winText;
+      box.appendChild(win);
+    }
+    var cards = document.createElement('div');
+    cards.className = 'race-result-cards';
+    players.forEach(function (p, i) { cards.appendChild(resultCard(p, i, me, isSpec)); });
     if (snap.abandonedPlayers && snap.abandonedPlayers.length) {
-      var abandoned = document.createElement('div');
-      abandoned.className = 'race-result-abandoned';
-      abandoned.innerHTML = '<div class="race-result-abandoned-title">中途退出</div>' +
-        snap.abandonedPlayers.map(function (p) {
-          return '<div>' + esc(p.nickname) + (p.isGuest ? '（游客）' : '') + ' · ' + (p.atChar || 0) + ' 字</div>';
-        }).join('');
-      box.appendChild(abandoned);
+      snap.abandonedPlayers.forEach(function (p, i) {
+        var card = document.createElement('div');
+        card.className = 'race-result-card is-abandoned';
+        card.style.animationDelay = Math.min((players.length + i) * 60, 220) + 'ms';
+        card.innerHTML =
+          '<div class="race-result-card-rank">—</div>' +
+          '<div class="race-result-card-main">' +
+            '<div class="race-result-card-name">' + esc(p.nickname) + '</div>' +
+            '<div class="race-result-card-stats"><span>中途退出 · 停在 ' + (p.atChar || 0) + ' 字</span></div>' +
+          '</div>';
+        cards.appendChild(card);
+      });
+    }
+    box.appendChild(cards);
+    if (isSpec) {
+      var note = document.createElement('div');
+      note.className = 'race-result-spectator-note race-empty';
+      note.textContent = '你以观战身份参与了本场比赛';
+      box.appendChild(note);
     }
     if (snap.race.status === 'aborted') {
-      box.innerHTML = '<div class="race-empty">比赛已中断（服务端重启等原因），本场不计成绩</div>';
+      var aborted = document.createElement('div');
+      aborted.className = 'race-empty';
+      aborted.textContent = '比赛已中断（服务端重启等原因），本场不计成绩';
+      box.appendChild(aborted);
     }
   }
 

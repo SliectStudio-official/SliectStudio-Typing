@@ -4575,3 +4575,93 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 @media (prefers-reduced-motion: reduce) {
   .race-mini-caret { animation: none; }
 }
+
+/* ===== P24 比赛表现层 ===== */
+.race-fx-duel {
+  margin: 0 0 10px; padding: 4px 10px; min-height: 0;
+  border: 1px solid var(--hairline-soft); border-radius: 10px;
+  background: var(--surface-strong); color: var(--body);
+}
+.race-fx-duel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.race-fx-duel-me, .race-fx-duel-opp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42%; }
+.race-fx-duel-vs { color: var(--muted); font-size: 10px; letter-spacing: .08em; flex: 0 0 auto; }
+.race-fx-duel-track { position: relative; height: 8px; margin-top: 4px; border-radius: 999px; background: var(--hairline-strong); overflow: hidden; }
+.race-fx-duel-fill { position: absolute; top: 0; bottom: 0; width: 0; transition: width 300ms var(--ease-out); }
+.race-fx-duel-fill-me { left: 0; }
+.race-fx-duel-fill-opp { right: 0; }
+.race-fx-duel-fill.is-leader { background: var(--primary); }
+.race-fx-duel-fill.is-lag { background: var(--muted-soft); }
+.race-fx-overtake {
+  display: none; margin: 0 auto 8px; max-width: 90%; width: max-content;
+  padding: 5px 12px; border: 1px solid var(--hairline-soft); border-radius: 999px;
+  background: var(--surface-card); color: var(--ink); font-size: 12.5px; text-align: center;
+  box-shadow: var(--shadow-2); opacity: 0;
+}
+.race-fx-overtake.show { animation: raceFxFade 700ms var(--ease-out) forwards; }
+@keyframes raceFxFade { 0% { opacity: 0; transform: translateY(4px); } 12% { opacity: 1; transform: translateY(0); } 75% { opacity: 1; } 100% { opacity: 0; } }
+.race-fx-combo {
+  position: absolute; top: 44px; right: 14px; z-index: 2;
+  display: none; align-items: center; gap: 4px; padding: 3px 9px;
+  border: 1px solid var(--primary); border-radius: 999px;
+  background: var(--primary-lightest); color: var(--ink);
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+}
+.race-fx-combo.pop { animation: raceFxPop 180ms var(--ease-out); }
+@keyframes raceFxPop { 0% { transform: scale(.82); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.race-fx-sprint {
+  position: absolute; top: 12px; right: 14px; z-index: 2;
+  display: none; padding: 3px 10px;
+  border: 1px solid var(--primary); border-radius: 999px;
+  background: var(--primary-lightest); color: var(--ink);
+  font-size: 12px; font-weight: 700;
+}
+.race-main.race-fx-sprint {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 1px var(--primary);
+  transition: border-color 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
+}
+@media (max-width: 480px) {
+  .race-fx-duel { padding: 5px 8px; }
+  .race-fx-duel-me, .race-fx-duel-opp { max-width: 38%; }
+  .race-fx-sprint { width: 9px; height: 9px; padding: 0; font-size: 0; border-radius: 50%; top: 15px; right: 15px; }
+  .race-fx-combo { top: 32px; right: 15px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .race-fx-duel-fill { transition: none; }
+  .race-fx-overtake.show, .race-fx-combo.pop { animation: none; opacity: 1; }
+  .race-main.race-fx-sprint { transition: none; }
+}
+.race-result-cards { display: flex; flex-direction: column; gap: 8px; }
+.race-result-card {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--hairline-soft); border-radius: 12px;
+  background: var(--glass-bg); color: var(--body);
+  animation: raceResultCardIn 180ms var(--ease-out) backwards;
+}
+.race-result-card.is-me { border-color: var(--primary); background: var(--primary-lightest); }
+.race-result-card.is-abandoned { opacity: .68; background: var(--surface-strong); }
+.race-result-card-rank { font-family: var(--font-mono); font-size: 28px; font-weight: 700; color: var(--primary); text-align: center; }
+.race-result-card-main { min-width: 0; }
+.race-result-card-name { color: var(--ink); font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.race-result-card-stats { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 5px; font-size: 12.5px; color: var(--body); }
+.race-result-card-stats b { color: var(--ink); font-family: var(--font-mono); }
+.race-result-outcome { font-size: 30px; font-weight: 700; line-height: 1.2; margin-bottom: 4px; }
+.race-result-outcome.is-win { color: var(--primary); }
+.race-result-outcome.is-lose, .race-result-outcome.is-incomplete, .race-result-outcome.is-draw { color: var(--body); }
+.race-result-spectator-note { margin-top: 8px; }
+@keyframes raceResultCardIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 480px) {
+  .race-result-card { grid-template-columns: 34px minmax(0, 1fr); padding: 10px; gap: 8px; }
+  .race-result-card-rank { font-size: 23px; }
+  .race-result-card-stats { gap: 3px 10px; }
+  .race-result-outcome { font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .race-result-card { animation: none; }
+}
+
+/* P24 胜负/名次使用两主题都过 4.5:1 的强调色 */
+.race-result-outcome.is-win { color: var(--primary-active); }
+.race-result-card-rank { color: var(--primary-active); }
+[data-theme="dark"] .race-result-outcome.is-win,
+[data-theme="dark"] .race-result-card-rank { color: var(--primary); }
