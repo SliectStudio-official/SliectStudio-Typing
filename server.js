@@ -196,6 +196,12 @@ async function initDatabase() {
   await db.exec(createSQL);
   await runMigrations(db);
   await seedData(db);
+  const schemaRow = await db.get("SELECT value FROM settings WHERE `key` = 'schema_version'");
+  if (!schemaRow || !schemaRow.value) {
+    await db.run("INSERT INTO settings (`key`, value) VALUES ('schema_version', ?)", versionInfo.contractVersion);
+  } else if (schemaRow.value !== versionInfo.contractVersion) {
+    throw new Error(`数据规范版本不一致：库里 ${schemaRow.value}，代码 ${versionInfo.contractVersion}`);
+  }
   loadOrCreateJwtSecret();
 }
 
@@ -1848,14 +1854,28 @@ app.post('/api/admin/db-config/test', authMiddleware, adminMiddleware, async (re
   }
 });
 
-const versionPath = path.join(__dirname, 'version.json');
-let versionInfo = { version: '', name: 'Typing', fullName: 'Typing' };
+const versionFile = path.join(__dirname, 'VERSION');
+const contractFile = path.join(__dirname, 'CONTRACT_VERSION');
+let versionRaw;
+let contractRaw;
 try {
-  const versionRaw = fs.readFileSync(versionPath, 'utf8');
-  versionInfo = JSON.parse(versionRaw);
+  versionRaw = fs.readFileSync(versionFile, 'utf8').trim();
+  contractRaw = fs.readFileSync(contractFile, 'utf8').trim();
 } catch (e) {
-  console.warn('version.json not found or invalid');
+  throw new Error('读取版本文件失败: ' + e.message);
 }
+if (!/^\d+\.\d+\.\d{6}\.\d{4}$/.test(versionRaw)) {
+  throw new Error(`VERSION 格式非法: "${versionRaw}"，期望 大版本.小版本.YYMMDD.HHMM`);
+}
+if (!/^v\d+$/.test(contractRaw)) {
+  throw new Error(`CONTRACT_VERSION 格式非法: "${contractRaw}"，期望 v 加整数`);
+}
+const versionInfo = {
+  version: versionRaw,
+  name: 'Typing',
+  fullName: 'Typing-' + versionRaw,
+  contractVersion: contractRaw
+};
 
 app.get('/api/version', (req, res) => {
   res.json(versionInfo);
