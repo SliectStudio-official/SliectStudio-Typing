@@ -757,7 +757,7 @@ async function loadUsers() {
           if (!user) return;
           const newUsername = prompt('修改用户名（留空不修改）：', user.username);
           if (newUsername === null) return;
-          const newEmail = prompt('修改邮箱（留空不修改）：', user.email || '');
+          const newEmail = prompt('修改邮箱（留空不修改，输入 - 清空）：', user.email || '');
           if (newEmail === null) return;
           const newPassword = prompt('修改密码（留空不修改，至少6位）：');
           if (newPassword === null) return;
@@ -770,7 +770,12 @@ async function loadUsers() {
           }
           const body = {};
           if (newUsername.trim()) body.username = newUsername.trim();
-          if (newEmail.trim() || newEmail === '') body.email = newEmail.trim();
+          const emailValue = newEmail.trim();
+          if (emailValue === '-') {
+            body.email = '';
+          } else if (emailValue) {
+            body.email = emailValue;
+          }
           if (newPassword.trim()) body.password = newPassword.trim();
           if (roleValue) body.role = roleValue;
           const updateRes = await fetch('/api/admin/users/' + id, {
