@@ -1738,7 +1738,7 @@ app.post('/api/race/finish', raceAuth, async (req, res) => {
     if (elapsedMs <= 0) {
       return res.status(400).json({ error: '比赛尚未开始' });
     }
-    const speed = room.charCount * 60000 / elapsedMs;
+    const speed = Math.round(room.charCount * 60000 / elapsedMs);
     const timeSeconds = Math.round(elapsedMs / 1000);
     player.finishedAt = now;
     player.speed = speed;
@@ -2633,7 +2633,8 @@ app.post('/api/leaderboard', async (req, res) => {
 
     const finalSource = hasArticle ? (source || 'normal') : 'unverified';
     const ip = req.ip || req.connection.remoteAddress || '';
-    const result = await db.run('INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', userId, effectiveNickname, speed, accuracy, time_seconds || 0, hasArticle ? article_id : null, ip, finalSource);
+    const storedSpeed = Math.round(speed);
+    const result = await db.run('INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', userId, effectiveNickname, storedSpeed, accuracy, time_seconds || 0, hasArticle ? article_id : null, ip, finalSource);
     const score = await db.get('SELECT s.*, a.title as article_title FROM scores s LEFT JOIN articles a ON s.article_id = a.id WHERE s.id = ?', result.lastInsertRowid);
     res.json(score);
   } catch (e) {

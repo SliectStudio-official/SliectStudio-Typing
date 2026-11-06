@@ -180,38 +180,41 @@
 
   <button class="leaderboard-btn" id="lb-btn">排行榜</button>
 
-  <div class="sidebar-overlay" id="lb-overlay"></div>
-  <div class="sidebar" id="lb-sidebar">
-    <div class="sidebar-header">
-      <h3>排行榜</h3>
-      <button class="sidebar-close" id="lb-close">关闭</button>
-    </div>
-    <div class="sidebar-body">
-      <div class="lb-tabs">
-        <button class="lb-tab active" data-period="all">总榜</button>
-        <button class="lb-tab" data-period="week">本周</button>
-        <button class="lb-tab" data-period="today">今日</button>
-        <button class="lb-tab" data-period="guest">游客榜</button>
+  <div class="modal-overlay lb-overlay" id="lb-overlay" style="display:none">
+    <div class="lb-modal" id="lb-modal" role="dialog" aria-modal="true" aria-labelledby="lb-title">
+      <div class="lb-modal-header">
+        <h3 id="lb-title">排行榜</h3>
+        <button class="lb-modal-close" id="lb-close" aria-label="关闭排行榜">关闭</button>
       </div>
-      <div class="lb-filter-row">
-        <select id="lb-category-filter" class="custom-select">
-          <option value="">全部分类</option>
-        </select>
+      <div class="lb-modal-body">
+        <div class="lb-tabs">
+          <button class="lb-tab active" data-period="all">总榜</button>
+          <button class="lb-tab" data-period="week">本周</button>
+          <button class="lb-tab" data-period="today">今日</button>
+          <button class="lb-tab" data-period="guest">游客榜</button>
+        </div>
+        <div class="lb-filter-row">
+          <select id="lb-category-filter" class="custom-select">
+            <option value="">全部分类</option>
+          </select>
+        </div>
+        <div class="lb-table-wrap">
+          <table class="lb-table">
+            <thead>
+              <tr>
+                <th class="lb-col-rank">#</th>
+                <th class="lb-col-name">昵称</th>
+                <th class="lb-col-speed">速度</th>
+                <th class="lb-col-acc">准确率</th>
+                <th class="lb-col-article">文章</th>
+                <th class="lb-col-date">日期</th>
+              </tr>
+            </thead>
+            <tbody id="lb-tbody"></tbody>
+          </table>
+          <div class="empty-msg" id="lb-empty">暂无记录</div>
+        </div>
       </div>
-      <table class="lb-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>昵称</th>
-            <th>速度</th>
-            <th>准确率</th>
-            <th>文章</th>
-            <th>日期</th>
-          </tr>
-        </thead>
-        <tbody id="lb-tbody"></tbody>
-      </table>
-      <div class="empty-msg" id="lb-empty">暂无记录</div>
     </div>
   </div>
 

@@ -80,7 +80,7 @@ const submitMsg = document.getElementById('submit-msg');
 
 const lbBtn = document.getElementById('lb-btn');
 const lbOverlay = document.getElementById('lb-overlay');
-const lbSidebar = document.getElementById('lb-sidebar');
+const lbModal = document.getElementById('lb-modal');
 const lbClose = document.getElementById('lb-close');
 const lbTbody = document.getElementById('lb-tbody');
 const lbEmpty = document.getElementById('lb-empty');
@@ -1037,7 +1037,7 @@ function renderHistory(scores) {
     div.innerHTML =
       '<div class="info">' +
         '<span class="article-name">' + escapeHtml(s.article_title || '未知文章') + '</span>' +
-        '<span class="speed-val">' + s.speed + ' 字/分</span>' +
+        '<span class="speed-val">' + Math.round(Number(s.speed) || 0) + ' 字/分</span>' +
         '<span class="acc-val">' + s.accuracy + '%</span>' +
         '<span class="date-val">' + dateStr + '</span>' +
       '</div>';
@@ -1122,8 +1122,8 @@ lbBtn.addEventListener('click', () => {
   openLeaderboard();
 });
 
-lbOverlay.addEventListener('click', () => {
-  closeLeaderboard();
+lbOverlay.addEventListener('click', (e) => {
+  if (e.target === lbOverlay) closeLeaderboard();
 });
 
 lbClose.addEventListener('click', () => {
@@ -1144,16 +1144,29 @@ lbCategoryFilter.addEventListener('change', () => {
   fetchLeaderboard();
 });
 
+let lbReturnFocus = null;
 function openLeaderboard() {
-  lbOverlay.classList.add('show');
-  lbSidebar.classList.add('show');
+  lbReturnFocus = document.activeElement || lbBtn;
+  lbOverlay.style.display = 'flex';
+  lbModal.scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+  lbClose.focus();
   fetchLeaderboard();
 }
 
 function closeLeaderboard() {
-  lbOverlay.classList.remove('show');
-  lbSidebar.classList.remove('show');
+  lbOverlay.style.display = 'none';
+  document.body.style.overflow = '';
+  if (lbReturnFocus && lbReturnFocus.focus) lbReturnFocus.focus();
+  lbReturnFocus = null;
 }
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && lbOverlay.style.display === 'flex') {
+    e.preventDefault();
+    closeLeaderboard();
+  }
+});
 
 async function fetchLeaderboard() {
   try {
@@ -1188,16 +1201,19 @@ function renderLeaderboard(records) {
     const tr = document.createElement('tr');
     const dateStr = new Date(r.created_at).toLocaleDateString('zh-CN');
     const avatarHtml = r.avatar
-      ? '<img src="' + escapeHtml(r.avatar) + '" class="lb-avatar" style="width:24px;height:24px;border-radius:50%;vertical-align:middle;margin-right:4px">'
+      ? '<img src="' + escapeHtml(r.avatar) + '" class="lb-avatar" alt="">'
       : '';
     const guestBadge = r.user_id ? '' : '<span class="guest-badge">游客</span>';
+    const nickname = escapeHtml(r.nickname || '');
+    const article = escapeHtml(r.article_title || '');
     tr.innerHTML =
-      '<td class="lb-rank">' + (idx + 1) + '</td>' +
-      '<td>' + avatarHtml + escapeHtml(r.nickname) + guestBadge + '</td>' +
-      '<td>' + r.speed + ' 字/分</td>' +
-      '<td>' + r.accuracy + '%</td>' +
-      '<td>' + escapeHtml(r.article_title || '') + '</td>' +
-      '<td>' + dateStr + '</td>';
+      '<td class="lb-rank lb-col-rank">' + (idx + 1) + '</td>' +
+      '<td class="lb-col-name" title="' + nickname + '">' + avatarHtml +
+        '<span class="lb-name-text">' + nickname + '</span>' + guestBadge + '</td>' +
+      '<td class="lb-col-speed">' + Math.round(Number(r.speed) || 0) + ' 字/分</td>' +
+      '<td class="lb-col-acc">' + r.accuracy + '%</td>' +
+      '<td class="lb-col-article" title="' + article + '">' + article + '</td>' +
+      '<td class="lb-col-date">' + dateStr + '</td>';
     lbTbody.appendChild(tr);
   });
 }
