@@ -738,7 +738,7 @@ async function loadUsers() {
       div.innerHTML =
         '<div class="info" style="flex:1">' +
           '<div class="title">' + escapeHtml(user.username) + roleBadge + '</div>' +
-          '<div class="preview">' + (user.email || '无邮箱') + ' · 注册于 ' + (user.created_at ? user.created_at.split('T')[0] : '') + '</div>' +
+          '<div class="preview">' + escapeHtml(user.email || '无邮箱') + ' · 注册于 ' + (user.created_at ? user.created_at.split('T')[0] : '') + '</div>' +
         '</div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0">' +
           '<button class="btn-secondary edit-user-btn" data-id="' + user.id + '" style="font-size:12px;padding:4px 10px">编辑</button>' +
@@ -2051,7 +2051,7 @@ confirmOk.addEventListener('click', async () => {
 });
 
 function escapeHtml(str) {
-  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 async function loadVersion() {
