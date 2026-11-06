@@ -253,7 +253,7 @@ async function createDatabase(config) {
       return async (...args) => {
         sqlite.exec('BEGIN');
         try {
-          const result = await fn(...args);
+          const result = await fn(db, ...args);
           sqlite.exec('COMMIT');
           return result;
         } catch (e) {

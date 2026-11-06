@@ -716,8 +716,8 @@ app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) =
 app.delete('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     await db.transaction(async (tdb) => {
-      await tdb.run('DELETE FROM articles WHERE id = ?', req.params.id);
       await tdb.run('DELETE FROM scores WHERE article_id = ?', req.params.id);
+      await tdb.run('DELETE FROM articles WHERE id = ?', req.params.id);
     })();
     res.json({ success: true });
   } catch (e) {
