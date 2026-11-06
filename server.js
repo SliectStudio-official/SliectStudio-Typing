@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
@@ -14,13 +15,32 @@ const {
 
 const app = express();
 const PORT = 3000;
-const isProduction = process.env.NODE_ENV === 'production';
-const JWT_SECRET = process.env.JWT_SECRET || (isProduction ? '' : 'typing-practice-jwt-secret-key-2026');
-if (isProduction && !JWT_SECRET) {
-  throw new Error('JWT_SECRET is required in production');
-}
-if (!process.env.JWT_SECRET) {
-  console.warn('[安全警告] JWT_SECRET 未设置，使用硬编码密钥。生产环境请务必设置环境变量 JWT_SECRET。');
+let JWT_SECRET = '';
+
+function loadOrCreateJwtSecret() {
+  if (process.env.JWT_SECRET) {
+    JWT_SECRET = process.env.JWT_SECRET;
+    console.log('JWT 密钥来源: 环境变量');
+    return;
+  }
+  const secretPath = path.join(__dirname, 'data', 'jwt-secret.txt');
+  if (fs.existsSync(secretPath)) {
+    const saved = fs.readFileSync(secretPath, 'utf8').trim();
+    if (!saved) {
+      throw new Error('data/jwt-secret.txt 为空，无法启动');
+    }
+    JWT_SECRET = saved;
+    console.log('JWT 密钥来源: data/jwt-secret.txt');
+    return;
+  }
+  const secret = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.writeFileSync(secretPath, secret, { encoding: 'utf8', mode: 0o600 });
+  } catch (e) {
+    throw new Error('写入 data/jwt-secret.txt 失败: ' + e.message);
+  }
+  JWT_SECRET = secret;
+  console.log('JWT 密钥来源: data/jwt-secret.txt（本次新建）');
 }
 
 app.use(compression({
@@ -103,6 +123,7 @@ async function initDatabase() {
   await db.exec(createSQL);
   await runMigrations(db);
   await seedData(db);
+  loadOrCreateJwtSecret();
 }
 
 function normalizeDateTimeInput(value) {
