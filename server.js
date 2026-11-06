@@ -562,6 +562,27 @@ function clearAllSpectators(room, now) {
   return true;
 }
 
+function transferHostToEarliest(room, now) {
+  const candidates = Array.from(room.players.values())
+    .filter(function (p) { return p.userId !== null && p.userId !== undefined; })
+    .sort(function (a, b) { return (a.joinedAt || 0) - (b.joinedAt || 0); });
+  if (!candidates.length) return null;
+  room.hostUserId = candidates[0].userId;
+  room.hostNickname = candidates[0].nickname;
+  room.hostLastSeen = now;
+  return candidates[0];
+}
+
+function markAbandoned(room, player) {
+  if (!room.abandonedPlayers) room.abandonedPlayers = [];
+  room.abandonedPlayers.push({
+    nickname: player.nickname,
+    isGuest: !!player.isGuest,
+    atChar: player.progress || 0,
+    leftAt: Date.now()
+  });
+}
+
 async function isNicknameTakenByUser(lower) {
   const row = await db.get('SELECT id FROM users WHERE LOWER(username) = ? OR LOWER(nickname) = ? LIMIT 1', lower, lower);
   return !!row;
@@ -611,7 +632,7 @@ async function createMatchedRoom(first, second, article) {
     maxPlayers: 2, isPublic: false, passwordHash: null,
     createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
-    allowSpectator: true, spectators: new Map(), matchmade: true
+    allowSpectator: true, spectators: new Map(), matchmade: true, abandonedPlayers: []
   };
   initSpectatorState(room);
   [first, second].forEach(function (entry) {
@@ -815,7 +836,10 @@ function buildSnapshot(room, player, spectator) {
       timeSeconds: p.timeSeconds || null,
       lastSeen: p.lastSeen || null
     })),
-    spectators: spectatorList
+    spectators: spectatorList,
+    abandonedPlayers: Array.from(room.abandonedPlayers || []).map(function (p) {
+      return { nickname: p.nickname, isGuest: !!p.isGuest, atChar: p.atChar || 0 };
+    })
   };
 }
 
@@ -1029,7 +1053,8 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
       maxPlayers: mp, isPublic: isPublic !== false, passwordHash: bcrypt.hashSync(password, 10),
       createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
       cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
-      allowSpectator: isPublic === undefined ? true : true, spectators: new Map()
+      allowSpectator: isPublic === undefined ? true : true, spectators: new Map(),
+      abandonedPlayers: []
     };
     room.allowSpectator = req.body && req.body.allowSpectator === false ? false : true;
     room.spectatorEnabled = room.allowSpectator;
@@ -1287,24 +1312,51 @@ app.post('/api/race/join', async (req, res) => {
 app.post('/api/race/leave', raceAuth, async (req, res) => {
   try {
     const { room, player, spectator } = findRaceContext(req);
+    const now = Date.now();
     if (!room) {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
+    if (room.status === 'finished' || room.status === 'cancelled') {
+      if (player) room.players.delete(playerMapKey(player));
+      if (spectator) room.spectators.delete(spectatorMapKey(spectator));
+      return res.json({ success: true });
+    }
     if (spectator) {
-      if (isSpectatorHost(room, spectator)) {
-        await cancelRoom(room, 'host_leave', spectator.userId);
-      } else {
-        room.spectators.delete(spectatorMapKey(spectator));
+      const isHost = isSpectatorHost(room, spectator);
+      room.spectators.delete(spectatorMapKey(spectator));
+      if (isHost) {
+        if (room.status === 'waiting') {
+          await cancelRoom(room, 'host_leave', spectator.userId);
+        } else {
+          transferHostToEarliest(room, now);
+          if (room.players.size === 0) await cancelRoom(room, 'all_left', null);
+        }
       }
       return res.json({ success: true });
     }
     if (!player) {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
-    if (!player.isGuest && room.hostUserId === player.userId) {
-      await cancelRoom(room, 'host_leave', player.userId);
-    } else {
-      room.players.delete(playerMapKey(player));
+    const key = playerMapKey(player);
+    const wasHost = !player.isGuest && room.hostUserId === player.userId;
+    if (room.status === 'waiting') {
+      room.players.delete(key);
+      if (wasHost) {
+        await cancelRoom(room, 'host_leave', player.userId);
+      } else if (room.players.size === 0) {
+        await cancelRoom(room, 'all_left', null);
+      }
+      return res.json({ success: true });
+    }
+    if (player.finishedAt) {
+      // 已完赛的成绩保留，退出只影响本端；结算仍需展示该名次
+      return res.json({ success: true });
+    }
+    markAbandoned(room, player);
+    room.players.delete(key);
+    if (wasHost) transferHostToEarliest(room, now);
+    if (room.players.size === 0) {
+      await cancelRoom(room, 'all_left', null);
     }
     res.json({ success: true });
   } catch (e) {

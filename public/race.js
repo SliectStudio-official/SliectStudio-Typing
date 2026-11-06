@@ -201,9 +201,10 @@
     state.engineReady = false;
     if (state.engine) { state.engine.destroy(); state.engine = null; }
     showView(state.isSpectator ? 'spectate' : 'room');
-    $('race-code-chip').style.display = 'block';
+    $('race-subnav-center').style.display = 'block';
     $('race-code-chip').textContent = '房间 ' + code;
     $('room-code').textContent = code;
+    $('btn-exit-race').style.display = 'inline-flex';
     state.tickFailures = 0;
     setReconnectBanner(false);
     persistRaceRestore();
@@ -249,7 +250,12 @@
     state.isSpectator = seat === 'spectator';
     if (st === 'cancelled') {
       stopPolling();
-      toast('房间已解散' + (snap.race.cancelledReason === 'admin' ? '（管理员操作）' : ''));
+      var reason = snap.race.cancelledReason;
+      var reasonText = '房间已解散' + (reason === 'admin' ? '（管理员操作）' : '');
+      if (reason === 'all_disconnected') reasonText = '房间因所有选手离线已结束';
+      else if (reason === 'all_left') reasonText = '所有选手已退出，房间已结束';
+      else if (reason === 'vote_dissolved') reasonText = '房主发起的解散投票已通过，本局结束';
+      toast(reasonText);
       backToLobby();
       return;
     }
@@ -617,6 +623,15 @@
         '<span class="race-rank-pct">观战中</span>';
       box.appendChild(row);
     });
+    (snap.abandonedPlayers || []).forEach(function (p) {
+      var row = document.createElement('div');
+      row.className = 'race-rank-row race-rank-abandoned';
+      row.innerHTML = '<span class="race-rank-no">—</span>' +
+        '<span class="race-rank-name">' + esc(p.nickname) + '</span>' +
+        '<span class="race-rank-bar"></span>' +
+        '<span class="race-rank-pct">已退出</span>';
+      box.appendChild(row);
+    });
   }
 
   /* ---------- 观战（导播台） ---------- */
@@ -670,6 +685,15 @@
         '<span class="race-board-bar"></span><span class="race-board-pct">—</span><span class="race-board-stat">观战中</span>';
       board.appendChild(row);
     });
+    (snap.abandonedPlayers || []).forEach(function (p) {
+      var row = document.createElement('div');
+      row.className = 'race-board-row race-board-abandoned';
+      row.innerHTML =
+        '<span class="race-board-rank">—</span>' +
+        '<span class="race-board-name">' + esc(p.nickname) + (p.isGuest ? ' <em>游客</em>' : '') + '</span>' +
+        '<span class="race-board-bar"></span><span class="race-board-pct">—</span><span class="race-board-stat">已退出</span>';
+      board.appendChild(row);
+    });
     if (!snap.players.length) board.innerHTML = '<div class="race-empty">还没有选手</div>';
 
     var cap = spectatorCapacity(r);
@@ -704,9 +728,88 @@
         '<span class="race-result-stat">' + (p.finishedAt ? '完赛 ' + (p.timeSeconds || '?') + 's · ' + Math.round(p.speed || 0) + ' 字/分' : '未完赛') + '</span>';
       box.appendChild(row);
     });
+    if (snap.abandonedPlayers && snap.abandonedPlayers.length) {
+      var abandoned = document.createElement('div');
+      abandoned.className = 'race-result-abandoned';
+      abandoned.innerHTML = '<div class="race-result-abandoned-title">中途退出</div>' +
+        snap.abandonedPlayers.map(function (p) {
+          return '<div>' + esc(p.nickname) + (p.isGuest ? '（游客）' : '') + ' · ' + (p.atChar || 0) + ' 字</div>';
+        }).join('');
+      box.appendChild(abandoned);
+    }
     if (snap.race.status === 'aborted') {
       box.innerHTML = '<div class="race-empty">比赛已中断（服务端重启等原因），本场不计成绩</div>';
     }
+  }
+
+  /* ---------- 顶部退出入口 ---------- */
+  function exitConfig(snap) {
+    var isHost = !!snap && isHostSnap(snap);
+    var seat = snap ? mySeat(snap) : (state.isSpectator ? 'spectator' : 'player');
+    var st = snap && snap.race ? snap.race.status : 'waiting';
+    if (!isHost && seat === 'spectator') {
+      return {
+        label: '退出观战', confirm: '退出观战',
+        title: '退出观战',
+        text: '退出后不再占用观战席，比赛照常进行。'
+      };
+    }
+    if (st === 'waiting' && isHost) {
+      return {
+        label: '退出比赛', confirm: '退出并解散',
+        title: '退出并解散房间',
+        text: '你是房主，退出后<strong>房间将解散</strong>，其他选手会被请回大厅。'
+      };
+    }
+    if (st === 'waiting') {
+      return {
+        label: '退出比赛', confirm: '退出',
+        title: '退出比赛',
+        text: '退出后本局不再保留你的席位。'
+      };
+    }
+    if (st === 'countdown' || st === 'racing') {
+      return {
+        label: '退出比赛', confirm: '确认退出',
+        title: '退出比赛',
+        text: '比赛已开始，退出后本局记为<strong>中途退出</strong>：不计名次、不计成绩，且不能重新加入本局。'
+      };
+    }
+    return {
+      label: '退出比赛', confirm: '退出',
+      title: '退出比赛',
+      text: '返回大厅并关闭本房间。'
+    };
+  }
+  function updateRaceChrome() {
+    var hasRoom = !!state.code;
+    $('race-subnav-center').style.display = hasRoom ? 'block' : 'none';
+    $('btn-exit-race').style.display = hasRoom ? 'inline-flex' : 'none';
+    if (!hasRoom) return;
+    var label = exitConfig(state.snap).label;
+    if (window.innerWidth <= 480) label = '退出';
+    $('btn-exit-race').textContent = label;
+  }
+  var exitReturnFocus = null;
+  function openExitDialog() {
+    var cfg = exitConfig(state.snap);
+    $('race-exit-title').textContent = cfg.title;
+    $('race-exit-text').innerHTML = cfg.text;
+    $('race-exit-confirm').textContent = cfg.confirm;
+    exitReturnFocus = document.activeElement;
+    $('race-exit-overlay').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    $('race-exit-cancel').focus();
+  }
+  function closeExitDialog(restoreFocus) {
+    $('race-exit-overlay').style.display = 'none';
+    document.body.style.overflow = '';
+    if (restoreFocus && exitReturnFocus && exitReturnFocus.focus) exitReturnFocus.focus();
+    exitReturnFocus = null;
+  }
+  function confirmExitRace() {
+    closeExitDialog(false);
+    leaveRoom();
   }
 
   /* ---------- 视图 ---------- */
@@ -720,6 +823,7 @@
       refreshList();
       state.listTimer = setInterval(refreshList, 3000);
     } else if (state.listTimer) { clearInterval(state.listTimer); state.listTimer = null; }
+    updateRaceChrome();
   }
 
   function backToLobby() {
@@ -729,10 +833,20 @@
     if (state.engine) { state.engine.destroy(); state.engine = null; }
     state.snap = null; state.code = null; state.raceToken = state.token;
     state.finished = false; state.isSpectator = false; state.focusNick = null;
-    $('race-code-chip').style.display = 'none';
+    $('race-subnav-center').style.display = 'none';
+    $('btn-exit-race').style.display = 'none';
+    try {
+      localStorage.removeItem('raceMatchPending');
+      localStorage.removeItem('raceMatchPendingSince');
+    } catch (e) {}
+    try { window.dispatchEvent(new Event('race-match-cancel-local')); } catch (e) {}
     showView('lobby');
   }
-  function leaveRoom() { api('/api/race/leave', { method: 'POST', body: {} }).catch(function () {}).then(backToLobby); }
+  function leaveRoom() {
+    return api('/api/race/leave', { method: 'POST', body: {} })
+      .then(backToLobby)
+      .catch(function (e) { toast(e.message); });
+  }
 
   function restoreRace() {
     var queryCode = '';
@@ -794,9 +908,20 @@
     $('btn-start').onclick = function () {
       api('/api/race/start', { method: 'POST', body: {} }).then(tick).catch(function (e) { toast(e.message); });
     };
-    $('btn-leave').onclick = leaveRoom;
     $('btn-leave2').onclick = leaveRoom;
     $('btn-back-lobby').onclick = leaveRoom;
+    $('btn-exit-race').onclick = openExitDialog;
+    $('race-exit-cancel').onclick = function () { closeExitDialog(true); };
+    $('race-exit-confirm').onclick = confirmExitRace;
+    $('race-exit-overlay').addEventListener('click', function (e) {
+      if (e.target === $('race-exit-overlay')) closeExitDialog(true);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && $('race-exit-overlay').style.display !== 'none') {
+        e.preventDefault();
+        closeExitDialog(true);
+      }
+    });
     $('spec-enabled').onchange = function () {
       updateSpectatorSetting({ enabled: $('spec-enabled').checked });
     };
@@ -822,6 +947,7 @@
   }
 
   state.token = localStorage.getItem('token');
+  window.addEventListener('resize', updateRaceChrome);
   bind();
   updateQuickMatchVisibility();
   showView('lobby');

@@ -11,9 +11,14 @@
 <body data-page="race">
   <div id="site-nav"></div>
 
-  <div class="sub-nav">
+  <div class="sub-nav race-sub-nav">
     <div class="section-name" id="page-title">比赛大厅</div>
-    <div class="race-subnav-right" id="race-code-chip" style="display:none"></div>
+    <div class="race-subnav-center" id="race-subnav-center" style="display:none">
+      <span class="race-code-chip" id="race-code-chip"></span>
+    </div>
+    <div class="race-subnav-actions" id="race-subnav-actions">
+      <button class="race-btn race-btn-small race-btn-danger" id="btn-exit-race" style="display:none">退出比赛</button>
+    </div>
   </div>
 
   <div class="container">
@@ -91,7 +96,6 @@
               <div class="race-room-actions">
                 <button class="race-btn" id="btn-ready">准备</button>
                 <button class="race-btn race-btn-primary" id="btn-start" style="display:none">开始比赛</button>
-                <button class="race-btn race-btn-ghost" id="btn-leave">离开</button>
               </div>
             </div>
             <div class="race-players" id="room-players"></div>
@@ -195,6 +199,18 @@
   </div>
 
   <div id="race-toast" class="race-toast" style="display:none"></div>
+
+  <!-- 退出比赛二次确认 -->
+  <div class="modal-overlay race-exit-overlay" id="race-exit-overlay" style="display:none">
+    <div class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="race-exit-title">
+      <h3 id="race-exit-title">退出比赛</h3>
+      <p id="race-exit-text"></p>
+      <div class="btn-group">
+        <button class="btn-secondary" id="race-exit-cancel">取消</button>
+        <button class="btn-primary race-btn-danger" id="race-exit-confirm">退出</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 全屏开赛倒计时（手动房与快速匹配共用） -->
   <div class="race-countdown-overlay" id="race-countdown-overlay" style="display:none" role="dialog" aria-modal="true" aria-label="比赛即将开始">

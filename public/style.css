@@ -4004,7 +4004,30 @@ button:focus-visible,
 
 
 /* ===== 比赛模式 ===== */
-.race-subnav-right { font-family: var(--font-mono); font-size: 13px; color: var(--muted); letter-spacing: .04em; }
+.race-sub-nav { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; }
+.race-sub-nav .section-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.race-subnav-center { min-width: 0; justify-self: center; }
+.race-code-chip { font-family: var(--font-mono); font-size: 13px; color: var(--muted); letter-spacing: .04em; white-space: nowrap; }
+.race-subnav-actions { justify-self: end; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.race-subnav-actions .race-btn { white-space: nowrap; }
+.race-btn-danger {
+  background: transparent; border: 1px solid var(--semantic-error);
+  color: var(--semantic-error);
+}
+.race-btn-danger:hover:not(:disabled) { background: var(--primary-lightest); border-color: var(--semantic-error); }
+.race-exit-overlay .modal p strong { color: var(--semantic-error); }
+.race-rank-abandoned, .race-board-abandoned { opacity: .62; }
+.race-result-abandoned {
+  margin-top: 8px; padding: 12px 14px; border: 1px dashed var(--hairline-strong);
+  border-radius: 10px; color: var(--body); font-size: 13px;
+}
+.race-result-abandoned-title { font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+@media (max-width: 480px) {
+  .race-sub-nav { gap: 4px; }
+  .race-sub-nav .section-name { font-size: 16px; }
+  .race-code-chip { font-size: 11px; letter-spacing: .02em; }
+  .race-subnav-actions .race-btn { padding: 5px 8px; font-size: 12px; }
+}
 
 .race-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 900px) { .race-grid { grid-template-columns: 1fr; } }
