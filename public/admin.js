@@ -497,7 +497,7 @@ function renderPendingArticles(list) {
         '<div class="title">' + escapeHtml(a.title) +
           (a.category_name ? '<span class="category-tag">' + escapeHtml(a.category_name) + '</span>' : '') +
         '</div>' +
-        '<div class="preview" style="font-size:12px;color:var(--muted)">作者：' + escapeHtml(a.author || '匿名') + '</div>' +
+        '<div class="preview" style="font-size:12px;color:var(--muted)">作者：' + escapeHtml(a.author_name || '匿名') + '</div>' +
         '<div class="preview">' + escapeHtml(preview) + '</div>' +
       '</div>' +
       '<div class="actions" style="display:flex;gap:8px">' +
@@ -761,12 +761,18 @@ async function loadUsers() {
           if (newEmail === null) return;
           const newPassword = prompt('修改密码（留空不修改，至少6位）：');
           if (newPassword === null) return;
-          const newRole = confirm('是否设为管理员？\n确定=管理员，取消=普通用户') ? 'admin' : 'user';
+          const newRole = prompt('角色（admin / user，留空不修改）：', user.role);
+          if (newRole === null) return;
+          const roleValue = newRole.trim();
+          if (roleValue && roleValue !== 'admin' && roleValue !== 'user') {
+            alert('角色只能是 admin 或 user');
+            return;
+          }
           const body = {};
           if (newUsername.trim()) body.username = newUsername.trim();
           if (newEmail.trim() || newEmail === '') body.email = newEmail.trim();
           if (newPassword.trim()) body.password = newPassword.trim();
-          body.role = newRole;
+          if (roleValue) body.role = roleValue;
           const updateRes = await fetch('/api/admin/users/' + id, {
             method: 'PUT',
             headers: apiHeaders(),
