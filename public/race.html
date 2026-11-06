@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打字比赛 - Typing</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#c96442">
+</head>
+<body data-page="race">
+  <div id="site-nav"></div>
+
+  <div class="sub-nav">
+    <div class="section-name" id="page-title">比赛大厅</div>
+    <div class="race-subnav-right" id="race-code-chip" style="display:none"></div>
+  </div>
+
+  <div class="container">
+
+    <div class="race-reconnect-banner" id="race-reconnect-banner" style="display:none">连接中断，正在重试…</div>
+
+    <!-- 大厅 -->
+    <section id="view-lobby">
+      <div class="race-grid">
+        <div class="section-card">
+          <div class="section-card-title">创建房间</div>
+          <p class="race-hint" id="create-hint">登录后可创建房间；未登录也能用房间码+密码加入别人的比赛。</p>
+          <div class="race-form">
+            <label>文章
+              <select id="create-article" class="race-input"></select>
+            </label>
+            <label>房间密码（4 位数字）
+              <input id="create-password" class="race-input" inputmode="numeric" maxlength="4" placeholder="例如 1234">
+            </label>
+            <label>人数上限
+              <select id="create-max" class="race-input">
+                <option value="2">2 人</option>
+                <option value="4">4 人</option>
+                <option value="6">6 人</option>
+                <option value="8" selected>8 人</option>
+              </select>
+            </label>
+            <label class="race-checkbox"><input type="checkbox" id="create-public" checked> 公开房间（出现在大厅列表）</label>
+            <button class="race-btn race-btn-primary" id="btn-create">创建比赛</button>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-card-title">加入房间</div>
+          <div class="race-form">
+            <label>房间码
+              <input id="join-code" class="race-input race-input-code" maxlength="6" placeholder="6 位房间码">
+            </label>
+            <label>密码
+              <input id="join-password" class="race-input" inputmode="numeric" maxlength="4" placeholder="4 位数字">
+            </label>
+            <label id="join-nickname-wrap">游客昵称（未登录时必填）
+              <input id="join-nickname" class="race-input" maxlength="12" placeholder="2~12 个字符">
+            </label>
+            <label class="race-checkbox"><input type="checkbox" id="join-spectator"> 以观战身份加入（不占比赛名额）</label>
+            <button class="race-btn race-btn-primary" id="btn-join">加入比赛</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div class="section-card-title">公开房间 <span class="race-count" id="list-count"></span></div>
+        <div id="room-list" class="race-room-list"><div class="race-empty">加载中…</div></div>
+      </div>
+    </section>
+
+    <!-- 等待大厅 -->
+    <section id="view-room" style="display:none">
+      <div class="section-card">
+        <div class="race-room-head">
+          <div>
+            <div class="race-code" id="room-code">------</div>
+            <div class="race-hint" id="room-article"></div>
+          </div>
+          <div class="race-room-actions">
+            <button class="race-btn" id="btn-ready">准备</button>
+            <button class="race-btn race-btn-primary" id="btn-start" style="display:none">开始比赛</button>
+            <button class="race-btn race-btn-ghost" id="btn-leave">离开</button>
+          </div>
+        </div>
+        <div class="race-players" id="room-players"></div>
+        <div class="race-room-foot">
+          <div class="race-hint" id="room-status"></div>
+          <label class="race-checkbox" id="spectator-setting-wrap" style="display:none">
+            <input type="checkbox" id="room-allow-spectator" checked> 允许观战
+          </label>
+          <span class="race-hint" id="room-spectators"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 比赛中 -->
+    <section id="view-race" style="display:none">
+      <div class="race-stage">
+        <aside class="race-side">
+          <div class="race-side-block">
+            <div class="race-side-label">文章</div>
+            <div class="race-side-title" id="race-article"></div>
+            <div class="race-side-meta" id="race-meta"></div>
+          </div>
+          <div class="race-side-block">
+            <div class="race-side-label">当前排名</div>
+            <div id="race-rank" class="race-rank"></div>
+          </div>
+          <div class="race-side-block">
+            <div class="race-side-label">我的进度</div>
+            <div class="race-mine" id="race-mine"></div>
+          </div>
+        </aside>
+        <div class="race-main">
+          <div class="race-countdown" id="race-countdown" style="display:none"></div>
+          <div class="race-typing-hint" id="race-typing-hint">点击下方输入框开始打字，输完一行自动翻到下一行</div>
+          <div id="race-typing" class="typing-pages"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 观战（导播台） -->
+    <section id="view-spectate" style="display:none">
+      <div class="race-stage">
+        <aside class="race-side">
+          <div class="race-side-block">
+            <div class="race-side-label">导播焦点</div>
+            <div class="race-side-title" id="spec-focus-name">—</div>
+            <div class="race-side-meta" id="spec-focus-meta"></div>
+            <div class="race-mine" id="spec-focus-stats" style="margin-top:8px"></div>
+          </div>
+          <div class="race-side-block">
+            <div class="race-side-label">比赛信息</div>
+            <div class="race-side-title" id="spec-article"></div>
+            <div class="race-side-meta" id="spec-meta"></div>
+          </div>
+          <div class="race-side-block">
+            <div class="race-side-label">观战席</div>
+            <div class="race-mine" id="spec-audience"></div>
+          </div>
+        </aside>
+        <div class="race-main">
+          <div class="race-side-label" style="margin-bottom:12px">全场实时战况</div>
+          <div id="spec-board" class="race-board"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 结算 -->
+    <section id="view-result" style="display:none">
+      <div class="section-card">
+        <div class="section-card-title">比赛结果</div>
+        <div id="result-list" class="race-result"></div>
+        <div class="race-room-actions" style="margin-top:16px">
+          <button class="race-btn race-btn-primary" id="btn-back-lobby">返回大厅</button>
+          <button class="race-btn" id="btn-leave2">离开房间</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <div id="race-toast" class="race-toast" style="display:none"></div>
+  <script src="nav.js"></script>
+  <script src="announcement-bar.js"></script>
+  <script src="typing-engine.js"></script>
+  <script src="theme-toggle.js"></script>
+  <script src="race.js"></script>
+</body>
+</html>

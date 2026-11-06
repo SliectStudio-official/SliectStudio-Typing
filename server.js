@@ -710,6 +710,27 @@ async function raceAuth(req, res, next) {
   return authMiddleware(req, res, next);
 }
 
+// 重连查询不能因为“已不在房间”返回 401：游客 token 有效但房间已结束时应返回 {code:null}
+function raceActiveAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: '未登录' });
+  }
+  let decoded;
+  try {
+    decoded = jwt.verify(auth.slice(7), JWT_SECRET);
+  } catch (e) {
+    return res.status(401).json({ error: 'token无效或已过期' });
+  }
+  if (decoded && decoded.role === 'guest') {
+    req.raceIsGuest = true;
+    req.raceActiveRoomCode = decoded.raceCode;
+    req.raceActiveGuestId = decoded.guestId;
+    return next();
+  }
+  return authMiddleware(req, res, next);
+}
+
 app.post('/api/race/create', authMiddleware, async (req, res) => {
   try {
     const settings = await getRaceSettings();
@@ -1147,6 +1168,33 @@ app.get('/api/race/list', async (req, res) => {
     res.json(list);
   } catch (e) {
     res.status(500).json({ error: '获取比赛列表失败' });
+  }
+});
+
+app.get('/api/race/active', raceActiveAuth, async (req, res) => {
+  try {
+    if (req.raceIsGuest) {
+      const room = findRoomByCode(req.raceActiveRoomCode);
+      if (!room || !isActiveRoom(room)) return res.json({ code: null });
+      const player = room.players.get('g:' + req.raceActiveGuestId) || null;
+      const spectator = room.spectators ? room.spectators.get('sg:' + req.raceActiveGuestId) || null : null;
+      if (!player && !spectator) return res.json({ code: null });
+      return res.json({ code: room.code, state: buildSnapshot(room, player, spectator), isSpectator: !player });
+    }
+    const room = findRoomByUser(req.user.id, true);
+    if (room) {
+      const player = room.players.get('u:' + req.user.id);
+      if (player) return res.json({ code: room.code, state: buildSnapshot(room, player), isSpectator: false });
+    }
+    for (const r of roomRegistry.values()) {
+      if (!isActiveRoom(r)) continue;
+      if (r.spectators && r.spectators.has('su:' + req.user.id)) {
+        return res.json({ code: r.code, state: buildSnapshot(r, null, r.spectators.get('su:' + req.user.id)), isSpectator: true });
+      }
+    }
+    res.json({ code: null });
+  } catch (e) {
+    res.status(500).json({ error: '查询比赛状态失败' });
   }
 });
 
