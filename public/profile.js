@@ -30,7 +30,6 @@ const historyTbody = document.getElementById('history-tbody');
 const historyEmpty = document.getElementById('history-empty');
 const pagination = document.getElementById('pagination');
 
-const announcementBar = document.getElementById('announcement-bar');
 const errorLogTbody = document.getElementById('error-log-tbody');
 const errorLogEmpty = document.getElementById('error-log-empty');
 const errorLogActions = document.getElementById('error-log-actions');
@@ -186,7 +185,6 @@ function showProfile() {
   }
 
   loadProfile();
-  loadAnnouncement();
   loadHistory(1);
   scheduleIdle(() => {
     loadStats(7);
@@ -218,55 +216,6 @@ async function loadProfile() {
   } catch (e) {
     console.error('Failed to load profile:', e);
   }
-}
-
-const LEVEL_LABELS = {
-  'notification': '通知',
-  'site-wide': '全站',
-  'warning': '警告'
-};
-
-let currentAnnouncementId = null;
-
-async function loadAnnouncement() {
-  try {
-    const res = await fetch('/api/announcement');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data) {
-      announcementBar.style.display = 'none';
-      return;
-    }
-    currentAnnouncementId = data.id;
-    const closedKey = 'announcement_closed_' + data.id;
-    if (localStorage.getItem(closedKey)) {
-      announcementBar.style.display = 'none';
-      return;
-    }
-
-    announcementBar.className = 'announcement-bar level-' + (data.level || 'notification');
-    const badge = announcementBar.querySelector('.announcement-level-badge');
-    const title = announcementBar.querySelector('.announcement-title');
-    const text = announcementBar.querySelector('.announcement-text');
-    const closeBtn = announcementBar.querySelector('.announcement-close');
-    if (badge) badge.textContent = LEVEL_LABELS[data.level] || '通知';
-    if (title) { title.textContent = data.title || ''; title.style.display = data.title ? '' : 'none'; }
-    if (text) text.textContent = data.content || '';
-    if (closeBtn) closeBtn.style.display = (data.allow_close === 0 || data.allow_close === false) ? 'none' : '';
-    announcementBar.style.display = 'flex';
-  } catch (e) {
-    console.error('Failed to load announcement:', e);
-  }
-}
-
-const announcementCloseBtn = document.getElementById('announcement-close');
-if (announcementCloseBtn) {
-  announcementCloseBtn.addEventListener('click', () => {
-    if (currentAnnouncementId !== null) {
-      announcementBar.style.display = 'none';
-      localStorage.setItem('announcement_closed_' + currentAnnouncementId, '1');
-    }
-  });
 }
 
 async function loadStats(days) {

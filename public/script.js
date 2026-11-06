@@ -103,12 +103,6 @@ const switchToLogin = document.getElementById('switch-to-login');
 const historyList = document.getElementById('history-list');
 const historyEmpty = document.getElementById('history-empty');
 
-const announcementBar = document.getElementById('announcement-bar');
-const announcementBadge = document.getElementById('announcement-badge');
-const announcementTitle = document.getElementById('announcement-title');
-const announcementText = document.getElementById('announcement-text');
-const announcementClose = document.getElementById('announcement-close');
-
 const offlineBanner = document.getElementById('offline-banner');
 
 const privateArticlesCard = document.getElementById('private-articles-card');
@@ -300,52 +294,6 @@ logoutBtn.addEventListener('click', () => {
   currentUser = null;
   updateAuthUI();
 });
-
-const LEVEL_LABELS = {
-  'notification': '通知',
-  'site-wide': '全站',
-  'warning': '警告'
-};
-
-let currentAnnouncementId = null;
-
-async function loadAnnouncement() {
-  try {
-    const res = await fetch('/api/announcement');
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data) {
-      announcementBar.style.display = 'none';
-      return;
-    }
-    currentAnnouncementId = data.id;
-    const closedKey = 'announcement_closed_' + data.id;
-    if (localStorage.getItem(closedKey)) {
-      announcementBar.style.display = 'none';
-      return;
-    }
-    announcementBar.className = 'announcement-bar level-' + (data.level || 'notification');
-    announcementBadge.textContent = LEVEL_LABELS[data.level] || '通知';
-    announcementTitle.textContent = data.title || '';
-    announcementTitle.style.display = data.title ? '' : 'none';
-    announcementText.textContent = data.content || '';
-    if (data.allow_close === 0 || data.allow_close === false) {
-      announcementClose.style.display = 'none';
-    } else {
-      announcementClose.style.display = '';
-    }
-    announcementBar.style.display = 'flex';
-  } catch (e) {}
-}
-
-announcementClose.addEventListener('click', () => {
-  if (currentAnnouncementId !== null) {
-    announcementBar.style.display = 'none';
-    localStorage.setItem('announcement_closed_' + currentAnnouncementId, '1');
-  }
-});
-
-setInterval(loadAnnouncement, 60000);
 
 async function fetchCategories() {
   const res = await fetch('/api/categories');
@@ -1425,7 +1373,6 @@ async function init() {
     // 分类返回后即可移除 loading，文章列表在后台继续加载
     hideLoadingOverlay();
     fetchArticles().catch(() => {});
-    loadAnnouncement().catch(() => {});
     checkErrorPracticeMode();
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('service-worker.js').catch(() => {});
