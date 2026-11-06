@@ -66,7 +66,7 @@
         var remaining = block.length - start;
         if (remaining <= max || remaining < minLen * 2) {
           var tail = trimRight(block.slice(start));
-          if (tail) segs.push(tail);
+          if (tail) segs.push({ text: tail, start: start });
           break;
         }
 
@@ -160,14 +160,17 @@
           cut = Math.min(block.length, start + codePointAdvance(block, start));
           piece = block.slice(start, cut);
         }
-        segs.push(piece);
+        segs.push({ text: piece, start: start });
         start = cut;
       }
 
-      // 孤行保护：末段不足 minLen 时并入前一段
-      if (segs.length > 1 && segs[segs.length - 1].length < minLen) {
-        segs[segs.length - 2] += segs.pop();
+      // 孤行保护：末段不足 minLen 时并入前一段；用原文区间合并，保留被 trim 的空格
+      if (segs.length > 1 && segs[segs.length - 1].text.length < minLen) {
+        var prev = segs[segs.length - 2];
+        prev.text = trimRight(block.slice(prev.start, block.length));
+        segs.pop();
       }
+      segs = segs.map(function (entry) { return entry.text; });
       return segs;
     }
 
@@ -209,38 +212,63 @@
     return out;
   }
 
+  var verifyFailureLogged = false;
+  function verifySegments(text, segments, offsets) {
+    if (!Array.isArray(segments) || !Array.isArray(offsets) || segments.length !== offsets.length) {
+      return { ok: false, reason: 'segments/offsets length mismatch' };
+    }
+    var cursor = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var off = offsets[i];
+      if (!Number.isInteger(off) || off < cursor || off > text.length) {
+        return { ok: false, reason: 'bad offset at ' + i };
+      }
+      var gap = text.slice(cursor, off);
+      if (gap && !/^[ \t\u00a0\r\n]*$/.test(gap)) {
+        return { ok: false, reason: 'non-whitespace gap at ' + i };
+      }
+      if (text.slice(off, off + segments[i].length) !== segments[i]) {
+        return { ok: false, reason: 'segment mismatch at ' + i };
+      }
+      cursor = off + segments[i].length;
+    }
+    var tail = text.slice(cursor);
+    if (tail && !/^[ \t\u00a0\r\n]*$/.test(tail)) {
+      return { ok: false, reason: 'non-whitespace tail' };
+    }
+    return { ok: true };
+  }
+
   function splitTextWithOffsets(text, maxLen, strictMax) {
     var source = String(text == null ? '' : text);
     var segments = splitTextIntoSegments(source, maxLen);
     if (strictMax) segments = splitOversizedSegments(segments, Math.max(4, parseInt(maxLen, 10) || MAX_LINE));
     var offsets = [];
     var cursor = 0;
+    var effectiveMax = Math.max(4, parseInt(maxLen, 10) || MAX_LINE);
     for (var i = 0; i < segments.length; i++) {
       var segment = segments[i];
-      var start = cursor;
-      var matched = 0;
-      while (matched < segment.length && cursor < source.length) {
-        if (source.charAt(cursor) === segment.charAt(matched)) {
-          if (matched === 0) start = cursor;
-          cursor++;
-          matched++;
-        } else if (/[ \t\u00a0\r\n]/.test(source.charAt(cursor))) {
-          // 段与段之间被 trim 的空白不计入段长，但光标必须跳过
-          cursor++;
-        } else {
-          var found = source.indexOf(segment, cursor);
-          if (found >= 0) {
-            start = found;
-            cursor = found + segment.length;
-            matched = segment.length;
-          } else {
-            start = cursor;
-            cursor += segment.length;
-            matched = segment.length;
-          }
-        }
+      var scan = cursor;
+      while (scan < source.length && !source.startsWith(segment, scan)) {
+        if (!/[ \t\u00a0\r\n]/.test(source.charAt(scan))) break;
+        scan++;
       }
-      offsets.push(start);
+      if (source.startsWith(segment, scan)) {
+        offsets.push(scan);
+        cursor = scan + segment.length;
+      } else {
+        console.error('[打字分段] 段无法在原文对齐', { index: i, segment: segment.slice(0, 40), cursor: cursor });
+        var hardEnd = Math.min(source.length, cursor + effectiveMax);
+        if (hardEnd <= cursor) hardEnd = source.length;
+        segments[i] = source.slice(cursor, hardEnd);
+        offsets.push(cursor);
+        cursor = hardEnd;
+      }
+    }
+    var check = verifySegments(source, segments, offsets);
+    if (!check.ok && !verifyFailureLogged) {
+      verifyFailureLogged = true;
+      console.error('[打字分段] verifySegments 失败', check.reason);
     }
     return { segments: segments, offsets: offsets };
   }
