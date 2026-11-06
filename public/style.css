@@ -841,8 +841,8 @@ textarea {
 }
 
 .btn-dark-utility:hover {
-  background: var(--ink);
-  color: var(--on-primary);
+  background: var(--hairline-strong);
+  color: var(--ink);
 }
 
 .btn-group {
@@ -4198,7 +4198,9 @@ button:focus-visible,
 
 .race-toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
-  background: var(--ink); color: #fff; font-size: 14px; padding: 10px 18px; border-radius: 10px;
+  background: var(--surface-card); color: var(--ink);
+  border: 1px solid var(--hairline-soft);
+  font-size: 14px; padding: 10px 18px; border-radius: 10px;
   z-index: 400; box-shadow: var(--shadow-2); max-width: 90vw;
   animation: floatIn var(--motion-fast) var(--ease-out) backwards;
 }
