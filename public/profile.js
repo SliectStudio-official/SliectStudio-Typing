@@ -8,9 +8,23 @@ const adminNavItem = document.getElementById('admin-nav-item');
 const accessDenied = document.getElementById('access-denied');
 const profileContent = document.getElementById('profile-content');
 
-const avatarImg = document.getElementById('avatar-img');
+const avatarImg = document.getElementById('profile-avatar-img');
 const avatarOverlay = document.getElementById('avatar-overlay');
 const avatarInput = document.getElementById('avatar-input');
+const avatarCropOverlay = document.getElementById('avatar-crop-overlay');
+const avatarCropCanvas = document.getElementById('avatar-crop-canvas');
+const avatarCropPreview = document.getElementById('avatar-crop-preview');
+const avatarCropZoom = document.getElementById('avatar-crop-zoom');
+const avatarCropMsg = document.getElementById('avatar-crop-msg');
+const avatarCropConfirm = document.getElementById('avatar-crop-confirm');
+const avatarCropCancel = document.getElementById('avatar-crop-cancel');
+const avatarCropReselect = document.getElementById('avatar-crop-reselect');
+const CROP_SIZE = 320;
+const avatarCrop = {
+  source: null, objectUrl: null, width: 0, height: 0, zoom: 1,
+  baseScale: 1, drawW: 0, drawH: 0, offsetX: 0, offsetY: 0,
+  drag: null, uploading: false, loadToken: 0
+};
 const profileNickname = document.getElementById('profile-nickname');
 const profileUsername = document.getElementById('profile-username');
 const profileEmail = document.getElementById('profile-email');
@@ -624,41 +638,234 @@ avatarOverlay.addEventListener('click', () => {
   avatarInput.click();
 });
 
-avatarInput.addEventListener('change', async () => {
-  const file = avatarInput.files[0];
-  if (!file) return;
-
-  if (file.size > 2 * 1024 * 1024) {
-    alert('文件大小不能超过2MB');
-    return;
+function releaseCropSource() {
+  if (avatarCrop.source && typeof avatarCrop.source.close === 'function') {
+    try { avatarCrop.source.close(); } catch (e) {}
   }
-
-  const allowed = ['image/jpeg', 'image/png', 'image/gif'];
-  if (!allowed.includes(file.type)) {
-    alert('仅支持 jpg/png/gif 格式');
-    return;
+  avatarCrop.source = null;
+  if (avatarCrop.objectUrl) {
+    try { URL.revokeObjectURL(avatarCrop.objectUrl); } catch (e) {}
+    avatarCrop.objectUrl = null;
   }
+}
 
-  const formData = new FormData();
-  formData.append('avatar', file);
+function clampCropOffsets() {
+  const minX = CROP_SIZE - avatarCrop.drawW;
+  const minY = CROP_SIZE - avatarCrop.drawH;
+  avatarCrop.offsetX = Math.min(0, Math.max(minX, avatarCrop.offsetX));
+  avatarCrop.offsetY = Math.min(0, Math.max(minY, avatarCrop.offsetY));
+}
 
+function drawCrop() {
+  const ctx = avatarCropCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, CROP_SIZE, CROP_SIZE);
+  if (!avatarCrop.source) return;
+  clampCropOffsets();
+  ctx.drawImage(avatarCrop.source, avatarCrop.offsetX, avatarCrop.offsetY, avatarCrop.drawW, avatarCrop.drawH);
+}
+
+function updateCropGeometry(center) {
+  if (!avatarCrop.source) return;
+  const fit = Math.max(CROP_SIZE / avatarCrop.width, CROP_SIZE / avatarCrop.height);
+  avatarCrop.drawW = avatarCrop.width * fit * avatarCrop.zoom;
+  avatarCrop.drawH = avatarCrop.height * fit * avatarCrop.zoom;
+  if (center) {
+    avatarCrop.offsetX = (CROP_SIZE - avatarCrop.drawW) / 2;
+    avatarCrop.offsetY = (CROP_SIZE - avatarCrop.drawH) / 2;
+  }
+  drawCrop();
+}
+
+function createCropSource(file) {
+  if (window.createImageBitmap) {
+    return createImageBitmap(file, { imageOrientation: 'from-image' })
+      .then(function (bitmap) { return { source: bitmap, url: null }; })
+      .catch(function () { return createCropSourceFallback(file); });
+  }
+  return createCropSourceFallback(file);
+}
+
+function createCropSourceFallback(file) {
+  return new Promise(function (resolve, reject) {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function () { resolve({ source: img, url: url }); };
+    img.onerror = function () {
+      try { URL.revokeObjectURL(url); } catch (e) {}
+      reject(new Error('图片加载失败，请换一张图片'));
+    };
+    img.src = url;
+  });
+}
+
+function openAvatarCrop(file) {
+  const token = ++avatarCrop.loadToken;
+  releaseCropSource();
+  avatarCrop.zoom = 1;
+  avatarCrop.drag = null;
+  avatarCropUploadReset();
+  avatarCropOverlay.style.display = 'flex';
+  avatarCropZoom.value = '1';
+  avatarCropMsg.textContent = '';
+  avatarCropMsg.style.color = '';
+  createCropSource(file).then(function (result) {
+    if (token !== avatarCrop.loadToken) {
+      if (result.source && typeof result.source.close === 'function') result.source.close();
+      if (result.url) URL.revokeObjectURL(result.url);
+      return;
+    }
+    avatarCrop.source = result.source;
+    avatarCrop.objectUrl = result.url;
+    avatarCrop.width = result.source.width || result.source.naturalWidth;
+    avatarCrop.height = result.source.height || result.source.naturalHeight;
+    updateCropGeometry(true);
+    avatarCropCanvas.focus();
+  }).catch(function (e) {
+    if (token === avatarCrop.loadToken) {
+      avatarCropMsg.textContent = e.message || '图片加载失败，请换一张图片';
+      avatarCropMsg.style.color = 'var(--semantic-error)';
+    }
+  });
+}
+
+function avatarCropUploadReset() {
+  avatarCrop.uploading = false;
+  avatarCropConfirm.disabled = false;
+  avatarCropConfirm.textContent = '确认裁剪';
+  avatarCropCancel.disabled = false;
+  avatarCropReselect.disabled = false;
+}
+
+function closeAvatarCrop() {
+  if (avatarCrop.uploading) return;
+  avatarCrop.loadToken += 1;
+  avatarCropOverlay.style.display = 'none';
+  releaseCropSource();
+  avatarCrop.drag = null;
+  avatarCrop.zoom = 1;
+  avatarCropMsg.textContent = '';
+  avatarCropMsg.style.color = '';
+  avatarCropUploadReset();
+  avatarInput.value = '';
+}
+
+function cropToBlob() {
+  return new Promise(function (resolve, reject) {
+    const out = document.createElement('canvas');
+    out.width = 256;
+    out.height = 256;
+    const ctx = out.getContext('2d');
+    if (!ctx || !avatarCrop.source) { reject(new Error('导出图片失败')); return; }
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, 256, 256);
+    const k = 256 / CROP_SIZE;
+    ctx.drawImage(avatarCrop.source, avatarCrop.offsetX * k, avatarCrop.offsetY * k, avatarCrop.drawW * k, avatarCrop.drawH * k);
+    out.toBlob(function (blob) {
+      if (blob) resolve(blob);
+      else reject(new Error('导出图片失败'));
+    }, 'image/jpeg', 0.9);
+  });
+}
+
+async function confirmAvatarCrop() {
+  if (!avatarCrop.source || avatarCrop.uploading) return;
+  avatarCrop.uploading = true;
+  avatarCropConfirm.disabled = true;
+  avatarCropConfirm.textContent = '上传中…';
+  avatarCropCancel.disabled = true;
+  avatarCropReselect.disabled = true;
+  avatarCropMsg.textContent = '';
+  avatarCropMsg.style.color = '';
   try {
+    const blob = await cropToBlob();
+    if (blob.size > 5 * 1024 * 1024) throw new Error('图片不能超过 5MB');
+    const formData = new FormData();
+    formData.append('avatar', blob, 'avatar.jpg');
     const res = await fetch('/api/user/avatar', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + getToken() },
       body: formData
     });
-    const data = await res.json();
-    if (res.ok) {
-      avatarImg.src = data.avatar + '?t=' + Date.now();
-      avatarImg.classList.remove('avatar-placeholder');
-    } else {
-      alert(data.error || '上传失败');
-    }
+    const data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || '上传失败');
+    avatarImg.src = data.avatar + '?t=' + Date.now();
+    avatarImg.classList.remove('avatar-placeholder');
+    avatarCrop.uploading = false;
+    closeAvatarCrop();
+    return;
   } catch (e) {
-    alert('上传失败，请重试');
+    avatarCropMsg.textContent = e.message || '上传失败';
+    avatarCropMsg.style.color = 'var(--semantic-error)';
   }
+  avatarCrop.uploading = false;
+  avatarCropUploadReset();
+}
+
+avatarInput.addEventListener('change', () => {
+  const file = avatarInput.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    alert('图片不能超过 5MB（当前 ' + (file.size / 1024 / 1024).toFixed(1) + ' MB）');
+    avatarInput.value = '';
+    return;
+  }
+  const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowed.includes(file.type)) {
+    alert('仅支持 JPG/PNG/WebP');
+    avatarInput.value = '';
+    return;
+  }
+  openAvatarCrop(file);
+});
+
+avatarCropZoom.addEventListener('input', function () {
+  avatarCrop.zoom = Math.min(3, Math.max(1, Number(avatarCropZoom.value) || 1));
+  updateCropGeometry(false);
+});
+avatarCropCanvas.addEventListener('wheel', function (e) {
+  if (!avatarCrop.source) return;
+  e.preventDefault();
+  avatarCrop.zoom = Math.min(3, Math.max(1, avatarCrop.zoom - e.deltaY * 0.001));
+  avatarCropZoom.value = String(avatarCrop.zoom);
+  updateCropGeometry(false);
+}, { passive: false });
+avatarCropCanvas.addEventListener('pointerdown', function (e) {
+  if (!avatarCrop.source || avatarCrop.uploading) return;
+  avatarCrop.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: avatarCrop.offsetX, oy: avatarCrop.offsetY };
+  avatarCropPreview.classList.add('dragging');
+  try { avatarCropCanvas.setPointerCapture(e.pointerId); } catch (err) {}
+});
+avatarCropCanvas.addEventListener('pointermove', function (e) {
+  const drag = avatarCrop.drag;
+  if (!drag || drag.id !== e.pointerId) return;
+  const rect = avatarCropCanvas.getBoundingClientRect();
+  const k = CROP_SIZE / Math.max(1, rect.width);
+  avatarCrop.offsetX = drag.ox + (e.clientX - drag.x) * k;
+  avatarCrop.offsetY = drag.oy + (e.clientY - drag.y) * k;
+  drawCrop();
+});
+function endCropDrag(e) {
+  if (!avatarCrop.drag) return;
+  if (e && e.pointerId !== avatarCrop.drag.id) return;
+  avatarCrop.drag = null;
+  avatarCropPreview.classList.remove('dragging');
+}
+avatarCropCanvas.addEventListener('pointerup', endCropDrag);
+avatarCropCanvas.addEventListener('pointercancel', endCropDrag);
+avatarCropConfirm.addEventListener('click', confirmAvatarCrop);
+avatarCropCancel.addEventListener('click', closeAvatarCrop);
+avatarCropReselect.addEventListener('click', function () {
+  if (avatarCrop.uploading) return;
+  closeAvatarCrop();
   avatarInput.value = '';
+  avatarInput.click();
+});
+avatarCropOverlay.addEventListener('click', function (e) {
+  if (e.target === avatarCropOverlay) closeAvatarCrop();
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && avatarCropOverlay.style.display !== 'none') closeAvatarCrop();
 });
 
 saveNicknameBtn.addEventListener('click', async () => {

@@ -93,11 +93,11 @@
     <div id="profile-content" style="display:none">
       <div class="profile-header">
         <div class="avatar-wrapper">
-          <img id="avatar-img" src="" alt="头像" class="avatar-img">
+          <img id="profile-avatar-img" src="" alt="头像" class="avatar-img">
           <div class="avatar-overlay" id="avatar-overlay">
             <span>更换</span>
           </div>
-          <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.gif" style="display:none">
+          <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp" style="display:none">
         </div>
         <div class="profile-meta">
           <div class="profile-nickname" id="profile-nickname"></div>
@@ -240,6 +240,27 @@
         <p class="note" style="margin-bottom:12px">从已审核文章中选择加入个人离线缓存，断网时仍可练习。管理员标记的全局离线文章无需重复添加。</p>
         <div id="offline-manage-list"></div>
         <div class="empty-msg" id="offline-manage-empty" style="display:none">暂无可选文章</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 头像裁剪确认框 -->
+  <div class="modal-overlay avatar-crop-overlay" id="avatar-crop-overlay" style="display:none">
+    <div class="modal avatar-crop-modal" role="dialog" aria-modal="true" aria-label="裁剪头像">
+      <h3>裁剪头像</h3>
+      <p class="avatar-crop-hint">拖动图片调整位置，滑杆缩放</p>
+      <div class="avatar-crop-preview" id="avatar-crop-preview">
+        <canvas id="avatar-crop-canvas" width="320" height="320"></canvas>
+      </div>
+      <div class="avatar-crop-zoom-row">
+        <span>缩放</span>
+        <input type="range" id="avatar-crop-zoom" min="1" max="3" step="0.01" value="1">
+      </div>
+      <p class="avatar-crop-msg" id="avatar-crop-msg"></p>
+      <div class="btn-group avatar-crop-actions">
+        <button class="btn-secondary" id="avatar-crop-reselect">重新选择</button>
+        <button class="btn-secondary" id="avatar-crop-cancel">取消</button>
+        <button class="btn-primary" id="avatar-crop-confirm">确认裁剪</button>
       </div>
     </div>
   </div>
