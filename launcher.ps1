@@ -53,6 +53,18 @@ function Write-ConfigFile {
     [System.IO.File]::WriteAllText($configPath, $Content, $utf8BOM)
 }
 
+function Write-LauncherConfig {
+    param(
+        [string]$Mode,
+        [string]$Secret
+    )
+    if ($Secret) {
+        Write-ConfigFile "`$launcherMode = '$Mode'`r`n`$launcherJwtSecret = '$Secret'"
+    } else {
+        Write-ConfigFile "`$launcherMode = '$Mode'"
+    }
+}
+
 # ============================================================
 # Phase 1: Node.js Environment Check & Auto-Fix
 # ============================================================
@@ -296,7 +308,7 @@ if (-not $launcherMode) {
     if ($launcherMode -eq 'production') {
         $launcherJwtSecret = New-RandomSecret
     }
-    Write-ConfigFile "`$launcherMode = '$launcherMode'"
+    Write-LauncherConfig $launcherMode $launcherJwtSecret
 }
 
 if ($launcherMode -eq 'production' -and -not $launcherJwtSecret) {
