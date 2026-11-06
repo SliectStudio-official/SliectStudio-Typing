@@ -112,9 +112,13 @@
         '<div class="race-room-row-main"><span class="race-room-code">' + esc(r.code) + '</span>' +
         '<span class="race-room-article">' + esc(r.articleTitle) + '</span></div>' +
         '<div class="race-room-row-meta"><span>' + r.playerCount + '/' + r.maxPlayers + ' 人</span>' +
-        '<span>' + r.charCount + ' 字</span><span>房主 ' + esc(r.hostNickname) + '</span></div>' +
-        '<button class="race-btn race-btn-small" data-code="' + esc(r.code) + '">加入</button>';
-      row.querySelector('button').onclick = function () { quickJoin(r.code); };
+        '<span>' + r.charCount + ' 字</span><span>房主 ' + esc(r.hostNickname) + '</span>' +
+        (r.spectatorEnabled ? '<span>观战 ' + (r.spectatorCount || 0) + '/' + (r.spectatorSeats || 0) + '</span>' : '') + '</div>' +
+        '<div class="race-room-row-actions">' +
+        '<button class="race-btn race-btn-small" data-action="join">加入</button>' +
+        '<button class="race-btn race-btn-small race-btn-ghost" data-action="spectate">观战</button></div>';
+      row.querySelector('[data-action="join"]').onclick = function () { quickJoin(r.code); };
+      row.querySelector('[data-action="spectate"]').onclick = function () { quickSpectate(r.code); };
       box.appendChild(row);
     });
   }
@@ -147,6 +151,11 @@
     var pw = prompt('该房间需要密码（4 位数字）：');
     if (pw === null) return;
     doJoin({ code: code, password: pw });
+  }
+  function quickSpectate(code) {
+    var pw = prompt('以观战身份进入该房间，请输入 4 位密码：');
+    if (pw === null) return;
+    doJoin({ code: code, password: pw, asSpectator: true });
   }
 
   /* ---------- 建房 / 加入 ---------- */
@@ -215,6 +224,7 @@
         toast('已重新连接');
       }
       state.snap = snap;
+      state.isSpectator = mySeat(snap) === 'spectator';
       persistRaceRestore();
       render();
     }).catch(function (e) {
@@ -235,55 +245,244 @@
     var snap = state.snap;
     if (!snap) return;
     var st = snap.race.status;
+    var seat = mySeat(snap);
+    state.isSpectator = seat === 'spectator';
     if (st === 'cancelled') {
       stopPolling();
       toast('房间已解散' + (snap.race.cancelledReason === 'admin' ? '（管理员操作）' : ''));
       backToLobby();
       return;
     }
-    if (state.isSpectator) { showView('spectate'); renderSpectate(snap); return; }
+    if (st === 'finished' || st === 'aborted') {
+      clearRaceRestore();
+      showView('result'); renderResult(snap); stopPolling();
+      return;
+    }
+    if (seat === 'spectator') {
+      if (st === 'waiting') { showView('room'); renderRoom(snap); }
+      else { showView('spectate'); renderSpectate(snap); }
+      return;
+    }
     if (st === 'waiting') { showView('room'); renderRoom(snap); }
     else if (st === 'countdown') { showView('race'); renderCountdown(snap); }
     else if (st === 'racing') { showView('race'); renderRacing(snap); }
-    else if (st === 'finished' || st === 'aborted') {
-      clearRaceRestore();
-      showView('result'); renderResult(snap); stopPolling();
-    }
   }
 
   /* ---------- 等待房间 ---------- */
+  function mySeat(snap) {
+    if (snap.race && snap.race.mySeat) return snap.race.mySeat;
+    if (snap.me) return 'player';
+    return snap.spectator ? 'spectator' : null;
+  }
+  function isHostSnap(snap) {
+    return !!(snap.race.isHost || (snap.me && snap.me.userId !== null && snap.me.userId === snap.race.hostUserId));
+  }
+  function spectatorCapacity(race) {
+    return race.spectatorEnabled ? (race.spectatorSeats || 0) : 0;
+  }
+  function tagHtml(isHost, isGuest) {
+    return (isHost ? '<span class="race-tag race-tag-host">房主</span>' : '') +
+      (isGuest ? '<span class="race-tag">游客</span>' : '');
+  }
+  function makeKickButton(target) {
+    var kick = document.createElement('button');
+    kick.className = 'race-btn race-btn-small race-btn-ghost';
+    kick.textContent = '移出';
+    kick.onclick = function () { doKick(target); };
+    return kick;
+  }
   function renderRoom(snap) {
+    var race = snap.race;
+    var seat = mySeat(snap);
+    var isHost = isHostSnap(snap);
+    var cap = spectatorCapacity(race);
     var me = snap.me;
-    $('room-article').textContent = snap.race.articleTitle + ' · ' + snap.race.charCount + ' 字 · 上限 ' + snap.race.maxPlayers + ' 人';
+    $('room-article').textContent = race.articleTitle + ' · ' + race.charCount + ' 字 · 上限 ' + race.maxPlayers + ' 人';
+    $('btn-ready').style.display = seat === 'player' ? 'inline-block' : 'none';
     $('btn-ready').textContent = me && me.ready ? '取消准备' : '准备';
-    var isHost = me && me.userId && me.userId === snap.race.hostUserId;
     $('btn-start').style.display = isHost ? 'inline-block' : 'none';
-    var allReady = snap.players.every(function (p) { return p.ready; });
+    var allReady = snap.players.length > 0 && snap.players.every(function (p) { return p.ready; });
     $('btn-start').disabled = !allReady;
-    $('room-status').textContent = allReady
-      ? '全员已准备，房主可以开始'
-      : '等待所有人准备（' + snap.players.filter(function (p) { return p.ready; }).length + '/' + snap.players.length + '）';
-    $('spectator-setting-wrap').style.display = isHost ? 'flex' : 'none';
-    $('room-allow-spectator').checked = snap.race.allowSpectator !== false;
-    $('room-spectators').textContent = '观战 ' + (snap.race.spectatorCount || 0) + ' 人';
+    if (!snap.players.length) {
+      $('room-status').textContent = '没有选手，无法开始';
+    } else {
+      $('room-status').textContent = allReady
+        ? '全员已准备，房主可以开始'
+        : '等待所有人准备（' + snap.players.filter(function (p) { return p.ready; }).length + '/' + snap.players.length + '）';
+    }
 
     var box = $('room-players');
     box.innerHTML = '';
     snap.players.forEach(function (p) {
       var row = document.createElement('div');
       row.className = 'race-player-row';
-      var tags = (p.isHost ? '<span class="race-tag race-tag-host">房主</span>' : '') + (p.isGuest ? '<span class="race-tag">游客</span>' : '');
-      row.innerHTML = '<span class="race-player-name">' + esc(p.nickname) + tags + '</span>' +
+      row.innerHTML = '<span class="race-player-name">' + esc(p.nickname) + tagHtml(p.isHost, p.isGuest) + '</span>' +
         '<span class="' + (p.ready ? 'race-ready-on' : 'race-ready-off') + '">' + (p.ready ? '已准备' : '未准备') + '</span>';
       if (isHost && !p.isHost) {
-        var kick = document.createElement('button');
-        kick.className = 'race-btn race-btn-small race-btn-ghost';
-        kick.textContent = '踢出';
-        kick.onclick = function () { doKick(p); };
-        row.appendChild(kick);
+        var toSpec = document.createElement('button');
+        toSpec.className = 'race-btn race-btn-small race-btn-ghost';
+        toSpec.textContent = '转观战';
+        toSpec.disabled = !race.spectatorEnabled || snap.spectators.length >= cap;
+        if (!race.spectatorEnabled) toSpec.title = '请先开启观战';
+        else if (snap.spectators.length >= cap) toSpec.title = '观战席已满';
+        toSpec.onclick = function () { assignSeat(p, 'spectator'); };
+        row.appendChild(toSpec);
+        row.appendChild(makeKickButton(p));
       }
       box.appendChild(row);
     });
+    snap.spectators.filter(function (s) { return s.fromPlayer; }).forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'race-player-row race-player-spectating';
+      row.innerHTML = '<span class="race-player-name">' + esc(s.nickname) + tagHtml(s.isHost, s.isGuest) + '</span>' +
+        '<span class="race-ready-off">观战中</span>';
+      if (isHost && !s.isHost) {
+        var toPlayer = document.createElement('button');
+        toPlayer.className = 'race-btn race-btn-small race-btn-ghost';
+        toPlayer.textContent = '回选手席';
+        toPlayer.disabled = snap.players.length >= race.maxPlayers;
+        if (toPlayer.disabled) toPlayer.title = '选手席已满';
+        toPlayer.onclick = function () { assignSeat(s, 'player'); };
+        row.appendChild(toPlayer);
+        row.appendChild(makeKickButton(s));
+      }
+      box.appendChild(row);
+    });
+
+    renderSpectatorPanel(snap, isHost, seat);
+  }
+
+  function renderSpectatorPanel(snap, isHost, seat) {
+    var race = snap.race;
+    var cap = spectatorCapacity(race);
+    var count = snap.spectators.length;
+    $('spec-seats-count').textContent = count + '/' + cap;
+    $('spec-mode-note').textContent = !race.spectatorEnabled
+      ? '观战已关闭'
+      : (race.spectatorMode === 'host' ? '观战席位由房主安排' : '玩家可自行进入观战席');
+
+    var list = $('spec-list');
+    list.innerHTML = '';
+    if (!snap.spectators.length) {
+      list.innerHTML = '<div class="race-spectate-empty">暂无观战者</div>';
+    } else {
+      snap.spectators.forEach(function (s) {
+        var item = document.createElement('div');
+        item.className = 'race-spectate-item';
+        item.innerHTML = '<span class="race-spectate-name">' + esc(s.nickname) + tagHtml(s.isHost, s.isGuest) + '</span>' +
+          (s.fromPlayer ? '<span class="race-tag race-tag-muted">选手转入</span>' : '');
+        if (isHost && !s.isHost) {
+          var pull = document.createElement('button');
+          pull.className = 'race-btn race-btn-small race-btn-ghost';
+          pull.textContent = '回选手席';
+          pull.disabled = snap.players.length >= race.maxPlayers;
+          if (pull.disabled) pull.title = '选手席已满';
+          pull.onclick = function () { assignSeat(s, 'player'); };
+          item.appendChild(pull);
+        }
+        list.appendChild(item);
+      });
+    }
+
+    var actions = $('spec-actions');
+    actions.innerHTML = '';
+    if (seat === 'spectator') {
+      var selfNote = document.createElement('div');
+      selfNote.className = 'race-spectate-self';
+      selfNote.textContent = '你正在观战';
+      actions.appendChild(selfNote);
+    }
+    var canReturn = snap.players.length < race.maxPlayers;
+    if (isHost) {
+      var hostBtn = document.createElement('button');
+      hostBtn.className = 'race-btn race-btn-small';
+      if (seat === 'spectator') {
+        hostBtn.textContent = '回到选手席';
+        hostBtn.disabled = !canReturn;
+        if (!canReturn) hostBtn.title = '选手席已满';
+        hostBtn.onclick = function () { spectateSelf('leave'); };
+      } else {
+        hostBtn.textContent = '进入观战席';
+        hostBtn.disabled = !race.spectatorEnabled || count >= cap;
+        if (!race.spectatorEnabled) hostBtn.title = '请先开启观战';
+        else if (count >= cap) hostBtn.title = '观战席已满';
+        hostBtn.onclick = function () { spectateSelf('enter'); };
+      }
+      actions.appendChild(hostBtn);
+    } else if (seat === 'spectator') {
+      if (race.spectatorEnabled && race.spectatorMode === 'free') {
+        var back = document.createElement('button');
+        back.className = 'race-btn race-btn-small';
+        back.textContent = '回到选手席';
+        back.disabled = !canReturn;
+        if (!canReturn) back.title = '选手席已满';
+        back.onclick = function () { spectateSelf('leave'); };
+        actions.appendChild(back);
+      } else {
+        actions.insertAdjacentHTML('beforeend', '<div class="race-hint">观战席位由房主安排</div>');
+      }
+    } else if (seat === 'player') {
+      if (!race.spectatorEnabled) {
+        actions.innerHTML = '<div class="race-hint">观战已关闭</div>';
+      } else if (race.spectatorMode === 'host') {
+        actions.innerHTML = '<div class="race-hint">观战席位由房主安排</div>';
+      } else {
+        var enter = document.createElement('button');
+        enter.className = 'race-btn race-btn-small';
+        enter.textContent = '进入观战席';
+        enter.disabled = count >= cap;
+        if (count >= cap) enter.title = '观战席已满';
+        enter.onclick = function () { spectateSelf('enter'); };
+        actions.appendChild(enter);
+      }
+    }
+
+    $('spec-host-controls').style.display = isHost ? 'block' : 'none';
+    if (isHost) {
+      $('spec-enabled').checked = !!race.spectatorEnabled;
+      $('spec-mode-free').checked = race.spectatorMode !== 'host';
+      $('spec-mode-host').checked = race.spectatorMode === 'host';
+      var input = $('spec-seats-input');
+      input.max = String(race.maxSpectators || cap || 1);
+      input.disabled = !race.spectatorEnabled;
+      if (document.activeElement !== input) input.value = String(race.spectatorSeats || 0);
+      $('spec-cap-hint').textContent = '席位数范围 1~' + (race.maxSpectators || cap || 1) + '（按人数 10% 计算，至少 1 席）';
+    }
+  }
+
+  function spectateSelf(action) {
+    api('/api/race/spectate/self', { method: 'POST', body: { action: action } })
+      .then(function () { return tick(); })
+      .catch(function (e) { toast(e.message); });
+  }
+  function assignSeat(target, to) {
+    var targetType = target.isGuest ? 'guest' : 'user';
+    var targetId = target.isGuest ? target.guestId : target.userId;
+    api('/api/race/spectate/assign', { method: 'POST', body: { targetType: targetType, targetId: targetId, to: to } })
+      .then(function () { return tick(); })
+      .catch(function (e) { toast(e.message); });
+  }
+  function updateSpectatorSetting(body) {
+    return api('/api/race/spectate/settings', { method: 'POST', body: body })
+      .then(function (r) { toast('观战席已更新'); tick(); return r; })
+      .catch(function (e) { toast(e.message); tick(); });
+  }
+
+  function renderSpectatorLive(snap) {
+    var race = snap.race;
+    var cap = spectatorCapacity(race);
+    $('race-spectator-live-count').textContent = !race.spectatorEnabled
+      ? '观战已关闭'
+      : ('观战 ' + snap.spectators.length + '/' + cap + ' 人');
+    var box = $('race-spectator-live-list');
+    box.innerHTML = '';
+    snap.spectators.forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'race-spectate-live-row';
+      row.innerHTML = esc(s.nickname) + tagHtml(s.isHost, s.isGuest);
+      box.appendChild(row);
+    });
+    if (!snap.spectators.length) box.innerHTML = '<div class="race-spectate-empty">暂无观战者</div>';
   }
 
   function doKick(p) {
@@ -343,6 +542,7 @@
     showCountdownOverlay(snap);
     mountEngine(snap, false);
     renderRank(snap);
+    renderSpectatorLive(snap);
   }
 
   function renderRacing(snap) {
@@ -352,6 +552,7 @@
     $('race-meta').textContent = snap.race.charCount + ' 字';
     mountEngine(snap, true);
     renderRank(snap);
+    renderSpectatorLive(snap);
 
     if (snap.me && state.engine) {
       var st = state.engine.state();
@@ -407,6 +608,15 @@
         '<span class="race-rank-pct">' + (p.finishedAt ? '完成' : pct + '%') + '</span>';
       box.appendChild(row);
     });
+    snap.spectators.filter(function (s) { return s.fromPlayer; }).forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'race-rank-row race-rank-spectating';
+      row.innerHTML = '<span class="race-rank-no">—</span>' +
+        '<span class="race-rank-name">' + esc(s.nickname) + '</span>' +
+        '<span class="race-rank-bar"></span>' +
+        '<span class="race-rank-pct">观战中</span>';
+      box.appendChild(row);
+    });
   }
 
   /* ---------- 观战（导播台） ---------- */
@@ -430,6 +640,10 @@
         '<div>速度 ' + (focus.speed ? Math.round(focus.speed) : '—') + ' 字/分</div>' +
         '<div>正确率 ' + (focus.accuracy ? focus.accuracy + '%' : '—') + '</div>' +
         '<div>用时 ' + (focus.timeSeconds ? focus.timeSeconds + 's' : '—') + '</div>';
+    } else {
+      $('spec-focus-name').textContent = '—';
+      $('spec-focus-meta').textContent = '还没有选手';
+      $('spec-focus-stats').innerHTML = '';
     }
 
     var board = $('spec-board');
@@ -447,20 +661,40 @@
       row.onclick = function () { state.focusNick = p.nickname; renderSpectate(snap); };
       board.appendChild(row);
     });
+    snap.spectators.filter(function (s) { return s.fromPlayer; }).forEach(function (s) {
+      var row = document.createElement('div');
+      row.className = 'race-board-row race-board-spectating';
+      row.innerHTML =
+        '<span class="race-board-rank">—</span>' +
+        '<span class="race-board-name">' + esc(s.nickname) + (s.isHost ? ' <em>房主</em>' : '') + (s.isGuest ? ' <em>游客</em>' : '') + '</span>' +
+        '<span class="race-board-bar"></span><span class="race-board-pct">—</span><span class="race-board-stat">观战中</span>';
+      board.appendChild(row);
+    });
     if (!snap.players.length) board.innerHTML = '<div class="race-empty">还没有选手</div>';
 
-    $('spec-audience').innerHTML =
-      '<div>观战 ' + (r.spectatorCount || 0) + ' 人</div>' +
-      '<div>我：' + esc(snap.spectator ? snap.spectator.nickname : '') + '</div>' +
-      '<button class="race-btn race-btn-small" id="btn-spec-leave" style="margin-top:8px">离开观战</button>';
-    var lv = $('btn-spec-leave');
-    if (lv) lv.onclick = leaveRoom;
+    var cap = spectatorCapacity(r);
+    var audience = '<div class="race-spectate-live-head">观战 ' + (r.spectatorEnabled ? (snap.spectators.length + '/' + cap) : '已关闭') + '</div>' +
+      '<div class="race-spectate-live-self">你正在观战：' + esc(snap.spectator ? snap.spectator.nickname : '') + '</div>';
+    if (snap.spectators.length) {
+      audience += '<div class="race-spectate-live-list">';
+      snap.spectators.forEach(function (s) {
+        audience += '<div class="race-spectate-live-row">' + esc(s.nickname) + tagHtml(s.isHost, s.isGuest) + '</div>';
+      });
+      audience += '</div>';
+    } else {
+      audience += '<div class="race-spectate-empty">暂无观战者</div>';
+    }
+    $('spec-audience').innerHTML = audience;
   }
 
   /* ---------- 结算 ---------- */
   function renderResult(snap) {
     var box = $('result-list');
     box.innerHTML = '';
+    if (mySeat(snap) === 'spectator') {
+      box.innerHTML = '<div class="race-empty">你以观战身份参与了本场比赛</div>';
+      return;
+    }
     snap.players.forEach(function (p, i) {
       var row = document.createElement('div');
       row.className = 'race-result-row' + (snap.me && p.nickname === snap.me.nickname ? ' race-result-me' : '');
@@ -551,7 +785,7 @@
       var code = ($('join-code').value || '').trim().toUpperCase();
       var pw = ($('join-password').value || '').trim();
       if (!code) { toast('请输入房间码'); return; }
-      doJoin({ code: code, password: pw, asSpectator: $('join-spectator').checked });
+      doJoin({ code: code, password: pw });
     };
     $('btn-ready').onclick = function () {
       var me = state.snap && state.snap.me;
@@ -563,10 +797,27 @@
     $('btn-leave').onclick = leaveRoom;
     $('btn-leave2').onclick = leaveRoom;
     $('btn-back-lobby').onclick = leaveRoom;
-    $('room-allow-spectator').onchange = function () {
-      api('/api/race/spectator-setting', { method: 'POST', body: { allow: $('room-allow-spectator').checked } })
-        .then(function (r) { toast(r.allowSpectator ? '已开放观战' : '已关闭观战'); tick(); })
-        .catch(function (e) { toast(e.message); });
+    $('spec-enabled').onchange = function () {
+      updateSpectatorSetting({ enabled: $('spec-enabled').checked });
+    };
+    $('spec-mode-free').onchange = function () {
+      if ($('spec-mode-free').checked) updateSpectatorSetting({ mode: 'free' });
+    };
+    $('spec-mode-host').onchange = function () {
+      if ($('spec-mode-host').checked) updateSpectatorSetting({ mode: 'host' });
+    };
+    $('spec-seats-input').onchange = function () {
+      var input = $('spec-seats-input');
+      var cap = input.max ? parseInt(input.max, 10) : 1;
+      var value = parseInt(input.value, 10);
+      if (!Number.isInteger(value)) value = 1;
+      var clamped = Math.max(1, Math.min(cap, value));
+      if (clamped !== value) {
+        toast('观战席位数必须在 1 到 ' + cap + ' 之间');
+        input.value = String(clamped);
+        return;
+      }
+      updateSpectatorSetting({ seats: clamped });
     };
   }
 

@@ -67,7 +67,6 @@
             <label id="join-nickname-wrap">游客昵称（未登录时必填）
               <input id="join-nickname" class="race-input" maxlength="12" placeholder="2~12 个字符">
             </label>
-            <label class="race-checkbox"><input type="checkbox" id="join-spectator"> 以观战身份加入（不占比赛名额）</label>
             <button class="race-btn race-btn-primary" id="btn-join">加入比赛</button>
           </div>
         </div>
@@ -82,24 +81,43 @@
     <!-- 等待大厅 -->
     <section id="view-room" style="display:none">
       <div class="section-card">
-        <div class="race-room-head">
-          <div>
-            <div class="race-code" id="room-code">------</div>
-            <div class="race-hint" id="room-article"></div>
+        <div class="race-wait-layout">
+          <div class="race-wait-main">
+            <div class="race-room-head">
+              <div>
+                <div class="race-code" id="room-code">------</div>
+                <div class="race-hint" id="room-article"></div>
+              </div>
+              <div class="race-room-actions">
+                <button class="race-btn" id="btn-ready">准备</button>
+                <button class="race-btn race-btn-primary" id="btn-start" style="display:none">开始比赛</button>
+                <button class="race-btn race-btn-ghost" id="btn-leave">离开</button>
+              </div>
+            </div>
+            <div class="race-players" id="room-players"></div>
+            <div class="race-room-foot">
+              <div class="race-hint" id="room-status"></div>
+            </div>
           </div>
-          <div class="race-room-actions">
-            <button class="race-btn" id="btn-ready">准备</button>
-            <button class="race-btn race-btn-primary" id="btn-start" style="display:none">开始比赛</button>
-            <button class="race-btn race-btn-ghost" id="btn-leave">离开</button>
-          </div>
-        </div>
-        <div class="race-players" id="room-players"></div>
-        <div class="race-room-foot">
-          <div class="race-hint" id="room-status"></div>
-          <label class="race-checkbox" id="spectator-setting-wrap" style="display:none">
-            <input type="checkbox" id="room-allow-spectator" checked> 允许观战
-          </label>
-          <span class="race-hint" id="room-spectators"></span>
+          <aside class="race-spectate-panel" id="race-spectate-panel">
+            <div class="race-spectate-head">
+              <div class="race-spectate-title">观战席 <span id="spec-seats-count">0/1</span></div>
+              <div class="race-spectate-note" id="spec-mode-note"></div>
+            </div>
+            <div class="race-spectate-list" id="spec-list"></div>
+            <div class="race-spectate-actions" id="spec-actions"></div>
+            <div class="race-spectate-host" id="spec-host-controls" style="display:none">
+              <label class="race-checkbox"><input type="checkbox" id="spec-enabled"> 开放观战</label>
+              <div class="race-spectate-mode">
+                <label class="race-checkbox"><input type="radio" name="spec-mode" id="spec-mode-free" value="free"> 自由进入</label>
+                <label class="race-checkbox"><input type="radio" name="spec-mode" id="spec-mode-host" value="host"> 房主安排</label>
+              </div>
+              <label class="race-spectate-seats">席位数
+                <input id="spec-seats-input" type="number" min="1" max="1" step="1">
+              </label>
+              <div class="race-hint" id="spec-cap-hint"></div>
+            </div>
+          </aside>
         </div>
       </div>
     </section>
@@ -120,6 +138,11 @@
           <div class="race-side-block">
             <div class="race-side-label">我的进度</div>
             <div class="race-mine" id="race-mine"></div>
+          </div>
+          <div class="race-side-block" id="race-spectator-live">
+            <div class="race-side-label">观战席</div>
+            <div class="race-side-meta" id="race-spectator-live-count"></div>
+            <div class="race-mine" id="race-spectator-live-list"></div>
           </div>
         </aside>
         <div class="race-main">
