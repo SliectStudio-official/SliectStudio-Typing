@@ -126,6 +126,14 @@ function parseDatabaseValue(value) {
   return value;
 }
 
+function normalizeEmail(input) {
+  if (input === null || input === undefined) return null;
+  const text = String(input).trim();
+  if (!text) return null;
+  if (text.length > 100 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return { ok: false };
+  return text.toLowerCase();
+}
+
 function calculateDifficulty(content) {
   const charCount = content.length;
   const punctuationCount = (content.match(/[，。！？、；：""''《》（）\[\]{},.!?;:'"()<>\/\\@#$%^&*+=~`]/g) || []).length;
@@ -251,20 +259,24 @@ app.post('/api/auth/register', async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ error: '密码至少6位' });
     }
+    const normalizedEmail = normalizeEmail(email);
+    if (normalizedEmail && normalizedEmail.ok === false) {
+      return res.status(400).json({ error: '邮箱格式不正确' });
+    }
     const existing = await db.get('SELECT id FROM users WHERE username = ?', username);
     if (existing) {
       return res.status(400).json({ error: '用户名已存在' });
     }
-    if (email && email.trim()) {
-      const emailExisting = await db.get('SELECT id FROM users WHERE email = ?', email.trim());
+    if (normalizedEmail) {
+      const emailExisting = await db.get('SELECT id FROM users WHERE email = ?', normalizedEmail);
       if (emailExisting) {
         return res.status(400).json({ error: '邮箱已被注册' });
       }
     }
     const hash = bcrypt.hashSync(password, 10);
-    const result = await db.run('INSERT INTO users (username, email, password_hash, role, nickname) VALUES (?, ?, ?, ?, ?)', username, email || null, hash, 'user', username);
+    const result = await db.run('INSERT INTO users (username, email, password_hash, role, nickname) VALUES (?, ?, ?, ?, ?)', username, normalizedEmail || null, hash, 'user', username);
     const token = jwt.sign({ id: result.lastInsertRowid, username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, user: { id: result.lastInsertRowid, username, nickname: username, email: email || '', role: 'user' } });
+    res.json({ token, user: { id: result.lastInsertRowid, username, nickname: username, email: normalizedEmail || '', role: 'user' } });
   } catch (e) {
     res.status(500).json({ error: '注册失败: ' + e.message });
   }
@@ -310,7 +322,14 @@ app.put('/api/auth/me', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: '用户不存在' });
     }
 
-    const resolvedEmail = email !== undefined ? email : user.email;
+    let resolvedEmail = user.email;
+    if (email !== undefined) {
+      const normalizedEmail = normalizeEmail(email);
+      if (normalizedEmail && normalizedEmail.ok === false) {
+        return res.status(400).json({ error: '邮箱格式不正确' });
+      }
+      resolvedEmail = normalizedEmail;
+    }
     if (newPassword) {
       if (!currentPassword) {
         return res.status(400).json({ error: '修改密码需要提供当前密码' });
@@ -380,7 +399,14 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
     const updates = [];
     const params = [];
     if (username) { updates.push('username = ?'); params.push(username); updates.push('nickname = ?'); params.push(username); }
-    if (email !== undefined) { updates.push('email = ?'); params.push(email); }
+    if (email !== undefined) {
+      const normalizedEmail = normalizeEmail(email);
+      if (normalizedEmail && normalizedEmail.ok === false) {
+        return res.status(400).json({ error: '邮箱格式不正确' });
+      }
+      updates.push('email = ?');
+      params.push(normalizedEmail);
+    }
     if (role !== undefined) {
       if (!['admin', 'user'].includes(role)) {
         return res.status(400).json({ error: '角色必须为 admin 或 user' });
@@ -1434,10 +1460,19 @@ app.get('/api/admin/db/:table', authMiddleware, adminMiddleware, async (req, res
     const pk = await db.getPrimaryKey(table);
     const orderBy = pk ? `${pk} DESC` : (isMySQL(db) ? '1 DESC' : 'rowid DESC');
     const rows = await db.all(`SELECT * FROM ${table} ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`, ...params, limit, offset);
+    const sensitivePattern = /password|hash|secret|token/i;
+    const visibleColumns = columns.filter(column => !sensitivePattern.test(column.name));
+    const visibleRows = rows.map(row => {
+      const filtered = {};
+      Object.keys(row).forEach(key => {
+        if (!sensitivePattern.test(key)) filtered[key] = row[key];
+      });
+      return filtered;
+    });
 
     res.json({
       table,
-      columns: columns.map(column => ({
+      columns: visibleColumns.map(column => ({
         name: column.name,
         type: column.type,
         pk: column.pk === 1,
@@ -1445,7 +1480,7 @@ app.get('/api/admin/db/:table', authMiddleware, adminMiddleware, async (req, res
         defaultValue: column.dflt_value
       })),
       primaryKey: pk,
-      rows,
+      rows: visibleRows,
       pagination: {
         page,
         limit,
