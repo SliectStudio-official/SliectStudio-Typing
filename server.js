@@ -296,9 +296,12 @@ async function authMiddleware(req, res, next) {
     return res.status(401).json({ error: '用户不存在或登录已失效' });
   }
   try {
-    const row = await db.get('SELECT id, username, role FROM users WHERE id = ?', decoded.id);
+    const row = await db.get('SELECT id, username, role, token_version FROM users WHERE id = ?', decoded.id);
     if (!row) {
       return res.status(401).json({ error: '用户不存在或登录已失效' });
+    }
+    if (Number(decoded.token_version || 0) !== Number(row.token_version || 0)) {
+      return res.status(401).json({ error: '登录已失效，请重新登录' });
     }
     req.user = { id: row.id, username: row.username, role: row.role };
     next();
@@ -353,7 +356,7 @@ app.post('/api/bootstrap/create-admin', async (req, res) => {
     const hash = bcrypt.hashSync(password, 10);
     const result = await db.run('INSERT INTO users (username, email, password_hash, role, nickname) VALUES (?, ?, ?, ?, ?)', username, email || null, hash, 'admin', username);
     await db.run("UPDATE settings SET value = 'false' WHERE `key` = 'needs_bootstrap'");
-    const token = jwt.sign({ id: result.lastInsertRowid, username, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: result.lastInsertRowid, username, role: 'admin', token_version: 0 }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: result.lastInsertRowid, username, nickname: username, email: email || '', role: 'admin' } });
   } catch (e) {
     res.status(500).json({ error: '创建管理员失败: ' + e.message });
@@ -393,7 +396,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
     const hash = bcrypt.hashSync(password, 10);
     const result = await db.run('INSERT INTO users (username, email, password_hash, role, nickname) VALUES (?, ?, ?, ?, ?)', username, normalizedEmail || null, hash, 'user', username);
-    const token = jwt.sign({ id: result.lastInsertRowid, username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: result.lastInsertRowid, username, role: 'user', token_version: 0 }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: result.lastInsertRowid, username, nickname: username, email: normalizedEmail || '', role: 'user' } });
   } catch (e) {
     res.status(500).json({ error: '注册失败: ' + e.message });
@@ -424,7 +427,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: '用户名或密码错误' });
     }
     loginFailures.delete(loginKey);
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role, token_version: user.token_version || 0 }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, username: user.username, nickname: user.nickname || user.username, email: user.email || '', role: user.role } });
   } catch (e) {
     res.status(500).json({ error: '登录失败: ' + e.message });
@@ -476,12 +479,12 @@ app.put('/api/auth/me', authMiddleware, async (req, res) => {
         if (existing) {
           return res.status(400).json({ error: '用户名已存在' });
         }
-        await db.run('UPDATE users SET username = ?, email = ?, password_hash = ?, nickname = ? WHERE id = ?', username, resolvedEmail, newHash, username, user.id);
-        const token = jwt.sign({ id: user.id, username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+        await db.run('UPDATE users SET username = ?, email = ?, password_hash = ?, nickname = ?, token_version = token_version + 1 WHERE id = ?', username, resolvedEmail, newHash, username, user.id);
+        const token = jwt.sign({ id: user.id, username, role: user.role, token_version: (user.token_version || 0) + 1 }, JWT_SECRET, { expiresIn: '7d' });
         res.json({ token, user: { id: user.id, username, nickname: username, email: resolvedEmail || '', role: user.role } });
         return;
       }
-      await db.run('UPDATE users SET email = ?, password_hash = ? WHERE id = ?', resolvedEmail, newHash, user.id);
+      await db.run('UPDATE users SET email = ?, password_hash = ?, token_version = token_version + 1 WHERE id = ?', resolvedEmail, newHash, user.id);
       res.json({ success: true });
       return;
     }
@@ -492,7 +495,7 @@ app.put('/api/auth/me', authMiddleware, async (req, res) => {
         return res.status(400).json({ error: '用户名已存在' });
       }
       await db.run('UPDATE users SET username = ?, email = ?, nickname = ? WHERE id = ?', username, resolvedEmail, username, user.id);
-      const token = jwt.sign({ id: user.id, username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ id: user.id, username, role: user.role, token_version: user.token_version || 0 }, JWT_SECRET, { expiresIn: '7d' });
       res.json({ token, user: { id: user.id, username, nickname: username, email: resolvedEmail || '', role: user.role } });
       return;
     }
@@ -528,6 +531,7 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
     }
     const updates = [];
     const params = [];
+    let bumpTokenVersion = false;
     if (username) { updates.push('username = ?'); params.push(username); updates.push('nickname = ?'); params.push(username); }
     if (email !== undefined) {
       const normalizedEmail = normalizeEmail(email);
@@ -548,6 +552,7 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
         }
       }
       updates.push('role = ?'); params.push(role);
+      bumpTokenVersion = true;
     }
     if (password) {
       const passwordError = validatePassword(password);
@@ -556,7 +561,9 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
       }
       updates.push('password_hash = ?');
       params.push(bcrypt.hashSync(password, 10));
+      bumpTokenVersion = true;
     }
+    if (bumpTokenVersion) updates.push('token_version = token_version + 1');
     if (updates.length === 0) {
       return res.status(400).json({ error: '没有要更新的字段' });
     }
@@ -1206,7 +1213,7 @@ app.put('/api/user/password', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: '旧密码不正确' });
     }
     const hash = bcrypt.hashSync(newPassword, 10);
-    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', hash, req.user.id);
+    await db.run('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?', hash, req.user.id);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: '修改密码失败' });

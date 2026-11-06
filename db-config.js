@@ -296,7 +296,8 @@ function getMySQLCreateSQL() {
       role VARCHAR(20) NOT NULL DEFAULT 'user',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       nickname VARCHAR(50) DEFAULT '',
-      avatar VARCHAR(200) DEFAULT ''
+      avatar VARCHAR(200) DEFAULT '',
+      token_version INT NOT NULL DEFAULT 0
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
     CREATE TABLE IF NOT EXISTS categories (
@@ -386,7 +387,8 @@ function getSQLiteCreateSQL() {
       role TEXT NOT NULL DEFAULT 'user',
       created_at TEXT DEFAULT (datetime('now', 'localtime')),
       nickname TEXT DEFAULT '',
-      avatar TEXT DEFAULT ''
+      avatar TEXT DEFAULT '',
+      token_version INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS categories (
@@ -486,7 +488,8 @@ async function runMigrations(db) {
       "ALTER TABLE announcements ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
       "ALTER TABLE announcements ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP",
       "ALTER TABLE scores ADD COLUMN source VARCHAR(20) DEFAULT 'normal'",
-      "ALTER TABLE articles ADD COLUMN is_offline TINYINT DEFAULT 0"
+      "ALTER TABLE articles ADD COLUMN is_offline TINYINT DEFAULT 0",
+      "ALTER TABLE users ADD COLUMN token_version INT NOT NULL DEFAULT 0"
     ];
     for (const sql of migrations) {
       try { await db.run(sql); } catch (e) {}
@@ -525,7 +528,8 @@ async function runMigrations(db) {
       "ALTER TABLE announcements ADD COLUMN created_at TEXT DEFAULT ''",
       "ALTER TABLE announcements ADD COLUMN updated_at TEXT DEFAULT ''",
       "ALTER TABLE scores ADD COLUMN source TEXT DEFAULT 'normal'",
-      'ALTER TABLE articles ADD COLUMN is_offline INTEGER DEFAULT 0'
+      'ALTER TABLE articles ADD COLUMN is_offline INTEGER DEFAULT 0',
+      'ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0'
     ];
     for (const sql of migrations) {
       try { await db.exec(sql); } catch (e) {}
