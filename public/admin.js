@@ -7,7 +7,7 @@ let weeklyChart = null;
 
 const adminContent = document.querySelector('.admin-layout') || document.body;
 const adminUsername = document.getElementById('admin-username');
-const adminLogoutBtn = document.getElementById('admin-logout-btn');
+const adminLogoutBtn = document.getElementById('logout-btn');
 
 const newCategoryName = document.getElementById('new-category-name');
 const addCategoryBtn = document.getElementById('add-category-btn');
@@ -2076,6 +2076,240 @@ async function loadVersion() {
   } catch (e) {}
 }
 
+let raceRoomsCache = [];
+let raceMembersCode = null;
+let raceSettingsCache = { maxRooms: 20, enabled: true };
+
+function setRaceListMsg(text, isError) {
+  const el = document.getElementById('race-list-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = isError ? 'var(--semantic-error)' : '';
+}
+
+function setRaceSettingsMsg(text, isError) {
+  const el = document.getElementById('race-settings-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = isError ? 'var(--semantic-error)' : 'var(--semantic-success)';
+}
+
+function formatRaceTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+
+function raceStatusText(status) {
+  return ({ waiting: '等待中', countdown: '倒计时', racing: '比赛中', finished: '已结束', cancelled: '已取消' }[status] || status || '—');
+}
+
+function renderRaceSummary() {
+  const totalPlayers = raceRoomsCache.reduce((sum, r) => sum + (r.playerCount || 0), 0);
+  const maxPlayers = raceRoomsCache.reduce((max, r) => Math.max(max, r.playerCount || 0), 0);
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  set('race-stat-rooms', raceRoomsCache.length);
+  set('race-stat-players', totalPlayers);
+  set('race-stat-max-players', maxPlayers);
+  set('race-stat-limit', raceSettingsCache.maxRooms);
+}
+
+function renderRaceRooms() {
+  const tbody = document.getElementById('race-list-body');
+  const empty = document.getElementById('race-empty');
+  const wrap = document.getElementById('race-list-wrap');
+  if (!tbody || !empty || !wrap) return;
+  tbody.innerHTML = '';
+  if (!raceRoomsCache.length) {
+    empty.style.display = 'block';
+    wrap.style.display = 'none';
+    hideRaceMembers();
+    return;
+  }
+  empty.style.display = 'none';
+  wrap.style.display = 'block';
+  raceRoomsCache.forEach(room => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + escapeHtml(room.code) + '</td>' +
+      '<td>' + escapeHtml(room.hostNickname) + '</td>' +
+      '<td title="' + escapeHtml(room.articleTitle) + '">' + escapeHtml(room.articleTitle) + '</td>' +
+      '<td>' + (room.playerCount || 0) + '/' + (room.maxPlayers || 0) + '</td>' +
+      '<td>' + escapeHtml(raceStatusText(room.status)) + '</td>' +
+      '<td>' + (room.isPublic ? '公开' : '私人') + '</td>' +
+      '<td>' + escapeHtml(formatRaceTime(room.createdAt)) + '</td>' +
+      '<td><div class="race-admin-actions"></div></td>';
+    const actions = tr.querySelector('.race-admin-actions');
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = '解散';
+    cancelBtn.onclick = function () { cancelRaceRoom(room.code); };
+    const membersBtn = document.createElement('button');
+    membersBtn.className = 'btn-secondary';
+    membersBtn.textContent = '成员';
+    membersBtn.onclick = function () { renderRaceMembers(room.code); };
+    actions.appendChild(cancelBtn);
+    actions.appendChild(membersBtn);
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadRaceRooms() {
+  setRaceListMsg('正在加载…', false);
+  await loadRaceSettings();
+  try {
+    const res = await fetch('/api/admin/races', { headers: apiHeaders() });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    if (!Array.isArray(data)) throw new Error('比赛房间数据格式异常');
+    // 管理界面只展示进行中的房间；已结束/已取消的房间留在库里供追溯，不占界面
+    raceRoomsCache = data.filter(r => r.status === 'waiting' || r.status === 'countdown' || r.status === 'racing');
+    setRaceListMsg('', false);
+    renderRaceSummary();
+    renderRaceRooms();
+    if (raceMembersCode) renderRaceMembers(raceMembersCode);
+  } catch (e) {
+    raceRoomsCache = [];
+    const tbody = document.getElementById('race-list-body');
+    const empty = document.getElementById('race-empty');
+    const wrap = document.getElementById('race-list-wrap');
+    if (tbody) tbody.innerHTML = '';
+    if (empty) empty.style.display = 'none';
+    if (wrap) wrap.style.display = 'none';
+    hideRaceMembers();
+    ['race-stat-rooms', 'race-stat-players', 'race-stat-max-players', 'race-stat-limit'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '—';
+    });
+    setRaceListMsg('加载比赛房间失败：' + e.message, true);
+  }
+}
+
+async function loadRaceSettings() {
+  try {
+    const res = await fetch('/api/admin/race-settings', { headers: apiHeaders() });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false };
+    const input = document.getElementById('race-max-rooms');
+    const check = document.getElementById('race-enabled');
+    if (input) input.value = raceSettingsCache.maxRooms;
+    if (check) check.checked = raceSettingsCache.enabled;
+    setRaceSettingsMsg('', false);
+  } catch (e) {
+    setRaceSettingsMsg('读取比赛设置失败：' + e.message, true);
+  }
+}
+
+async function saveRaceSettings() {
+  const input = document.getElementById('race-max-rooms');
+  const check = document.getElementById('race-enabled');
+  const maxRooms = Number(input && input.value);
+  if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) {
+    setRaceSettingsMsg('房间数上限必须在 1 到 50 之间', true);
+    return;
+  }
+  try {
+    const res = await fetch('/api/admin/race-settings', {
+      method: 'PUT', headers: apiHeaders(),
+      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked) })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false };
+    if (input) input.value = raceSettingsCache.maxRooms;
+    if (check) check.checked = raceSettingsCache.enabled;
+    renderRaceSummary();
+    setRaceSettingsMsg('设置已保存', false);
+  } catch (e) {
+    setRaceSettingsMsg('保存失败：' + e.message, true);
+  }
+}
+
+async function cancelRaceRoom(code) {
+  if (!confirm('确定解散房间 ' + code + '？房间内所有参与者会被移出。')) return;
+  try {
+    const res = await fetch('/api/admin/races/' + encodeURIComponent(code) + '/cancel', { method: 'POST', headers: apiHeaders() });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    await loadRaceRooms();
+    setRaceListMsg('已解散房间 ' + code, false);
+  } catch (e) {
+    setRaceListMsg('解散失败：' + e.message, true);
+  }
+}
+
+function hideRaceMembers() {
+  raceMembersCode = null;
+  const panel = document.getElementById('race-members-panel');
+  if (panel) panel.style.display = 'none';
+  const body = document.getElementById('race-members-body');
+  if (body) body.innerHTML = '';
+  const msg = document.getElementById('race-members-msg');
+  if (msg) msg.textContent = '';
+}
+
+function renderRaceMembers(code) {
+  const room = raceRoomsCache.find(r => r.code === code);
+  const panel = document.getElementById('race-members-panel');
+  const title = document.getElementById('race-members-title');
+  const body = document.getElementById('race-members-body');
+  const msg = document.getElementById('race-members-msg');
+  if (!room || !panel || !title || !body) { hideRaceMembers(); return; }
+  raceMembersCode = code;
+  panel.style.display = 'block';
+  title.textContent = '房间 ' + code + ' 成员（' + room.players.length + ' 人）';
+  if (msg) msg.textContent = '';
+  body.innerHTML = '';
+  if (!room.players.length) {
+    body.innerHTML = '<div class="race-admin-empty">该房间还没有成员</div>';
+    return;
+  }
+  room.players.forEach(p => {
+    const isHost = p.userId !== null && p.userId !== undefined && p.userId === room.hostUserId;
+    const row = document.createElement('div');
+    row.className = 'race-admin-member-row';
+    row.innerHTML =
+      '<span class="race-admin-member-name">' + escapeHtml(p.nickname) + '</span>' +
+      (isHost ? '<span class="race-admin-member-tag">房主</span>' : '') +
+      (p.isGuest ? '<span class="race-admin-member-tag">游客</span>' : '') +
+      '<span class="race-admin-member-meta">' + (p.ready ? '已准备' : '未准备') + '</span>' +
+      '<span class="race-admin-member-meta">进度 ' + (p.progress || 0) + '/' + (room.charCount || 0) + '</span>' +
+      '<span class="race-admin-member-meta">' + (p.rank ? '第 ' + p.rank + ' 名' : '') + '</span>';
+    const kickBtn = document.createElement('button');
+    kickBtn.className = 'btn-secondary';
+    kickBtn.textContent = '踢出';
+    kickBtn.onclick = function () { kickRaceMember(room.code, p); };
+    row.appendChild(kickBtn);
+    body.appendChild(row);
+  });
+}
+
+async function kickRaceMember(code, player) {
+  if (!confirm('把 ' + player.nickname + ' 移出房间？')) return;
+  const payload = player.isGuest ? { guestId: player.guestId } : { userId: player.userId };
+  try {
+    const res = await fetch('/api/admin/races/' + encodeURIComponent(code) + '/kick', {
+      method: 'POST', headers: apiHeaders(), body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    await loadRaceRooms();
+    renderRaceMembers(code);
+    const msg = document.getElementById('race-members-msg');
+    if (msg) msg.textContent = '已踢出 ' + player.nickname;
+  } catch (e) {
+    const msg = document.getElementById('race-members-msg');
+    if (msg) { msg.textContent = '踢出失败：' + e.message; msg.style.color = 'var(--semantic-error)'; }
+  }
+}
+
+const raceSettingsSaveBtn = document.getElementById('race-settings-save');
+if (raceSettingsSaveBtn) raceSettingsSaveBtn.addEventListener('click', saveRaceSettings);
+const raceMembersCloseBtn = document.getElementById('race-members-close');
+if (raceMembersCloseBtn) raceMembersCloseBtn.addEventListener('click', hideRaceMembers);
+
 const sectionLoaders = {
   overview: () => loadDashboard(),
   users: () => loadUsers(),
@@ -2090,11 +2324,17 @@ const sectionLoaders = {
     await loadDbConfig();
     await loadDatabaseTables();
   },
+  races: () => loadRaceRooms(),
   crawler: () => Promise.resolve()
 };
 const loadedSections = new Set();
 
 async function loadSectionData(section) {
+  // 比赛房间是实时内存数据，每次切回该区块都重新拉取
+  if (section === 'races') {
+    await loadRaceRooms();
+    return;
+  }
   if (loadedSections.has(section)) return;
   const loader = sectionLoaders[section];
   if (!loader) return;
