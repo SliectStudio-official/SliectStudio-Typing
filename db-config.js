@@ -374,6 +374,48 @@ function getMySQLCreateSQL() {
       \`key\` VARCHAR(100) PRIMARY KEY,
       value TEXT NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS races (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      code VARCHAR(8) NOT NULL UNIQUE,
+      cancelled_reason VARCHAR(20),
+      cancelled_by INT,
+      password_hash VARCHAR(200),
+      host_user_id INT,
+      article_id INT,
+      article_title VARCHAR(200),
+      content_snapshot LONGTEXT,
+      char_count INT,
+      status VARCHAR(20) DEFAULT 'waiting',
+      is_public TINYINT DEFAULT 1,
+      max_players INT DEFAULT 8,
+      player_count INT DEFAULT 0,
+      started_at DATETIME,
+      finished_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_races_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+    CREATE TABLE IF NOT EXISTS race_participants (
+      id INT PRIMARY KEY AUTO_INCREMENT,
+      race_id INT NOT NULL,
+      user_id INT NULL,
+      guest_id VARCHAR(40) NULL,
+      nickname VARCHAR(50) NOT NULL,
+      is_guest TINYINT DEFAULT 0,
+      ready TINYINT DEFAULT 0,
+      progress INT DEFAULT 0,
+      speed DOUBLE,
+      accuracy DOUBLE,
+      time_seconds INT,
+      rank_no INT,
+      finished_at DATETIME,
+      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (race_id) REFERENCES races(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE KEY uk_race_user (race_id, user_id),
+      UNIQUE KEY uk_race_guest (race_id, guest_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `;
 }
 
@@ -465,6 +507,48 @@ function getSQLiteCreateSQL() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS races (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT NOT NULL UNIQUE,
+      cancelled_reason TEXT,
+      cancelled_by INTEGER,
+      password_hash TEXT,
+      host_user_id INTEGER,
+      article_id INTEGER,
+      article_title TEXT,
+      content_snapshot TEXT,
+      char_count INTEGER,
+      status TEXT DEFAULT 'waiting',
+      is_public INTEGER DEFAULT 1,
+      max_players INTEGER DEFAULT 8,
+      player_count INTEGER DEFAULT 0,
+      started_at TEXT,
+      finished_at TEXT,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_races_status ON races(status);
+
+    CREATE TABLE IF NOT EXISTS race_participants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      race_id INTEGER NOT NULL,
+      user_id INTEGER,
+      guest_id TEXT,
+      nickname TEXT NOT NULL,
+      is_guest INTEGER DEFAULT 0,
+      ready INTEGER DEFAULT 0,
+      progress INTEGER DEFAULT 0,
+      speed REAL,
+      accuracy REAL,
+      time_seconds INTEGER,
+      rank_no INTEGER,
+      finished_at TEXT,
+      joined_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (race_id) REFERENCES races(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_race_participants_user ON race_participants(race_id, user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_race_participants_guest ON race_participants(race_id, guest_id);
   `;
 }
 

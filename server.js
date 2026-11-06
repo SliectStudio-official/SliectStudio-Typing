@@ -195,6 +195,7 @@ async function initDatabase() {
   const createSQL = currentConfig.type === 'mysql' ? getMySQLCreateSQL() : getSQLiteCreateSQL();
   await db.exec(createSQL);
   await runMigrations(db);
+  await db.run("UPDATE races SET status = 'aborted' WHERE status IN ('racing', 'countdown')");
   await seedData(db);
   const schemaRow = await db.get("SELECT value FROM settings WHERE `key` = 'schema_version'");
   if (!schemaRow || !schemaRow.value) {
@@ -298,6 +299,9 @@ async function authMiddleware(req, res, next) {
   } catch (e) {
     return res.status(401).json({ error: 'token无效或已过期' });
   }
+  if (decoded && decoded.role === 'guest') {
+    return res.status(401).json({ error: '无效的登录凭证' });
+  }
   if (!decoded || !decoded.id) {
     return res.status(401).json({ error: '用户不存在或登录已失效' });
   }
@@ -322,6 +326,825 @@ function adminMiddleware(req, res, next) {
   }
   next();
 }
+
+// ============================================================
+// Race mode: in-memory state + DB archive
+// ============================================================
+const RACE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const RACE_GUEST_TOKEN_TTL_MS = 4 * 60 * 60 * 1000;
+const RACE_JOIN_WINDOW_MS = 10 * 60 * 1000;
+const RACE_JOIN_MAX_FAILURES = 5;
+const RACE_LIST_WINDOW_MS = 60 * 1000;
+const RACE_LIST_MAX_HITS = 60;
+const RACE_ROOM_GRACE_MS = 60 * 1000;
+const RACE_GUEST_LIMIT = 4;
+const roomRegistry = new Map();
+const raceJoinFailures = new Map();
+const raceListHits = new Map();
+let raceCleanupTimer = null;
+
+function formatDateTime(ms) {
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function generateRoomCode() {
+  const bytes = crypto.randomBytes(6);
+  let code = '';
+  for (let i = 0; i < 6; i++) code += RACE_CODE_ALPHABET[bytes[i] % RACE_CODE_ALPHABET.length];
+  return code;
+}
+
+function generateGuestId() {
+  return crypto.randomBytes(20).toString('hex');
+}
+
+function normalizeNickname(raw) {
+  let s = String(raw || '').normalize('NFKC');
+  s = s.replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
+  return s;
+}
+
+function isActiveRoom(room) {
+  return room.status === 'waiting' || room.status === 'countdown' || room.status === 'racing';
+}
+
+function activeRoomCount() {
+  let n = 0;
+  for (const room of roomRegistry.values()) if (isActiveRoom(room)) n++;
+  return n;
+}
+
+function findRoomByCode(code) {
+  return roomRegistry.get(String(code || '').toUpperCase()) || null;
+}
+
+function findRoomByUser(userId, activeOnly = true) {
+  for (const room of roomRegistry.values()) {
+    if (activeOnly && !isActiveRoom(room)) continue;
+    if (room.players.has('u:' + userId)) return room;
+  }
+  return null;
+}
+
+function findRoomByHost(userId, activeOnly = true) {
+  for (const room of roomRegistry.values()) {
+    if (activeOnly && !isActiveRoom(room)) continue;
+    if (room.hostUserId === userId) return room;
+  }
+  return null;
+}
+
+function playerMapKey(player) {
+  return player.isGuest ? 'g:' + player.guestId : 'u:' + player.userId;
+}
+
+async function isNicknameTakenByUser(lower) {
+  const row = await db.get('SELECT id FROM users WHERE LOWER(username) = ? OR LOWER(nickname) = ? LIMIT 1', lower, lower);
+  return !!row;
+}
+
+async function buildGuestNickname(raw, room) {
+  let base = normalizeNickname(raw);
+  if (base.length < 2 || base.length > 12) return null;
+  const hit = await containsSensitiveWord(base);
+  if (hit) base = base.split(hit).join('***');
+  const existing = new Set();
+  for (const p of room.players.values()) existing.add(p.nickname.toLowerCase());
+  let candidate = base;
+  let n = 1;
+  while (existing.has(candidate.toLowerCase()) || await isNicknameTakenByUser(candidate.toLowerCase())) {
+    n++;
+    if (n > 50) return null;
+    const suffix = '(' + n + ')';
+    candidate = base.slice(0, Math.max(1, 12 - suffix.length)) + suffix;
+  }
+  return candidate;
+}
+
+async function getRaceSettings() {
+  const maxRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_rooms'");
+  const enabledRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_enabled'");
+  let maxRooms = maxRow ? parseInt(maxRow.value, 10) : 20;
+  if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) maxRooms = 20;
+  const enabled = enabledRow ? enabledRow.value === 'true' : true;
+  return { maxRooms, enabled };
+}
+
+async function setSetting(key, value) {
+  if (isMySQL(db)) {
+    await db.run('INSERT INTO settings (`key`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)', key, value);
+  } else {
+    await db.run('INSERT INTO settings (`key`, value) VALUES (?, ?) ON CONFLICT(`key`) DO UPDATE SET value = excluded.value', key, value);
+  }
+}
+
+function checkJoinLock(key) {
+  const now = Date.now();
+  const entry = raceJoinFailures.get(key);
+  if (!entry) return false;
+  if (now - entry.windowStart > RACE_JOIN_WINDOW_MS) {
+    raceJoinFailures.delete(key);
+    return false;
+  }
+  return entry.count >= RACE_JOIN_MAX_FAILURES;
+}
+
+function recordJoinFailure(key) {
+  const now = Date.now();
+  let entry = raceJoinFailures.get(key);
+  if (!entry || now - entry.windowStart > RACE_JOIN_WINDOW_MS) {
+    if (!entry && raceJoinFailures.size >= 10000) {
+      raceJoinFailures.clear();
+      console.warn('[安全警告] 房间加入失败计数超过上限，已清空');
+    }
+    entry = { count: 0, windowStart: now };
+    raceJoinFailures.set(key, entry);
+  }
+  entry.count += 1;
+}
+
+function checkListRate(ip) {
+  const now = Date.now();
+  let entry = raceListHits.get(ip);
+  if (!entry || now - entry.start > RACE_LIST_WINDOW_MS) {
+    if (!entry && raceListHits.size >= 10000) {
+      raceListHits.clear();
+      console.warn('[安全警告] 房间列表访问计数超过上限，已清空');
+    }
+    entry = { start: now, count: 0 };
+    raceListHits.set(ip, entry);
+  }
+  entry.count += 1;
+  return entry.count <= RACE_LIST_MAX_HITS;
+}
+
+function buildSnapshot(room, player) {
+  const sorted = Array.from(room.players.values()).sort((a, b) => {
+    if (a.rank && b.rank) return a.rank - b.rank;
+    if (a.rank) return -1;
+    if (b.rank) return 1;
+    return b.progress - a.progress;
+  });
+  return {
+    race: {
+      code: room.code,
+      status: room.status,
+      articleTitle: room.articleTitle,
+      charCount: room.charCount,
+      maxPlayers: room.maxPlayers,
+      hostUserId: room.hostUserId,
+      startsAt: room.startsAt,
+      finishedAt: room.finishedAt,
+      cancelledReason: room.cancelledReason || null,
+      serverNow: Date.now()
+    },
+    me: player ? {
+      userId: player.userId,
+      guestId: player.guestId,
+      nickname: player.nickname,
+      ready: player.ready,
+      progress: player.progress,
+      finishedAt: player.finishedAt,
+      rank: player.rank
+    } : null,
+    players: sorted.map(p => ({
+      userId: p.userId,
+      guestId: p.guestId,
+      nickname: p.nickname,
+      isHost: p.userId !== null && p.userId === room.hostUserId,
+      isGuest: p.isGuest,
+      ready: p.ready,
+      progress: p.progress,
+      finishedAt: p.finishedAt,
+      rank: p.rank
+    }))
+  };
+}
+
+function updateRoomPhase(room) {
+  if (room.status === 'countdown' && Date.now() >= room.startsAt) {
+    room.status = 'racing';
+  }
+}
+
+async function cancelRoom(room, reason, byId) {
+  if (room.status === 'cancelled') return;
+  room.status = 'cancelled';
+  room.cancelledReason = reason;
+  room.cancelledBy = byId || null;
+  room.cancelledAt = Date.now();
+  try {
+    await db.run("UPDATE races SET status = 'cancelled', cancelled_reason = ?, cancelled_by = ? WHERE id = ?", reason, byId || null, room.raceId);
+  } catch (e) {
+    console.error('[比赛] 更新取消状态失败:', e.message);
+  }
+  console.warn('[比赛] 房间取消', { code: room.code, reason, by: byId || null });
+}
+
+async function upsertParticipant(room, player) {
+  const finishedAt = player.finishedAt ? formatDateTime(player.finishedAt) : null;
+  const joinedAt = formatDateTime(player.joinedAt || Date.now());
+  const values = [
+    room.raceId, player.userId || null, player.guestId || null, player.nickname,
+    player.isGuest ? 1 : 0, player.ready ? 1 : 0, player.progress || 0,
+    player.speed === undefined ? null : player.speed,
+    player.accuracy === undefined ? null : player.accuracy,
+    player.timeSeconds === undefined ? null : player.timeSeconds,
+    player.rank === undefined ? null : player.rank,
+    finishedAt, joinedAt
+  ];
+  const cols = '(race_id, user_id, guest_id, nickname, is_guest, ready, progress, speed, accuracy, time_seconds, rank_no, finished_at, joined_at)';
+  const marks = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+  try {
+    if (isMySQL(db)) {
+      await db.run(`INSERT INTO race_participants ${cols} VALUES ${marks} ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), ready = VALUES(ready), progress = VALUES(progress), speed = VALUES(speed), accuracy = VALUES(accuracy), time_seconds = VALUES(time_seconds), rank_no = VALUES(rank_no), finished_at = VALUES(finished_at)`, ...values);
+    } else {
+      await db.run(`INSERT INTO race_participants ${cols} VALUES ${marks} ON CONFLICT DO UPDATE SET nickname = excluded.nickname, ready = excluded.ready, progress = excluded.progress, speed = excluded.speed, accuracy = excluded.accuracy, time_seconds = excluded.time_seconds, rank_no = excluded.rank_no, finished_at = excluded.finished_at`, ...values);
+    }
+  } catch (e) {
+    console.error('[比赛] 写入参与者失败:', e.message);
+  }
+}
+
+async function finalizeRoom(room, reason) {
+  if (room.status === 'finished' || room.status === 'cancelled') return;
+  updateRoomPhase(room);
+  const players = Array.from(room.players.values());
+  const finished = players.filter(p => p.finishedAt).sort((a, b) => a.rank - b.rank);
+  const unfinished = players.filter(p => !p.finishedAt).sort((a, b) => b.progress - a.progress);
+  let nextRank = finished.length + 1;
+  for (const p of unfinished) p.rank = nextRank++;
+  room.status = 'finished';
+  room.finishedAt = Date.now();
+  try {
+    await db.run("UPDATE races SET status = 'finished', finished_at = ? WHERE id = ?", formatDateTime(room.finishedAt), room.raceId);
+  } catch (e) {
+    console.error('[比赛] 更新结束状态失败:', e.message);
+  }
+  for (const p of players) await upsertParticipant(room, p);
+  console.warn('[比赛] 房间结束', { code: room.code, reason });
+}
+
+async function cleanupRooms() {
+  const now = Date.now();
+  for (const room of Array.from(roomRegistry.values())) {
+    if (room.status === 'waiting' && now - room.createdAt > 2 * 60 * 60 * 1000) {
+      await cancelRoom(room, 'timeout', null);
+    }
+    if (isActiveRoom(room) && room.hostLastSeen && now - room.hostLastSeen > 5 * 60 * 1000) {
+      await cancelRoom(room, 'host_disconnect', null);
+    }
+    if (room.status === 'racing' && room.charCount > 0 && now - room.startsAt > room.charCount * 2 * 60 * 1000) {
+      await finalizeRoom(room, 'time_limit');
+    }
+    if ((room.status === 'finished' && room.finishedAt && now - room.finishedAt > RACE_ROOM_GRACE_MS) ||
+        (room.status === 'cancelled' && room.cancelledAt && now - room.cancelledAt > RACE_ROOM_GRACE_MS)) {
+      roomRegistry.delete(room.code);
+    }
+  }
+}
+
+function startRaceCleanup() {
+  if (raceCleanupTimer) return;
+  raceCleanupTimer = setInterval(() => {
+    cleanupRooms().catch(e => console.error('[比赛] 清理失败:', e.message));
+  }, 30000);
+  process.on('exit', () => {
+    if (raceCleanupTimer) clearInterval(raceCleanupTimer);
+  });
+}
+
+function findRaceContext(req) {
+  if (req.raceIsGuest) {
+    const room = req.raceRoom;
+    const player = room ? room.players.get('g:' + req.racePlayer.guestId) : null;
+    return { room, player };
+  }
+  if (!req.user) return { room: null, player: null };
+  const room = findRoomByUser(req.user.id, true) || findRoomByUser(req.user.id, false);
+  const player = room ? room.players.get('u:' + req.user.id) : null;
+  return { room, player };
+}
+
+async function raceAuth(req, res, next) {
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) {
+    return res.status(401).json({ error: '未登录' });
+  }
+  let decoded;
+  try {
+    decoded = jwt.verify(auth.slice(7), JWT_SECRET);
+  } catch (e) {
+    return res.status(401).json({ error: 'token无效或已过期' });
+  }
+  if (decoded && decoded.role === 'guest') {
+    const room = findRoomByCode(decoded.raceCode);
+    const player = room ? room.players.get('g:' + decoded.guestId) : null;
+    if (!player) {
+      return res.status(401).json({ error: '已不在该房间' });
+    }
+    req.raceIsGuest = true;
+    req.raceRoom = room;
+    req.racePlayer = player;
+    return next();
+  }
+  return authMiddleware(req, res, next);
+}
+
+app.post('/api/race/create', authMiddleware, async (req, res) => {
+  try {
+    const settings = await getRaceSettings();
+    if (!settings.enabled) {
+      return res.status(400).json({ error: '管理员已暂停创建比赛' });
+    }
+    if (activeRoomCount() >= settings.maxRooms) {
+      return res.status(400).json({ error: `当前比赛房间已满（${settings.maxRooms}/${settings.maxRooms}）` });
+    }
+    if (findRoomByUser(req.user.id, true)) {
+      return res.status(400).json({ error: '你已在其他比赛房间中' });
+    }
+    const { articleId, password, maxPlayers, isPublic } = req.body || {};
+    if (typeof password !== 'string' || !/^\d{4}$/.test(password)) {
+      return res.status(400).json({ error: '房间密码必须是 4 位数字' });
+    }
+    const mp = maxPlayers === undefined ? 8 : parseInt(maxPlayers, 10);
+    if (!Number.isInteger(mp) || mp < 2 || mp > 8) {
+      return res.status(400).json({ error: '房间人数上限必须在 2 到 8 之间' });
+    }
+    const aid = parseInt(articleId, 10);
+    if (!Number.isInteger(aid)) {
+      return res.status(400).json({ error: '请选择文章' });
+    }
+    const article = await db.get('SELECT id, title, content FROM articles WHERE id = ?', aid);
+    if (!article) {
+      return res.status(400).json({ error: '文章不存在' });
+    }
+    let code = null;
+    for (let i = 0; i < 10; i++) {
+      const candidate = generateRoomCode();
+      if (roomRegistry.has(candidate)) continue;
+      const exists = await db.get('SELECT id FROM races WHERE code = ?', candidate);
+      if (!exists) { code = candidate; break; }
+    }
+    if (!code) {
+      return res.status(500).json({ error: '生成房间码失败，请重试' });
+    }
+    const host = await db.get('SELECT username, nickname FROM users WHERE id = ?', req.user.id);
+    const hostNickname = (host && (host.nickname || host.username)) || req.user.username;
+    const now = Date.now();
+    const room = {
+      code, raceId: null, hostUserId: req.user.id, hostNickname, status: 'waiting',
+      articleId: aid, articleTitle: article.title, content: article.content, charCount: article.content.length,
+      maxPlayers: mp, isPublic: isPublic !== false, passwordHash: bcrypt.hashSync(password, 10),
+      createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
+      cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map()
+    };
+    room.players.set('u:' + req.user.id, {
+      userId: req.user.id, guestId: null, nickname: hostNickname, isGuest: false, ready: false,
+      progress: 0, finishedAt: null, speed: null, accuracy: null, timeSeconds: null, rank: null,
+      joinedAt: now, ip: req.ip || '', lastSeen: now
+    });
+    const result = await db.run(
+      'INSERT INTO races (code, password_hash, host_user_id, article_id, article_title, status, is_public, max_players, player_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      code, room.passwordHash, req.user.id, aid, article.title, 'waiting', room.isPublic ? 1 : 0, mp, 0
+    );
+    room.raceId = result.lastInsertRowid;
+    roomRegistry.set(code, room);
+    res.json({ code });
+  } catch (e) {
+    res.status(500).json({ error: '创建比赛失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/join', async (req, res) => {
+  try {
+    const { code, password, nickname } = req.body || {};
+    const codeStr = String(code || '').toUpperCase();
+    const ip = req.ip || '';
+    const limitKey = ip + '|' + codeStr;
+    if (checkJoinLock(limitKey)) {
+      return res.status(429).json({ error: '尝试次数过多，请稍后再试' });
+    }
+    const room = findRoomByCode(codeStr);
+    if (!room) {
+      recordJoinFailure(limitKey);
+      return res.status(400).json({ error: '房间不存在或密码错误' });
+    }
+    const auth = req.headers.authorization;
+    let realUser = null;
+    let guestToken = null;
+    if (auth && auth.startsWith('Bearer ')) {
+      let decoded;
+      try {
+        decoded = jwt.verify(auth.slice(7), JWT_SECRET);
+      } catch (e) {
+        return res.status(401).json({ error: 'token无效或已过期' });
+      }
+      if (decoded && decoded.role === 'guest') {
+        guestToken = decoded;
+      } else if (decoded && decoded.id) {
+        const u = await db.get('SELECT id, username, nickname, token_version FROM users WHERE id = ?', decoded.id);
+        if (!u || Number(decoded.token_version || 0) !== Number(u.token_version || 0)) {
+          return res.status(401).json({ error: '登录已失效，请重新登录' });
+        }
+        realUser = u;
+      }
+    }
+    if (realUser && room.players.has('u:' + realUser.id)) {
+      raceJoinFailures.delete(limitKey);
+      const player = room.players.get('u:' + realUser.id);
+      return res.json({ token: auth.slice(7), nickname: player.nickname, raceId: room.raceId, state: buildSnapshot(room, player) });
+    }
+    if (guestToken && guestToken.raceCode === room.code) {
+      const gp = room.players.get('g:' + guestToken.guestId);
+      if (gp) {
+        raceJoinFailures.delete(limitKey);
+        return res.json({ token: auth.slice(7), nickname: gp.nickname, raceId: room.raceId, state: buildSnapshot(room, gp) });
+      }
+    }
+    if (room.passwordHash && !bcrypt.compareSync(String(password || ''), room.passwordHash)) {
+      recordJoinFailure(limitKey);
+      return res.status(400).json({ error: '房间不存在或密码错误' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '比赛已开始，无法加入' });
+    }
+    if (room.players.size >= room.maxPlayers) {
+      return res.status(400).json({ error: '房间已满' });
+    }
+    if (realUser) {
+      if (findRoomByUser(realUser.id, true)) {
+        return res.status(400).json({ error: '你已在其他比赛房间中' });
+      }
+      const finalNickname = realUser.nickname || realUser.username;
+      const now = Date.now();
+      const player = {
+        userId: realUser.id, guestId: null, nickname: finalNickname, isGuest: false, ready: false,
+        progress: 0, finishedAt: null, speed: null, accuracy: null, timeSeconds: null, rank: null,
+        joinedAt: now, ip, lastSeen: now
+      };
+      room.players.set('u:' + realUser.id, player);
+      raceJoinFailures.delete(limitKey);
+      return res.json({ token: auth.slice(7), nickname: finalNickname, raceId: room.raceId, state: buildSnapshot(room, player) });
+    }
+    if (!nickname) {
+      return res.status(400).json({ error: '游客需要填写昵称' });
+    }
+    const guestCount = Array.from(room.players.values()).filter(p => p.isGuest).length;
+    if (guestCount >= RACE_GUEST_LIMIT) {
+      return res.status(400).json({ error: '该房间游客席位已满' });
+    }
+    if (Array.from(room.players.values()).some(p => p.isGuest && p.ip === ip)) {
+      return res.status(400).json({ error: '同一 IP 在该房间只能有一个游客席位' });
+    }
+    const finalNickname = await buildGuestNickname(nickname, room);
+    if (!finalNickname) {
+      return res.status(400).json({ error: '昵称长度必须为 2~12 个字符' });
+    }
+    const guestId = generateGuestId();
+    const now = Date.now();
+    const player = {
+      userId: null, guestId, nickname: finalNickname, isGuest: true, ready: false,
+      progress: 0, finishedAt: null, speed: null, accuracy: null, timeSeconds: null, rank: null,
+      joinedAt: now, ip, lastSeen: now
+    };
+    room.players.set('g:' + guestId, player);
+    const expiresIn = Math.max(1, Math.floor((room.createdAt + RACE_GUEST_TOKEN_TTL_MS - Date.now()) / 1000));
+    const token = jwt.sign({ role: 'guest', guestId, nickname: finalNickname, raceCode: room.code }, JWT_SECRET, { expiresIn });
+    raceJoinFailures.delete(limitKey);
+    res.json({ token, nickname: finalNickname, raceId: room.raceId, state: buildSnapshot(room, player) });
+  } catch (e) {
+    res.status(500).json({ error: '加入比赛失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/leave', raceAuth, async (req, res) => {
+  try {
+    const { room, player } = findRaceContext(req);
+    if (!room || !player) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    if (!player.isGuest && room.hostUserId === player.userId) {
+      await cancelRoom(room, 'host_leave', player.userId);
+    } else {
+      room.players.delete(playerMapKey(player));
+    }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '退出比赛失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/ready', raceAuth, async (req, res) => {
+  try {
+    const { room, player } = findRaceContext(req);
+    if (!room || !player) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '当前阶段不能修改准备状态' });
+    }
+    player.ready = !!(req.body && req.body.ready);
+    player.lastSeen = Date.now();
+    if (!player.isGuest && room.hostUserId === player.userId) room.hostLastSeen = Date.now();
+    res.json({ success: true, ready: player.ready });
+  } catch (e) {
+    res.status(500).json({ error: '准备操作失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/kick', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '你不在主持比赛' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '当前阶段不能踢人' });
+    }
+    const { targetUserId, targetGuestId } = req.body || {};
+    let key = null;
+    if (targetUserId !== undefined) {
+      const id = parseInt(targetUserId, 10);
+      if (id === req.user.id) {
+        return res.status(400).json({ error: '不能踢自己' });
+      }
+      key = 'u:' + id;
+    } else if (targetGuestId) {
+      key = 'g:' + String(targetGuestId);
+    } else {
+      return res.status(400).json({ error: '请选择要踢出的玩家' });
+    }
+    if (!room.players.has(key)) {
+      return res.status(404).json({ error: '玩家不在房间中' });
+    }
+    room.players.delete(key);
+    room.hostLastSeen = Date.now();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '踢人失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/start', authMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByHost(req.user.id, true);
+    if (!room) {
+      return res.status(400).json({ error: '你不在主持比赛' });
+    }
+    if (room.status !== 'waiting') {
+      return res.status(400).json({ error: '当前阶段不能开始比赛' });
+    }
+    const players = Array.from(room.players.values());
+    if (players.length < 1) {
+      return res.status(400).json({ error: '房间内没有玩家' });
+    }
+    const notReady = players.filter(p => !p.ready).map(p => p.nickname);
+    if (notReady.length > 0) {
+      return res.status(400).json({ error: '还有玩家未准备：' + notReady.join('、') });
+    }
+    const article = await db.get('SELECT title, content FROM articles WHERE id = ?', room.articleId);
+    if (!article) {
+      return res.status(400).json({ error: '文章不存在' });
+    }
+    room.articleTitle = article.title;
+    room.content = article.content;
+    room.charCount = article.content.length;
+    room.status = 'countdown';
+    room.startsAt = Date.now() + 3000;
+    room.finishedCount = 0;
+    await db.run(
+      "UPDATE races SET status = 'countdown', content_snapshot = ?, char_count = ?, player_count = ?, started_at = ? WHERE id = ?",
+      room.content, room.charCount, players.length, formatDateTime(room.startsAt), room.raceId
+    );
+    room.hostLastSeen = Date.now();
+    const hostPlayer = room.players.get('u:' + req.user.id);
+    res.json({ success: true, ...buildSnapshot(room, hostPlayer) });
+  } catch (e) {
+    res.status(500).json({ error: '开始比赛失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/tick', raceAuth, async (req, res) => {
+  try {
+    const { room, player } = findRaceContext(req);
+    if (!room || !player) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    updateRoomPhase(room);
+    player.lastSeen = Date.now();
+    if (!player.isGuest && room.hostUserId === player.userId) room.hostLastSeen = Date.now();
+    if (room.status === 'racing' && !player.finishedAt && req.body && req.body.progress !== undefined) {
+      const p = Number(req.body.progress);
+      if (Number.isFinite(p) && p >= 0) {
+        player.progress = Math.max(player.progress || 0, Math.min(Math.floor(p), room.charCount));
+      }
+    }
+    res.json(buildSnapshot(room, player));
+  } catch (e) {
+    res.status(500).json({ error: '获取比赛状态失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/finish', raceAuth, async (req, res) => {
+  try {
+    const { room, player } = findRaceContext(req);
+    if (!room || !player) {
+      return res.status(400).json({ error: '你不在任何房间中' });
+    }
+    if (player.finishedAt) {
+      return res.json({ rank: player.rank });
+    }
+    updateRoomPhase(room);
+    if (room.status !== 'racing') {
+      return res.status(400).json({ error: '比赛尚未开始或已结束' });
+    }
+    const accuracy = Number(req.body && req.body.accuracy);
+    if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 100) {
+      return res.status(400).json({ error: '准确率数据异常' });
+    }
+    const now = Date.now();
+    const elapsedMs = now - room.startsAt;
+    if (elapsedMs <= 0) {
+      return res.status(400).json({ error: '比赛尚未开始' });
+    }
+    const speed = room.charCount * 60000 / elapsedMs;
+    const timeSeconds = Math.round(elapsedMs / 1000);
+    player.finishedAt = now;
+    player.speed = speed;
+    player.accuracy = accuracy;
+    player.timeSeconds = timeSeconds;
+    player.rank = ++room.finishedCount;
+    player.progress = room.charCount;
+    if (!player.isGuest && room.hostUserId === player.userId) room.hostLastSeen = now;
+    const source = player.isGuest ? 'race_guest' : 'race';
+    const articleRow = await db.get('SELECT id FROM articles WHERE id = ?', room.articleId);
+    const scoreArticleId = articleRow ? room.articleId : null;
+    try {
+      await db.run(
+        'INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        player.userId, player.nickname, speed, accuracy, timeSeconds, scoreArticleId, player.ip || '', source
+      );
+    } catch (e) {
+      console.error('[比赛] 写入成绩失败:', e.message);
+    }
+    await upsertParticipant(room, player);
+    const allFinished = Array.from(room.players.values()).every(p => p.finishedAt);
+    if (allFinished) await finalizeRoom(room, 'all_finished');
+    res.json({ rank: player.rank });
+  } catch (e) {
+    res.status(500).json({ error: '完赛失败: ' + e.message });
+  }
+});
+
+app.get('/api/race/list', async (req, res) => {
+  try {
+    if (!checkListRate(req.ip || '')) {
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    }
+    const list = Array.from(roomRegistry.values())
+      .filter(r => r.isPublic && r.status === 'waiting')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 20)
+      .map(r => ({
+        code: r.code, hostNickname: r.hostNickname, articleTitle: r.articleTitle,
+        charCount: r.charCount, playerCount: r.players.size, maxPlayers: r.maxPlayers,
+        status: r.status, createdAt: r.createdAt
+      }));
+    res.json(list);
+  } catch (e) {
+    res.status(500).json({ error: '获取比赛列表失败' });
+  }
+});
+
+app.get('/api/race/:code', async (req, res) => {
+  try {
+    if (!checkListRate(req.ip || '')) {
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    }
+    const code = String(req.params.code || '').toUpperCase();
+    const room = findRoomByCode(code);
+    if (!room) {
+      const dbRace = await db.get('SELECT status FROM races WHERE code = ?', code);
+      if (dbRace && dbRace.status === 'aborted') {
+        return res.status(400).json({ error: '比赛已中断' });
+      }
+      return res.status(400).json({ error: '房间不存在或密码错误' });
+    }
+    if (!room.isPublic) {
+      const pw = req.query.password;
+      if (!pw || !room.passwordHash || !bcrypt.compareSync(String(pw), room.passwordHash)) {
+        return res.status(400).json({ error: '房间不存在或密码错误' });
+      }
+    }
+    res.json({
+      code: room.code, status: room.status, articleTitle: room.articleTitle,
+      charCount: room.charCount, maxPlayers: room.maxPlayers, playerCount: room.players.size,
+      hostUserId: room.hostUserId, hostNickname: room.hostNickname, isPublic: room.isPublic,
+      createdAt: room.createdAt, cancelledReason: room.cancelledReason || null,
+      players: Array.from(room.players.values()).map(p => ({
+        userId: p.userId, guestId: p.guestId, nickname: p.nickname,
+        isHost: p.userId !== null && p.userId === room.hostUserId,
+        isGuest: p.isGuest, ready: p.ready, progress: p.progress, rank: p.rank
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: '获取房间详情失败' });
+  }
+});
+
+app.get('/api/admin/races', authMiddleware, adminMiddleware, (req, res) => {
+  const list = Array.from(roomRegistry.values()).map(r => ({
+    code: r.code, raceId: r.raceId, hostUserId: r.hostUserId, hostNickname: r.hostNickname,
+    status: r.status, articleId: r.articleId, articleTitle: r.articleTitle, charCount: r.charCount,
+    maxPlayers: r.maxPlayers, playerCount: r.players.size, isPublic: r.isPublic,
+    createdAt: r.createdAt, startsAt: r.startsAt, finishedAt: r.finishedAt,
+    cancelledReason: r.cancelledReason, cancelledBy: r.cancelledBy,
+    players: Array.from(r.players.values()).map(p => ({
+      userId: p.userId, guestId: p.guestId, nickname: p.nickname, isGuest: p.isGuest,
+      ready: p.ready, progress: p.progress, rank: p.rank
+    }))
+  }));
+  res.json(list);
+});
+
+app.post('/api/admin/races/:code/cancel', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByCode(req.params.code);
+    if (!room) {
+      return res.status(404).json({ error: '房间不存在' });
+    }
+    await cancelRoom(room, 'admin', req.user.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '解散房间失败: ' + e.message });
+  }
+});
+
+app.post('/api/admin/races/:code/kick', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const room = findRoomByCode(req.params.code);
+    if (!room) {
+      return res.status(404).json({ error: '房间不存在' });
+    }
+    const { userId, guestId } = req.body || {};
+    let key = null;
+    if (userId !== undefined) {
+      key = 'u:' + parseInt(userId, 10);
+    } else if (guestId) {
+      key = 'g:' + String(guestId);
+    } else {
+      return res.status(400).json({ error: '请选择要踢出的玩家' });
+    }
+    if (!room.players.has(key)) {
+      return res.status(404).json({ error: '玩家不在房间中' });
+    }
+    room.players.delete(key);
+    console.warn('[比赛] 管理员踢出玩家', { code: room.code, userId, guestId });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '踢出玩家失败: ' + e.message });
+  }
+});
+
+app.get('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    res.json(await getRaceSettings());
+  } catch (e) {
+    res.status(500).json({ error: '获取比赛设置失败' });
+  }
+});
+
+app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const maxRaw = body.maxRooms !== undefined ? body.maxRooms : body.race_max_rooms;
+    const enabledRaw = body.enabled !== undefined ? body.enabled : body.race_enabled;
+    if (maxRaw === undefined && enabledRaw === undefined) {
+      return res.status(400).json({ error: '没有要更新的字段' });
+    }
+    if (maxRaw !== undefined) {
+      const n = parseInt(maxRaw, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 50) {
+        return res.status(400).json({ error: '房间数上限必须在 1 到 50 之间' });
+      }
+      await setSetting('race_max_rooms', String(n));
+    }
+    if (enabledRaw !== undefined) {
+      const isTrue = enabledRaw === true || enabledRaw === 'true' || enabledRaw === 1 || enabledRaw === '1';
+      const isFalse = enabledRaw === false || enabledRaw === 'false' || enabledRaw === 0 || enabledRaw === '0';
+      if (!isTrue && !isFalse) {
+        return res.status(400).json({ error: '开关值必须是 true 或 false' });
+      }
+      await setSetting('race_enabled', isTrue ? 'true' : 'false');
+    }
+    res.json(await getRaceSettings());
+  } catch (e) {
+    res.status(500).json({ error: '保存比赛设置失败' });
+  }
+});
 
 app.get('/api/bootstrap/status', async (req, res) => {
   try {
@@ -1289,7 +2112,7 @@ app.get('/api/user/stats', authMiddleware, async (req, res) => {
     const da = daysAgo(days, db);
     const dailyStats = await db.all(
       `SELECT ${df} as date, AVG(speed) as avgSpeed, AVG(accuracy) as avgAccuracy FROM scores WHERE user_id = ? AND created_at >= ${da} GROUP BY ${df} ORDER BY date DESC`,
-      req.user.id, days
+      req.user.id
     );
 
     res.json({
@@ -1547,7 +2370,7 @@ app.put('/api/admin/sensitive-words', authMiddleware, adminMiddleware, async (re
   }
 });
 
-const ALLOWED_TABLES = ['users', 'articles', 'categories', 'scores', 'announcements', 'settings', 'error_logs', 'private_articles'];
+const ALLOWED_TABLES = ['users', 'articles', 'categories', 'scores', 'announcements', 'settings', 'error_logs', 'private_articles', 'races', 'race_participants'];
 
 async function assertDatabaseTable(table) {
   if (!table || !ALLOWED_TABLES.includes(table)) {
@@ -1896,6 +2719,7 @@ app.use((err, req, res, next) => {
 });
 
 initDatabase().then(() => {
+  startRaceCleanup();
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`打字练习服务器已启动 [${versionInfo.fullName}]：`);
     console.log(`  本机访问: http://localhost:${PORT}`);
