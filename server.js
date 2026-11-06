@@ -31,7 +31,7 @@ app.use(compression({
     return compression.filter(req, res);
   }
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: '7d',
   etag: true,
@@ -106,11 +106,15 @@ async function initDatabase() {
 }
 
 function normalizeDateTimeInput(value) {
-  if (!value) return null;
+  if (value === null || value === undefined) return null;
   const text = String(value).trim();
-  if (!text) return null;
-  const normalized = text.replace('T', ' ').slice(0, 19);
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized) ? normalized + ':00' : normalized;
+  if (!text) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text + ' 00:00:00';
+  }
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!match) return value;
+  return `${match[1]} ${match[2]}:${match[3]}:${match[4] || '00'}`;
 }
 
 function parseDatabaseValue(value) {
@@ -762,7 +766,7 @@ app.get('/api/leaderboard', async (req, res) => {
 
     const whereStr = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
     const scores = await db.all(
-      `SELECT s.*, a.title as article_title, u.avatar, u.nickname FROM scores s LEFT JOIN articles a ON s.article_id = a.id LEFT JOIN users u ON s.user_id = u.id ${whereStr} ORDER BY s.speed DESC, s.accuracy DESC LIMIT 500`,
+      `SELECT s.*, a.title as article_title, u.avatar, COALESCE(s.nickname, u.nickname) AS nickname FROM scores s LEFT JOIN articles a ON s.article_id = a.id LEFT JOIN users u ON s.user_id = u.id ${whereStr} ORDER BY s.speed DESC, s.accuracy DESC LIMIT 500`,
       ...params
     );
 
@@ -1652,6 +1656,16 @@ try {
 
 app.get('/api/version', (req, res) => {
   res.json(versionInfo);
+});
+
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({ error: '请求体过大' });
+  }
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: '请求体不是合法 JSON' });
+  }
+  next(err);
 });
 
 initDatabase().then(() => {
