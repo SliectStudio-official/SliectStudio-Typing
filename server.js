@@ -43,6 +43,27 @@ function loadOrCreateJwtSecret() {
   console.log('JWT 密钥来源: data/jwt-secret.txt（本次新建）');
 }
 
+const loginFailures = new Map();
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 5;
+
+function recordLoginFailure(key) {
+  const now = Date.now();
+  let entry = loginFailures.get(key);
+  if (!entry) {
+    if (loginFailures.size >= 10000) {
+      loginFailures.clear();
+      console.warn('[安全警告] 登录失败计数超过上限，已清空');
+    }
+    entry = { count: 0, windowStart: now, lockedUntil: 0 };
+    loginFailures.set(key, entry);
+  }
+  entry.count += 1;
+  if (entry.count >= LOGIN_MAX_FAILURES) {
+    entry.lockedUntil = entry.windowStart + LOGIN_WINDOW_MS;
+  }
+}
+
 app.use(compression({
   level: 9,
   threshold: 256,
@@ -246,6 +267,10 @@ app.get('/api/bootstrap/status', async (req, res) => {
 
 app.post('/api/bootstrap/create-admin', async (req, res) => {
   try {
+    const ip = req.ip || '';
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      return res.status(403).json({ error: '首次初始化只允许在服务器本机进行' });
+    }
     if (await hasAdminUser()) {
       return res.status(400).json({ error: '管理员账户已存在' });
     }
@@ -292,6 +317,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ error: '密码至少6位' });
     }
+    if (Buffer.byteLength(password, 'utf8') > 72) {
+      return res.status(400).json({ error: '密码不能超过 72 字节' });
+    }
     const normalizedEmail = normalizeEmail(email);
     if (normalizedEmail && normalizedEmail.ok === false) {
       return res.status(400).json({ error: '邮箱格式不正确' });
@@ -321,13 +349,24 @@ app.post('/api/auth/login', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: '用户名和密码不能为空' });
     }
+    const loginKey = (req.ip || '') + '|' + String(username).trim().toLowerCase();
+    const now = Date.now();
+    const attempt = loginFailures.get(loginKey);
+    if (attempt && now - attempt.windowStart > LOGIN_WINDOW_MS) {
+      loginFailures.delete(loginKey);
+    } else if (attempt && attempt.lockedUntil > now) {
+      return res.status(429).json({ error: '尝试次数过多，请稍后再试' });
+    }
     const user = await db.get('SELECT * FROM users WHERE username = ?', username);
     if (!user) {
+      recordLoginFailure(loginKey);
       return res.status(400).json({ error: '用户名或密码错误' });
     }
     if (!bcrypt.compareSync(password, user.password_hash)) {
+      recordLoginFailure(loginKey);
       return res.status(400).json({ error: '用户名或密码错误' });
     }
+    loginFailures.delete(loginKey);
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, username: user.username, nickname: user.nickname || user.username, email: user.email || '', role: user.role } });
   } catch (e) {
@@ -372,6 +411,9 @@ app.put('/api/auth/me', authMiddleware, async (req, res) => {
       }
       if (newPassword.length < 6) {
         return res.status(400).json({ error: '新密码至少6位' });
+      }
+      if (Buffer.byteLength(newPassword, 'utf8') > 72) {
+        return res.status(400).json({ error: '密码不能超过 72 字节' });
       }
       const newHash = bcrypt.hashSync(newPassword, 10);
       if (username && username !== user.username) {
@@ -444,11 +486,20 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
       if (!['admin', 'user'].includes(role)) {
         return res.status(400).json({ error: '角色必须为 admin 或 user' });
       }
+      if (role === 'user' && user.role === 'admin') {
+        const adminCount = (await db.get("SELECT COUNT(*) as count FROM users WHERE role = 'admin'")).count;
+        if (adminCount <= 1) {
+          return res.status(400).json({ error: '不能降级唯一的管理员账户' });
+        }
+      }
       updates.push('role = ?'); params.push(role);
     }
     if (password) {
       if (password.length < 6) {
         return res.status(400).json({ error: '密码至少6位' });
+      }
+      if (Buffer.byteLength(password, 'utf8') > 72) {
+        return res.status(400).json({ error: '密码不能超过 72 字节' });
       }
       updates.push('password_hash = ?');
       params.push(bcrypt.hashSync(password, 10));
@@ -1095,6 +1146,9 @@ app.put('/api/user/password', authMiddleware, async (req, res) => {
     }
     if (newPassword.length < 6) {
       return res.status(400).json({ error: '新密码至少6位' });
+    }
+    if (Buffer.byteLength(newPassword, 'utf8') > 72) {
+      return res.status(400).json({ error: '密码不能超过 72 字节' });
     }
     const user = await db.get('SELECT password_hash FROM users WHERE id = ?', req.user.id);
     if (!user || !bcrypt.compareSync(oldPassword, user.password_hash)) {
