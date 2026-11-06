@@ -4534,3 +4534,44 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
   border-color: var(--semantic-error);
   color: var(--semantic-error);
 }
+
+/* ===== P23 观战迷你打字条 ===== */
+.race-mini-line {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 8px;
+  margin-top: 6px;
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.race-mini-focus { font-size: 14px; }
+.race-mini-clip { display: block; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.race-mini-before { color: var(--ink); }
+.race-mini-after { color: var(--body); }
+.race-mini-caret {
+  display: inline-block;
+  min-width: 2px;
+  padding-left: 1px;
+  border-left: 2px solid var(--primary);
+  color: var(--ink);
+  animation: raceMiniCaret 1.1s steps(1, end) infinite;
+}
+@keyframes raceMiniCaret { 50% { opacity: .2; } }
+.race-mini-status { margin-left: 8px; color: var(--body); font-size: 11px; }
+.race-mini-done { opacity: .72; }
+.race-mini-loading { color: var(--body); }
+.race-board-row .race-mini-line { grid-column: 1 / -1; }
+@media (max-width: 480px) {
+  .race-board-row .race-mini-line { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .race-mini-caret { animation: none; }
+}

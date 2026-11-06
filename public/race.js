@@ -13,7 +13,7 @@
     countdownTimer: null, countdownOffset: 0, countdownHideTimer: null,
     lastDissolveNoticeAt: 0,
     polling: false, tickInFlight: false, raceContent: null, needContent: false,
-    rankExpanded: false
+    rankExpanded: false, miniPos: new Map(), miniRaf: null, miniAnims: new Map()
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -256,6 +256,7 @@
   function stopPolling() {
     state.polling = false;
     if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
+    stopMiniLoop();
   }
 
   function tick() {
@@ -306,6 +307,7 @@
     var st = snap.race.status;
     var seat = mySeat(snap);
     state.isSpectator = seat === 'spectator';
+    if (seat !== 'spectator') stopMiniLoop();
     processDissolveNotice(snap);
     renderDissolve(snap);
     if (st === 'cancelled') {
@@ -748,11 +750,140 @@
     });
   }
 
+  /* ---------- 观战：迷你打字条（P23） ---------- */
+  function miniKey(p) {
+    if (!p) return '';
+    if (p.userId != null) return 'u:' + p.userId;
+    if (p.guestId) return 'g:' + p.guestId;
+    return 'n:' + (p.nickname || '');
+  }
+  function miniChar(s) {
+    return String(s == null ? '' : s).replace(/\r/g, '').replace(/\n/g, '↵');
+  }
+  function miniEscape(s) {
+    return esc(miniChar(s));
+  }
+  function miniWindow(content, pos, front, back) {
+    var p = Math.max(0, Math.min(Number(pos) || 0, content.length));
+    var start = Math.max(0, p - front);
+    var end = Math.min(content.length, p + back);
+    return {
+      pos: p, start: start, end: end,
+      before: content.slice(start, p),
+      cursor: content[p] || '',
+      after: content.slice(p + 1, end)
+    };
+  }
+  function setMiniContent(el, content, pos, front, back, completed, rank) {
+    if (!el) return;
+    if (!content) {
+      el.innerHTML = '<span class="race-mini-clip"><span class="race-mini-loading">正在加载正文…</span></span>';
+      return;
+    }
+    var w = miniWindow(content, pos, front, back);
+    var html = (w.start > 0 ? '…' : '') +
+      '<span class="race-mini-before">' + miniEscape(w.before) + '</span>';
+    if (!completed) {
+      html += '<span class="race-mini-caret">' + miniEscape(w.cursor) + '</span>';
+    }
+    html += '<span class="race-mini-after">' + miniEscape(w.after) + '</span>' +
+      (w.end < content.length ? '…' : '');
+    if (completed) {
+      html += '<span class="race-mini-status">已完成 · 第 ' + (rank || '—') + ' 名</span>';
+    }
+    el.innerHTML = '<span class="race-mini-clip">' + html + '</span>';
+    el.classList.toggle('race-mini-done', !!completed);
+  }
+  function stopMiniLoop() {
+    if (state.miniRaf) { cancelAnimationFrame(state.miniRaf); state.miniRaf = null; }
+    state.miniAnims.clear();
+  }
+  function startMiniLoop() {
+    if (state.miniRaf) return;
+    var step = function () {
+      var now = performance.now();
+      var active = false;
+      state.miniAnims.forEach(function (anim) {
+        var t = Math.min(1, (now - anim.started) / 300);
+        var pos = anim.from + Math.round((anim.to - anim.from) * t);
+        anim.entries.forEach(function (entry) {
+          setMiniContent(entry.el, anim.content, pos, entry.front, entry.back, false, null);
+        });
+        if (t < 1) active = true;
+      });
+      if (active) {
+        state.miniRaf = requestAnimationFrame(step);
+      } else {
+        state.miniRaf = null;
+        state.miniAnims.clear();
+      }
+    };
+    state.miniRaf = requestAnimationFrame(step);
+  }
+  function applyMiniBars(snap, content) {
+    var focusEl = $('spec-focus-mini');
+    var els = document.querySelectorAll('#view-spectate .race-mini-line[data-mini-key]');
+    if (!els.length) return;
+    var byKey = {};
+    snap.players.forEach(function (p) { byKey[miniKey(p)] = p; });
+    stopMiniLoop();
+    var now = performance.now();
+    var contentNow = content || '';
+    els.forEach(function (el) {
+      var key = el.getAttribute('data-mini-key');
+      var p = byKey[key];
+      if (!p) return;
+      var completed = !!p.finishedAt;
+      var target = completed ? contentNow.length : Math.min(p.progress || 0, contentNow.length || 0);
+      var front = parseInt(el.getAttribute('data-mini-front'), 10) || 6;
+      var back = parseInt(el.getAttribute('data-mini-back'), 10) || 6;
+      el.style.display = 'block';
+      if (!contentNow) {
+        setMiniContent(el, '', target, front, back, completed, p.rank);
+        return;
+      }
+      var prev = state.miniPos.get(key);
+      var delta = prev == null ? 0 : target - prev;
+      state.miniPos.set(key, target);
+      if (prev != null && delta > 0 && delta <= 12 && !completed) {
+        var anim = state.miniAnims.get(key);
+        if (!anim) {
+          anim = { from: prev, to: target, started: now, content: contentNow, entries: [] };
+          state.miniAnims.set(key, anim);
+        } else {
+          anim.to = target;
+        }
+        anim.entries.push({ el: el, front: front, back: back });
+        setMiniContent(el, contentNow, prev, front, back, false, null);
+      } else {
+        setMiniContent(el, contentNow, target, front, back, completed, p.rank);
+      }
+    });
+    if (state.miniAnims.size) startMiniLoop();
+  }
+
   /* ---------- 观战（导播台） ---------- */
   function renderSpectate(snap) {
     var r = snap.race;
     $('spec-article').textContent = r.articleTitle;
     $('spec-meta').textContent = r.charCount + ' 字 · ' + ({ waiting: '等待中', countdown: '倒计时', racing: '比赛中', finished: '已结束', aborted: '已中断' }[r.status] || r.status);
+    var content = state.raceContent || r.content || '';
+    if (r.content) state.raceContent = r.content;
+    var showMini = r.status === 'racing';
+    var focusMini = $('spec-focus-mini');
+    if (focusMini) {
+      focusMini.style.display = 'none';
+      focusMini.innerHTML = '';
+      focusMini.removeAttribute('data-mini-key');
+    }
+    if (!showMini) {
+      if (r.status === 'countdown' && focusMini) {
+        focusMini.style.display = 'block';
+        focusMini.textContent = '尚未开始';
+      }
+    } else if (!content) {
+      state.needContent = true;
+    }
 
     // 焦点：默认第一名，可点击切换
     var focus = snap.players[0] || null;
@@ -769,6 +900,12 @@
         '<div>速度 ' + (focus.speed ? Math.round(focus.speed) : '—') + ' 字/分</div>' +
         '<div>正确率 ' + (focus.accuracy ? focus.accuracy + '%' : '—') + '</div>' +
         '<div>用时 ' + (focus.timeSeconds ? focus.timeSeconds + 's' : '—') + '</div>';
+      if (showMini && focus) {
+        focusMini.style.display = 'block';
+        focusMini.setAttribute('data-mini-key', miniKey(focus));
+        focusMini.setAttribute('data-mini-front', window.innerWidth <= 480 ? '6' : '12');
+        focusMini.setAttribute('data-mini-back', window.innerWidth <= 480 ? '6' : '12');
+      }
     } else {
       $('spec-focus-name').textContent = '—';
       $('spec-focus-meta').textContent = '还没有选手';
@@ -787,6 +924,14 @@
         '<span class="race-board-bar"><i style="width:' + pct + '%"></i></span>' +
         '<span class="race-board-pct">' + pct + '%</span>' +
         '<span class="race-board-stat">' + (p.finishedAt ? ('完成 ' + (p.timeSeconds || '?') + 's') : (p.speed ? Math.round(p.speed) + ' 字/分' : '—')) + '</span>';
+      if (showMini && (i < 8 || (focus && p.nickname === focus.nickname))) {
+        var mini = document.createElement('div');
+        mini.className = 'race-mini-line';
+        mini.setAttribute('data-mini-key', miniKey(p));
+        mini.setAttribute('data-mini-front', '6');
+        mini.setAttribute('data-mini-back', '6');
+        row.appendChild(mini);
+      }
       row.onclick = function () { state.focusNick = p.nickname; renderSpectate(snap); };
       board.appendChild(row);
     });
@@ -809,6 +954,7 @@
       board.appendChild(row);
     });
     if (!snap.players.length) board.innerHTML = '<div class="race-empty">还没有选手</div>';
+    if (showMini) applyMiniBars(snap, content);
 
     var cap = spectatorCapacity(r);
     var audience = '<div class="race-spectate-live-head">观战 ' + (r.spectatorEnabled ? ((r.spectatorCount || 0) + '/' + cap) : '已关闭') + '</div>' +
@@ -1242,7 +1388,10 @@
   }
 
   state.token = localStorage.getItem('token');
-  window.addEventListener('resize', updateRaceChrome);
+  window.addEventListener('resize', function () {
+    updateRaceChrome();
+    if (state.snap && state.isSpectator) renderSpectate(state.snap);
+  });
   bind();
   updateQuickMatchVisibility();
   showView('lobby');
