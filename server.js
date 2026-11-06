@@ -110,6 +110,14 @@ app.get(HTML_PAGES, (req, res, next) => {
     res.type('html').send(rewritten);
   });
 });
+app.get('/service-worker.js', (req, res, next) => {
+  fs.readFile(path.join(publicDir, 'service-worker.js'), 'utf8', (err, source) => {
+    if (err) return next();
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(`// asset-version: ${assetVersion}\n` + source);
+  });
+});
 app.use(express.static(publicDir, {
   maxAge: '7d',
   etag: true,

@@ -1,28 +1,38 @@
-let CACHE_NAME = 'typing-fallback';
-
 const CRITICAL_ASSETS = [
   '/index.html',
   '/style.css',
   '/script.js',
   '/custom-select.js',
-  '/loading-indicator.js?v=2'
+  '/loading-indicator.js'
 ];
 
-let PRECACHE_ASSETS = CRITICAL_ASSETS;
+let cacheNamePromise = null;
+let precacheAssets = CRITICAL_ASSETS;
 
-async function resolveCacheConfig() {
-  try {
-    const res = await fetch('/api/asset-version', { cache: 'no-store' });
-    if (!res.ok) throw new Error('asset-version ' + res.status);
-    const data = await res.json();
-    if (!data || !data.version || !data.files) throw new Error('asset-version invalid');
-    CACHE_NAME = 'typing-' + data.version;
-    PRECACHE_ASSETS = Object.keys(data.files).map(p => p + '?v=' + data.files[p]);
-    if (!PRECACHE_ASSETS.includes('/index.html')) PRECACHE_ASSETS.push('/index.html');
-  } catch (e) {
-    CACHE_NAME = 'typing-fallback';
-    PRECACHE_ASSETS = CRITICAL_ASSETS;
+function getCacheName() {
+  if (!cacheNamePromise) {
+    cacheNamePromise = (async () => {
+      try {
+        const res = await fetch('/api/asset-version', { cache: 'no-store' });
+        if (!res.ok) throw new Error('asset-version ' + res.status);
+        const data = await res.json();
+        if (!data || !data.version || !data.files) throw new Error('asset-version invalid');
+        precacheAssets = Object.keys(data.files).map(p => p + '?v=' + data.files[p]);
+        if (!precacheAssets.includes('/index.html')) precacheAssets.push('/index.html');
+        return 'typing-' + data.version;
+      } catch (e) {
+        cacheNamePromise = null;
+        precacheAssets = CRITICAL_ASSETS;
+        return 'typing-fallback';
+      }
+    })();
   }
+  return cacheNamePromise;
+}
+
+async function putInCache(request, response) {
+  const cache = await caches.open(await getCacheName());
+  await cache.put(request, response);
 }
 
 // 状态检测接口：仅走网络，不缓存，服务器不可达时返回 503 以触发离线提示
@@ -198,10 +208,10 @@ async function syncPendingScores() {
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
-      await resolveCacheConfig();
       try {
-        const cache = await caches.open(CACHE_NAME);
-        await cache.addAll(PRECACHE_ASSETS);
+        const name = await getCacheName();
+        const cache = await caches.open(name);
+        await cache.addAll(precacheAssets);
       } catch (e) {
         console.error('SW install failed:', e);
       }
@@ -214,12 +224,12 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      await caches.keys().then((names) =>
-        Promise.all(
-          names
-            .filter((name) => name.startsWith('typing-') && name !== CACHE_NAME)
-            .map((name) => caches.delete(name))
-        )
+      const currentName = await getCacheName();
+      const names = await caches.keys();
+      await Promise.all(
+        names
+          .filter((name) => name.startsWith('typing-') && name !== currentName)
+          .map((name) => caches.delete(name))
       );
       try { await syncGlobalOfflineArticles(); } catch (e) {}
     })()
@@ -255,7 +265,7 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          putInCache(request, clone).catch(() => {});
           return response;
         })
         .catch(() => caches.match(request).then((r) => r || caches.match('/index.html')))
@@ -281,7 +291,7 @@ self.addEventListener('fetch', (event) => {
         .then((response) => {
           if (response.ok) {
             const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+            putInCache(request, clone).catch(() => {});
           }
           return response;
         })
@@ -301,7 +311,7 @@ self.addEventListener('fetch', (event) => {
         .then((response) => {
           if (response.ok) {
             const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+            putInCache(request, clone).catch(() => {});
           }
           return response;
         })
@@ -314,7 +324,7 @@ self.addEventListener('fetch', (event) => {
     fetch(request).then((response) => {
       if (response.ok) {
         const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        putInCache(request, clone).catch(() => {});
       }
       return response;
     }).catch(() => caches.match(request))
