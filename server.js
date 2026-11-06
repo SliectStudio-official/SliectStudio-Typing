@@ -181,17 +181,29 @@ async function getActiveAnnouncement() {
   return row || null;
 }
 
-function authMiddleware(req, res, next) {
+async function authMiddleware(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) {
     return res.status(401).json({ error: '未登录' });
   }
+  let decoded;
   try {
-    const decoded = jwt.verify(auth.slice(7), JWT_SECRET);
-    req.user = decoded;
-    next();
+    decoded = jwt.verify(auth.slice(7), JWT_SECRET);
   } catch (e) {
     return res.status(401).json({ error: 'token无效或已过期' });
+  }
+  if (!decoded || !decoded.id) {
+    return res.status(401).json({ error: '用户不存在或登录已失效' });
+  }
+  try {
+    const row = await db.get('SELECT id, username, role FROM users WHERE id = ?', decoded.id);
+    if (!row) {
+      return res.status(401).json({ error: '用户不存在或登录已失效' });
+    }
+    req.user = { id: row.id, username: row.username, role: row.role };
+    next();
+  } catch (e) {
+    return res.status(500).json({ error: '鉴权失败' });
   }
 }
 
