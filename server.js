@@ -3123,12 +3123,22 @@ app.get('/api/asset-version', (req, res) => {
   res.json({ version: assetVersion, files: assetHashes });
 });
 
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: '接口不存在：' + req.method + ' ' + req.path });
+  }
+  next();
+});
+
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.too.large') {
     return res.status(413).json({ error: '请求体过大' });
   }
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: '请求体不是合法 JSON' });
+  }
+  if (req.path.startsWith('/api') && !res.headersSent) {
+    return res.status(err.status || 500).json({ error: err.message || '服务器内部错误' });
   }
   next(err);
 });
