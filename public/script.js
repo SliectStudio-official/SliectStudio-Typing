@@ -25,6 +25,7 @@ let currentLbCategory = '';
 let errorPracticeMode = false;
 let isOfflineArticles = false;
 let segments = [];
+let segmentOffsets = [];
 let currentSegmentIndex = 0;
 let segmentInputs = [];
 let segmentInputValues = [];
@@ -533,7 +534,9 @@ function startPractice() {
   cachedCorrect = 0;
   cachedWrong = 0;
   currentSegmentIndex = 0;
-  segments = splitTextIntoSegments(originalText);
+  const split = window.TypingEngine.splitTextWithOffsets(originalText);
+  segments = split.segments;
+  segmentOffsets = split.offsets;
   segmentInputs = [];
   segmentInputValues = new Array(segments.length).fill('');
 
@@ -569,6 +572,7 @@ function resetPractice() {
   cachedCorrect = 0;
   cachedWrong = 0;
   segments = [];
+  segmentOffsets = [];
   currentSegmentIndex = 0;
   segmentInputs = [];
   segmentInputValues = [];
@@ -629,11 +633,7 @@ function startTimer() {
 let lastSpokenWord = '';
 
 function getSegmentStartOffset(segmentIndex) {
-  let offset = 0;
-  for (let i = 0; i < segmentIndex; i++) {
-    offset += segments[i].length;
-  }
-  return offset;
+  return segmentOffsets[segmentIndex] || 0;
 }
 
 function focusCurrentSegment() {
@@ -807,6 +807,16 @@ function handleSegmentInput(segmentIndex, inputValue) {
     }
   }
 
+  if (mode === 'full') {
+    let pct;
+    if (segmentIndex === segments.length - 1 && inputValue.length >= segment.length) {
+      pct = 100;
+    } else {
+      pct = Math.min(100, ((getSegmentStartOffset(segmentIndex) + inputValue.length) / originalText.length) * 100);
+    }
+    textProgress.style.width = pct + '%';
+  }
+
   // 当前段完成，自动翻页
   if (inputValue.length >= segment.length) {
     const allCorrect = segment.split('').every((c, i) => inputValue[i] === c);
@@ -815,11 +825,6 @@ function handleSegmentInput(segmentIndex, inputValue) {
     } else if (allCorrect && segmentIndex === segments.length - 1) {
       finishPractice();
     }
-  }
-
-  if (mode === 'full') {
-    const pct = Math.min(100, (prevInputLen / originalText.length) * 100);
-    textProgress.style.width = pct + '%';
   }
 }
 
@@ -922,15 +927,23 @@ function finishPractice() {
     nicknameInput.value = currentUser.username;
   }
 
+  if (mode === 'full') {
+    textProgress.style.width = '100%';
+  }
+
   if (currentUser && currentArticle && currentArticle.id) {
     const errors = [];
-    const inputVal = segmentInputValues.join('');
-    for (let i = 0; i < inputVal.length && i < originalText.length; i++) {
-      if (charStates[i] === 'wrong') {
-        errors.push({
-          expected_char: originalText[i],
-          typed_char: inputVal[i]
-        });
+    for (let si = 0; si < segments.length; si++) {
+      const segment = segments[si];
+      const value = segmentInputValues[si] || '';
+      const base = segmentOffsets[si] || 0;
+      for (let k = 0; k < segment.length; k++) {
+        if (charStates[base + k] === 'wrong') {
+          errors.push({
+            expected_char: segment[k],
+            typed_char: value[k]
+          });
+        }
       }
     }
     if (errors.length > 0) {
