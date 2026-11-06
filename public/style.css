@@ -68,6 +68,10 @@
   --card-padding: 16px;
   --nav-h: 44px;
   --subnav-h: 56px;
+  color-scheme: light;
+  --scrollbar-size: 8px;
+  --scrollbar-thumb: var(--hairline-strong);
+  --scrollbar-thumb-hover: var(--muted-soft);
 }
 
 [data-theme="dark"] {
@@ -111,6 +115,7 @@
   --toast-info: #58a8e8;
   --ring-warm: #3d3d3a;
   --ring-deep: #4d4c48;
+  color-scheme: dark;
 }
 
 body {
@@ -632,23 +637,6 @@ select.custom-select {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
-}
-
-.custom-select-dropdown::-webkit-scrollbar {
-  width: 6px;
-}
-
-.custom-select-dropdown::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-select-dropdown::-webkit-scrollbar-thumb {
-  background: var(--hairline-strong);
-  border-radius: 3px;
-}
-
-.custom-select-dropdown::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-soft);
 }
 
 .custom-select-option {
@@ -3946,6 +3934,40 @@ button:focus-visible,
   }
 }
 
+
+/* ===== 滚动条统一（G 组） ===== */
+#race-typing, .notify-drawer, .lb-modal-body, .database-table-wrap,
+.custom-select-dropdown, .mobile-menu-drawer, .user-menu, .race-spectate-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+#race-typing::-webkit-scrollbar, .notify-drawer::-webkit-scrollbar,
+.lb-modal-body::-webkit-scrollbar, .database-table-wrap::-webkit-scrollbar,
+.custom-select-dropdown::-webkit-scrollbar, .mobile-menu-drawer::-webkit-scrollbar,
+.user-menu::-webkit-scrollbar, .race-spectate-list::-webkit-scrollbar {
+  width: var(--scrollbar-size); height: var(--scrollbar-size);
+}
+#race-typing::-webkit-scrollbar-track, .notify-drawer::-webkit-scrollbar-track,
+.lb-modal-body::-webkit-scrollbar-track, .database-table-wrap::-webkit-scrollbar-track,
+.custom-select-dropdown::-webkit-scrollbar-track, .mobile-menu-drawer::-webkit-scrollbar-track,
+.user-menu::-webkit-scrollbar-track, .race-spectate-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+#race-typing::-webkit-scrollbar-thumb, .notify-drawer::-webkit-scrollbar-thumb,
+.lb-modal-body::-webkit-scrollbar-thumb, .database-table-wrap::-webkit-scrollbar-thumb,
+.custom-select-dropdown::-webkit-scrollbar-thumb, .mobile-menu-drawer::-webkit-scrollbar-thumb,
+.user-menu::-webkit-scrollbar-thumb, .race-spectate-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb); border-radius: var(--scrollbar-size);
+}
+#race-typing::-webkit-scrollbar-thumb:hover, .notify-drawer::-webkit-scrollbar-thumb:hover,
+.lb-modal-body::-webkit-scrollbar-thumb:hover, .database-table-wrap::-webkit-scrollbar-thumb:hover,
+.custom-select-dropdown::-webkit-scrollbar-thumb:hover, .mobile-menu-drawer::-webkit-scrollbar-thumb:hover,
+.user-menu::-webkit-scrollbar-thumb:hover, .race-spectate-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+#race-typing::-webkit-scrollbar { width: 6px; height: 6px; }
+#race-typing::-webkit-scrollbar-thumb { background: transparent; }
+#race-typing:hover::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
 
 /* ===== 比赛模式 ===== */
 .race-sub-nav { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; }
