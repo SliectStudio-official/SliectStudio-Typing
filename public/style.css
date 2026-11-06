@@ -4303,6 +4303,7 @@ button:focus-visible,
   background: var(--menu-glass-bg); border: 1px solid var(--hairline-soft); border-radius: 14px;
   backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
   box-shadow: var(--shadow-2); padding: 8px; z-index: 320;
+  max-height: min(70vh, 520px); overflow-y: auto;
   opacity: 0; visibility: hidden; transform: translateY(-6px) scale(.98); filter: blur(var(--blur-float));
   transition: opacity var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out),
               filter var(--motion-fast) var(--ease-out), visibility 0s linear var(--motion-fast);
@@ -4335,6 +4336,7 @@ button:focus-visible,
 .user-menu-item:hover { background: var(--glass-bg-hover); }
 .user-menu-danger { color: var(--primary-active); }
 .user-menu-danger:hover { background: var(--primary-lightest); }
+.user-menu-race-stats { margin-top: 0; }
 .user-menu-notify { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notify-badge {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;

@@ -60,6 +60,11 @@
             '<div class="user-stat"><b id="stat-chars">—</b><span>累计字数</span></div>' +
             '<div class="user-stat"><b id="stat-speed">—</b><span>平均速度</span></div>' +
           '</div>' +
+          '<div class="user-menu-stats user-menu-race-stats" id="user-menu-race-stats">' +
+            '<div class="user-stat"><b id="stat-raced">—</b><span>比赛场次</span></div>' +
+            '<div class="user-stat"><b id="stat-winrate">—</b><span>胜率</span></div>' +
+            '<div class="user-stat"><b id="stat-bestrank">—</b><span>最佳名次</span></div>' +
+          '</div>' +
           '<button class="user-menu-item user-menu-notify" id="notify-entry" role="menuitem">' +
             '<span>通知中心</span><span class="notify-badge" id="notify-badge" style="display:none"></span>' +
           '</button>' +
@@ -350,7 +355,7 @@
     if (!accountMenu || !avatarBtn) return;
     accountMenu.classList.add('open');
     avatarBtn.setAttribute('aria-expanded', 'true');
-    if (!menuLoaded) { menuLoaded = true; loadQuickStats(); }
+    if (!menuLoaded) { menuLoaded = true; loadQuickStats(); loadRaceStats(); }
   }
   function closeUserMenu() {
     if (!accountMenu || !avatarBtn) return;
@@ -376,6 +381,37 @@
         if (v) v.textContent = speed ? speed + ' 字/分' : '—';
       })
       .catch(function () {});
+  }
+
+  function loadRaceStats() {
+    var tk = localStorage.getItem('token');
+    if (!tk) return;
+    fetch('/api/user/race-stats', { headers: { Authorization: 'Bearer ' + tk } })
+      .then(function (r) {
+        if (!r.ok) { console.error('[接口] 比赛统计 HTTP', r.status); return null; }
+        return readJson(r, '/api/user/race-stats');
+      })
+      .then(function (s) {
+        if (!s) {
+          setRaceStat('stat-raced', '—');
+          setRaceStat('stat-winrate', '—');
+          setRaceStat('stat-bestrank', '—');
+          return;
+        }
+        setRaceStat('stat-raced', (Number(s.racedCount) || 0) + ' 场');
+        setRaceStat('stat-winrate', s.finishedCount > 0 ? Number(s.winRate).toFixed(1) + '%' : '—');
+        setRaceStat('stat-bestrank', s.bestRank ? '第 ' + s.bestRank + ' 名' : '—');
+      })
+      .catch(function (e) {
+        console.error('[账号菜单] 比赛统计加载失败', e && e.message);
+        setRaceStat('stat-raced', '—');
+        setRaceStat('stat-winrate', '—');
+        setRaceStat('stat-bestrank', '—');
+      });
+  }
+  function setRaceStat(id, text) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = text;
   }
 
   function setNavRoleLinks(isAdmin) {

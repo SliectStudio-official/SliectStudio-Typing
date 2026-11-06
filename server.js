@@ -2931,6 +2931,36 @@ app.get('/api/user/stats', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/user/race-stats', authMiddleware, async (req, res) => {
+  try {
+    const row = await db.get(
+      `SELECT COUNT(*) AS racedCount,
+              COALESCE(SUM(CASE WHEN r.status = 'finished' AND rp.rank_no IS NOT NULL THEN 1 ELSE 0 END), 0) AS finishedCount,
+              COALESCE(SUM(CASE WHEN r.status = 'finished' AND rp.rank_no = 1 THEN 1 ELSE 0 END), 0) AS winCount,
+              MIN(CASE WHEN rp.rank_no IS NOT NULL THEN rp.rank_no END) AS bestRank
+       FROM race_participants rp
+       JOIN races r ON r.id = rp.race_id
+       WHERE rp.user_id = ?`,
+      req.user.id
+    );
+    const hosted = await db.get('SELECT COUNT(*) AS count FROM races WHERE host_user_id = ?', req.user.id);
+    const racedCount = Number(row.racedCount) || 0;
+    const finishedCount = Number(row.finishedCount) || 0;
+    const winCount = Number(row.winCount) || 0;
+    const bestRank = row.bestRank == null ? null : Number(row.bestRank);
+    res.json({
+      racedCount,
+      finishedCount,
+      winCount,
+      winRate: finishedCount > 0 ? Math.round((winCount / finishedCount) * 1000) / 10 : 0,
+      bestRank,
+      hostedCount: Number(hosted && hosted.count) || 0
+    });
+  } catch (e) {
+    res.status(500).json({ error: '获取比赛统计失败' });
+  }
+});
+
 app.get('/api/user/error-log', authMiddleware, async (req, res) => {
   try {
     const errors = await db.all(
