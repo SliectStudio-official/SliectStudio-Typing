@@ -188,9 +188,31 @@
     return ch;
   }
 
-  function splitTextWithOffsets(text, maxLen) {
+  function splitOversizedSegments(segments, maxLen) {
+    var minLen = Math.ceil(maxLen * MIN_RATIO);
+    var out = [];
+    segments.forEach(function (segment) {
+      var start = 0;
+      while (segment.length - start > maxLen) {
+        var upper = Math.min(segment.length, start + maxLen);
+        var cut = upper;
+        for (var i = upper - 1; i >= start + minLen; i--) {
+          if (/[\s，。！？、；：,.;:!?]/.test(segment.charAt(i))) { cut = i + 1; break; }
+        }
+        cut = safeCut(segment, cut, start);
+        if (cut <= start) cut = upper;
+        out.push(segment.slice(start, cut));
+        start = cut;
+      }
+      if (start < segment.length) out.push(segment.slice(start));
+    });
+    return out;
+  }
+
+  function splitTextWithOffsets(text, maxLen, strictMax) {
     var source = String(text == null ? '' : text);
     var segments = splitTextIntoSegments(source, maxLen);
+    if (strictMax) segments = splitOversizedSegments(segments, Math.max(4, parseInt(maxLen, 10) || MAX_LINE));
     var offsets = [];
     var cursor = 0;
     for (var i = 0; i < segments.length; i++) {
@@ -223,12 +245,46 @@
     return { segments: segments, offsets: offsets };
   }
 
+  function measureMaxLen(element) {
+    var host = element && element.nodeType === 1 ? element : document.body;
+    var probe = document.createElement('div');
+    probe.className = 'typing-line-text';
+    probe.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;';
+    host.appendChild(probe);
+    var cs = getComputedStyle(probe);
+    var hostStyle = getComputedStyle(host);
+    var width = host.clientWidth || document.documentElement.clientWidth;
+    var avail = (width - (parseFloat(hostStyle.paddingLeft) || 0) - (parseFloat(hostStyle.paddingRight) || 0)) * 0.98;
+    var fontSize = parseFloat(cs.fontSize) || 16;
+    var cjk = fontSize;
+    var ascii = fontSize * 0.5;
+    try {
+      var ctx = document.createElement('canvas').getContext('2d');
+      if (ctx && cs.font) {
+        ctx.font = cs.font;
+        cjk = ctx.measureText('中').width || cjk;
+        ascii = ctx.measureText('a').width || ascii;
+      }
+    } catch (e) {}
+    var n;
+    if (cjk > 0 && ascii > 0) n = Math.floor(avail / Math.max(cjk, ascii));
+    else n = Math.floor(avail / fontSize);
+    if (!Number.isFinite(n) || n <= 0) n = 32;
+    n = Math.max(8, Math.min(40, n));
+    probe.parentNode.removeChild(probe);
+    return n;
+  }
+
   function create(container, options) {
     var text = options.text || '';
     var onChange = options.onChange || function () {};
     var onFinish = options.onFinish || function () {};
 
-    var split = splitTextWithOffsets(text);
+    var maxLen = options.maxLen;
+    if (!maxLen && global.TypingEngine && global.TypingEngine.measureMaxLen) {
+      maxLen = global.TypingEngine.measureMaxLen(container);
+    }
+    var split = splitTextWithOffsets(text, maxLen || MAX_LINE, true);
     var segments = split.segments;
     var offsets = split.offsets;
     var charStates = new Array(text.length).fill('pending');
@@ -405,5 +461,5 @@
     };
   }
 
-  global.TypingEngine = { create: create, splitTextIntoSegments: splitTextIntoSegments, splitTextWithOffsets: splitTextWithOffsets };
+  global.TypingEngine = { create: create, splitTextIntoSegments: splitTextIntoSegments, splitTextWithOffsets: splitTextWithOffsets, measureMaxLen: measureMaxLen };
 })(window);

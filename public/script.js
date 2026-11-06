@@ -534,14 +534,14 @@ function startPractice() {
   cachedCorrect = 0;
   cachedWrong = 0;
   currentSegmentIndex = 0;
-  const split = window.TypingEngine.splitTextWithOffsets(originalText);
+  typingCard.style.display = 'block';
+  statsCard.style.display = 'block';
+  const maxLen = window.TypingEngine.measureMaxLen(typingPages) || 32;
+  const split = window.TypingEngine.splitTextWithOffsets(originalText, maxLen, true);
   segments = split.segments;
   segmentOffsets = split.offsets;
   segmentInputs = [];
   segmentInputValues = new Array(segments.length).fill('');
-
-  statsCard.style.display = 'block';
-  typingCard.style.display = 'block';
   resultCard.style.display = 'none';
   startBtn.disabled = true;
   resetBtn.disabled = false;
