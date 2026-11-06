@@ -5041,15 +5041,12 @@ body.dashboard-mode.dash-list-mode { overflow: auto; }
   width: 100%; height: auto; padding: 0; order: 1;
 }
 .home-page #view-dashboard.is-list .dash-hero { order: 0; }
-.home-page #view-dashboard.is-list .dash-actions { order: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; width: 100%; }
+.home-page #view-dashboard.is-list .dash-actions { order: 1; display: grid; grid-template-columns: 1fr; gap: 12px; width: 100%; }
 .home-page #view-dashboard.is-list .dash-action + .dash-action { margin-top: 0; }
 .home-page #view-dashboard.is-list .dash-profile { order: 2; width: 100%; max-width: none; justify-self: stretch; }
 .home-page #view-dashboard.is-list .dash-version { order: 3; align-self: flex-start; width: 100%; }
 .home-page #view-dashboard.is-list .dash-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .home-page #view-dashboard.is-list .dash-action { height: auto; min-height: 76px; }
-@media (max-width: 767px) {
-  .home-page #view-dashboard.is-list .dash-actions { grid-template-columns: 1fr; }
-}
 @media (max-width: 480px) {
   .home-page .home-topbar { padding: 0 10px; gap: 6px; }
   .home-page .announcement-level-badge { display: none; }
