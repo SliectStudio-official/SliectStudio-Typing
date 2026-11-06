@@ -5,6 +5,8 @@ chcp 65001 > $null 2>&1
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
+$TargetNodeVersion = '25.3.0'
+$TargetNodeMajor = [int]($TargetNodeVersion.Split('.')[0])
 
 Write-Host ''
 Write-Host '========================================'
@@ -40,6 +42,28 @@ function Test-NodeReady {
     return (Get-Command node -ErrorAction SilentlyContinue) -and (Get-Command npm -ErrorAction SilentlyContinue)
 }
 
+function Write-NodeVersionCheck {
+    param($v)
+    if ($v -and $v.Major -eq $TargetNodeMajor) {
+        Write-Host "[OK] Node.js $($v.Full) matches target $TargetNodeVersion."
+    } else {
+        Write-Host "[WARN] 检测到 Node $($v.Full)，本项目锁定 $TargetNodeVersion。继续使用当前版本，安装后自检会判定兼容性。"
+    }
+}
+
+function Test-BetterSqlite3 {
+    node -e "require('better-sqlite3')" 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ''
+        Write-Host '[ERROR] better-sqlite3 无法加载。'
+        Write-Host '请安装 Visual Studio Build Tools 后重新运行 npm install，'
+        Write-Host '或把已编译好的 node_modules 整体拷入项目目录。'
+        return $false
+    }
+    Write-Host '[OK] better-sqlite3 可加载'
+    return $true
+}
+
 function New-RandomSecret {
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -69,9 +93,9 @@ function Write-LauncherConfig {
 # Phase 1: Node.js Environment Check & Auto-Fix
 # ============================================================
 
-function Ensure-NodeV22 {
+function Ensure-NodeTarget {
     # ---- 0. 先检查本地 MSI 安装包 ----
-    $localMsi = Join-Path $root 'node-v22.14.0-x64.msi'
+    $localMsi = Join-Path $root "node-v$TargetNodeVersion-x64.msi"
     $hasLocalMsi = Test-Path $localMsi
 
     # ---- 1. 检查 PATH 中是否有可用的 Node.js ----
@@ -79,7 +103,7 @@ function Ensure-NodeV22 {
         $v = Get-NodeVersion
         $exePath = (Get-Command node).Source
         Write-Host "[FOUND] Node.js $($v.Full) : $exePath"
-        Write-Host "[OK] Node.js is working. Continuing with current version."
+        Write-NodeVersionCheck $v
         return $true
     }
 
@@ -113,6 +137,7 @@ function Ensure-NodeV22 {
 
         if (Test-NodeReady) {
             $v = Get-NodeVersion
+            Write-NodeVersionCheck $v
             Write-Host "[OK] Node.js $($v.Full) found at $nodePath. Continuing."
             return $true
         }
@@ -130,6 +155,7 @@ function Ensure-NodeV22 {
                 Refresh-SessionPath
                 if (Test-NodeReady) {
                     $v = Get-NodeVersion
+                    Write-NodeVersionCheck $v
                     Write-Host "[OK] Node.js $($v.Full) found via registry. Continuing."
                     return $true
                 }
@@ -149,6 +175,7 @@ function Ensure-NodeV22 {
             Refresh-SessionPath
             if (Test-NodeReady) {
                 $v = Get-NodeVersion
+                Write-NodeVersionCheck $v
                 Write-Host "[OK] Node.js $($v.Full) found on disk. Continuing."
                 return $true
             }
@@ -179,7 +206,7 @@ function Ensure-NodeV22 {
     $hasWinget = Get-Command winget -ErrorAction SilentlyContinue
     if ($hasWinget) {
         Write-Host '[INSTALL] Trying winget...'
-        winget install OpenJS.NodeJS.LTS --version 22.14.0 --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+        winget install OpenJS.NodeJS --version $TargetNodeVersion --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
         Start-Sleep -Seconds 5
         Refresh-SessionPath
         if (Test-NodeReady) {
@@ -192,13 +219,13 @@ function Ensure-NodeV22 {
     }
 
     # 下载 MSI 安装
-    $nodeInstaller = Join-Path $env:TEMP 'node-v22.14.0-x64.msi'
+    $nodeInstaller = Join-Path $env:TEMP "node-v$TargetNodeVersion-x64.msi"
     $urls = @(
-        'https://cdn.npmmirror.com/binaries/node/v22.14.0/node-v22.14.0-x64.msi',
-        'https://registry.npmmirror.com/-/binary/node/v22.14.0/node-v22.14.0-x64.msi',
-        'https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi',
-        'https://mirrors.huaweicloud.com/nodejs/v22.14.0/node-v22.14.0-x64.msi',
-        'https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v22.14.0/node-v22.14.0-x64.msi'
+        "https://cdn.npmmirror.com/binaries/node/v$TargetNodeVersion/node-v$TargetNodeVersion-x64.msi",
+        "https://registry.npmmirror.com/-/binary/node/v$TargetNodeVersion/node-v$TargetNodeVersion-x64.msi",
+        "https://nodejs.org/dist/v$TargetNodeVersion/node-v$TargetNodeVersion-x64.msi",
+        "https://mirrors.huaweicloud.com/nodejs/v$TargetNodeVersion/node-v$TargetNodeVersion-x64.msi",
+        "https://mirrors.tuna.tsinghua.edu.cn/nodejs-release/v$TargetNodeVersion/node-v$TargetNodeVersion-x64.msi"
     )
 
     foreach ($url in $urls) {
@@ -254,15 +281,15 @@ function Ensure-NodeV22 {
     Write-Host '  Auto-install failed - Manual Steps'
     Write-Host '========================================'
     Write-Host ''
-    Write-Host 'IMPORTANT: Install Node.js v22 LTS'
+    Write-Host "IMPORTANT: Install Node.js v$TargetNodeVersion"
     Write-Host ''
     Write-Host 'Option A - Local MSI (Recommended, no internet needed):'
-    Write-Host '  1. Download: https://nodejs.org/dist/v22.14.0/node-v22.14.0-x64.msi'
-    Write-Host '  2. Save as: <project>\node-v22.14.0-x64.msi'
+    Write-Host "  1. Download: https://nodejs.org/dist/v$TargetNodeVersion/node-v$TargetNodeVersion-x64.msi"
+    Write-Host "  2. Save as: <project>\node-v$TargetNodeVersion-x64.msi"
     Write-Host '  3. Re-run start.bat (will auto-detect local MSI)'
     Write-Host ''
     Write-Host 'Option B - Manual install:'
-    Write-Host '  1. Download v22 LTS from https://nodejs.org'
+    Write-Host "  1. Download v$TargetNodeVersion from https://nodejs.org"
     Write-Host '  2. Install with "Add to PATH" checked'
     Write-Host '  3. Re-run start.bat'
     Write-Host '========================================'
@@ -275,7 +302,7 @@ function Ensure-NodeV22 {
 # ============================================================
 
 Write-Host '[Phase 1] Checking Node.js environment...'
-if (-not (Ensure-NodeV22)) {
+if (-not (Ensure-NodeTarget)) {
     Write-Host '[ERROR] Node.js is required. Cannot continue.'
     Read-Host 'Press Enter to exit'
     exit 1
@@ -356,6 +383,12 @@ if ($needInstall) {
     Write-Host '[OK] Dependencies installed.'
 } else {
     Write-Host '[OK] Dependencies ready.'
+}
+
+Write-Host ''
+Write-Host '[Phase 3.5] Verifying better-sqlite3...'
+if (-not (Test-BetterSqlite3)) {
+    exit 1
 }
 
 # ============================================================
