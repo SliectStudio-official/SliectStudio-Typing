@@ -384,6 +384,14 @@ const raceJoinFailures = new Map();
 const raceListHits = new Map();
 let raceCleanupTimer = null;
 
+// 快速匹配队列：进程内存，单进程前提；重启即清空
+const matchQueue = [];
+const MATCH_QUEUE_LIMIT = 50;
+const MATCH_TIMEOUT_MS = 30 * 1000;
+const MATCH_STALE_MS = 5 * 60 * 1000;
+let matchAttempting = false;
+let matchRoomFullLogged = false;
+
 function formatDateTime(ms) {
   const d = new Date(ms);
   const pad = n => String(n).padStart(2, '0');
@@ -462,6 +470,102 @@ async function buildGuestNickname(raw, room) {
     candidate = base.slice(0, Math.max(1, 12 - suffix.length)) + suffix;
   }
   return candidate;
+}
+
+function findMatchEntry(userId) {
+  for (const entry of matchQueue) {
+    if (entry.userId === userId) return entry;
+  }
+  return null;
+}
+
+async function createMatchedRoom(first, second, article) {
+  let code = null;
+  for (let i = 0; i < 10; i++) {
+    const candidate = generateRoomCode();
+    if (roomRegistry.has(candidate)) continue;
+    const exists = await db.get('SELECT id FROM races WHERE code = ?', candidate);
+    if (!exists) { code = candidate; break; }
+  }
+  if (!code) throw new Error('生成房间码失败');
+  const now = Date.now();
+  const startsAt = now + 3000;
+  const hostNickname = first.nickname || first.username;
+  const room = {
+    code, raceId: null, hostUserId: first.userId, hostNickname, status: 'countdown',
+    articleId: article.id, articleTitle: article.title, content: article.content, charCount: article.content.length,
+    maxPlayers: 2, isPublic: false, passwordHash: null,
+    createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
+    cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
+    allowSpectator: true, spectators: new Map(), matchmade: true
+  };
+  [first, second].forEach(function (entry) {
+    room.players.set('u:' + entry.userId, {
+      userId: entry.userId, guestId: null, nickname: entry.nickname || entry.username,
+      isGuest: false, ready: true, progress: 0, finishedAt: null, speed: null,
+      accuracy: null, timeSeconds: null, rank: null, joinedAt: now, ip: '', lastSeen: now
+    });
+  });
+  const result = await db.run(
+    `INSERT INTO races (code, password_hash, host_user_id, article_id, article_title, content_snapshot, char_count, status, is_public, max_players, player_count, started_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    code, null, first.userId, article.id, article.title, article.content, article.content.length,
+    'countdown', 0, 2, 2, formatDateTime(startsAt)
+  );
+  room.raceId = result.lastInsertRowid;
+  roomRegistry.set(code, room);
+  return room;
+}
+
+async function attemptMatch() {
+  if (matchAttempting) return null;
+  matchAttempting = true;
+  try {
+    const now = Date.now();
+    for (let i = matchQueue.length - 1; i >= 0; i--) {
+      const entry = matchQueue[i];
+      const inRoom = !!findRoomByUser(entry.userId, true);
+      const stale = now - entry.joinedAt > MATCH_STALE_MS;
+      if (inRoom || stale) {
+        matchQueue.splice(i, 1);
+        console.warn('[匹配] 剔除排队条目', { userId: entry.userId, reason: inRoom ? 'already_in_room' : 'stale' });
+      }
+    }
+    if (matchQueue.length < 2) return null;
+    const settings = await getRaceSettings();
+    if (!settings.enabled) return null;
+    if (activeRoomCount() >= settings.maxRooms) {
+      if (!matchRoomFullLogged) {
+        console.warn('[匹配] 房间已满，暂停配对', { active: activeRoomCount(), max: settings.maxRooms });
+        matchRoomFullLogged = true;
+      }
+      return { hint: '房间已满，请稍后再试', roomFull: true };
+    }
+    matchRoomFullLogged = false;
+    const first = matchQueue[0];
+    const second = matchQueue[1];
+    if (!first || !second || first.userId === second.userId) return null;
+    const rows = await db.all("SELECT id, title, content FROM articles WHERE status = 'approved'");
+    const preferred = rows.filter(function (row) { return row.content && row.content.length >= 200 && row.content.length <= 400; });
+    const pool = preferred.length ? preferred : rows.filter(function (row) { return row.content; });
+    if (!pool.length) return { hint: '暂无可用文章，请稍后再试' };
+    const article = pool[Math.floor(Math.random() * pool.length)];
+    let room;
+    try {
+      room = await createMatchedRoom(first, second, article);
+    } catch (e) {
+      console.error('[匹配] 创建房间失败:', e.message);
+      return { hint: '创建比赛失败，请稍后再试' };
+    }
+    [first, second].forEach(function (entry) {
+      const idx = matchQueue.findIndex(function (item) { return item.userId === entry.userId; });
+      if (idx >= 0) matchQueue.splice(idx, 1);
+    });
+    console.log('[匹配] 配对成功', { code: room.code, first: first.userId, second: second.userId });
+    return { matched: room.code };
+  } finally {
+    matchAttempting = false;
+  }
 }
 
 async function getRaceSettings() {
@@ -800,6 +904,82 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     res.json({ code });
   } catch (e) {
     res.status(500).json({ error: '创建比赛失败: ' + e.message });
+  }
+});
+
+app.post('/api/race/match/join', authMiddleware, async (req, res) => {
+  try {
+    const settings = await getRaceSettings();
+    if (!settings.enabled) {
+      return res.status(400).json({ error: '管理员已暂停创建比赛' });
+    }
+    if (findRoomByUser(req.user.id, true)) {
+      return res.status(400).json({ error: '你已在其他比赛房间中' });
+    }
+    let entry = findMatchEntry(req.user.id);
+    if (!entry) {
+      if (matchQueue.length >= MATCH_QUEUE_LIMIT) {
+        return res.status(400).json({ error: '队列已满，请稍后再试' });
+      }
+      const user = await db.get('SELECT username, nickname FROM users WHERE id = ?', req.user.id);
+      entry = {
+        userId: req.user.id,
+        username: user ? user.username : req.user.username,
+        nickname: user ? (user.nickname || user.username) : req.user.username,
+        joinedAt: Date.now()
+      };
+      matchQueue.push(entry);
+    }
+    const attempt = await attemptMatch();
+    const room = findRoomByUser(req.user.id, true);
+    if (room) return res.json({ status: 'matched', code: room.code });
+    if (!findMatchEntry(req.user.id)) {
+      // 条目恰好超过 5 分钟被 attemptMatch 清掉：重新排一次，保持 join 幂等可用
+      const user = await db.get('SELECT username, nickname FROM users WHERE id = ?', req.user.id);
+      entry = {
+        userId: req.user.id,
+        username: user ? user.username : req.user.username,
+        nickname: user ? (user.nickname || user.username) : req.user.username,
+        joinedAt: Date.now()
+      };
+      if (matchQueue.length < MATCH_QUEUE_LIMIT) matchQueue.push(entry);
+    }
+    const elapsed = Date.now() - entry.joinedAt;
+    const payload = { status: 'waiting', waiting: matchQueue.length, elapsed };
+    if (attempt && attempt.hint) payload.hint = attempt.hint;
+    else if (elapsed >= MATCH_TIMEOUT_MS) payload.hint = '可继续等待，或返回大厅自建房间';
+    if (attempt && attempt.roomFull) payload.roomFull = true;
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ error: '加入匹配失败' });
+  }
+});
+
+app.get('/api/race/match/status', authMiddleware, async (req, res) => {
+  try {
+    const attempt = await attemptMatch();
+    const room = findRoomByUser(req.user.id, true);
+    if (room) return res.json({ status: 'matched', code: room.code });
+    const entry = findMatchEntry(req.user.id);
+    if (!entry) return res.json({ status: 'idle' });
+    const elapsed = Date.now() - entry.joinedAt;
+    const payload = { status: 'waiting', waiting: matchQueue.length, elapsed };
+    if (attempt && attempt.hint) payload.hint = attempt.hint;
+    else if (elapsed >= MATCH_TIMEOUT_MS) payload.hint = '可继续等待，或返回大厅自建房间';
+    if (attempt && attempt.roomFull) payload.roomFull = true;
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ error: '获取匹配状态失败' });
+  }
+});
+
+app.post('/api/race/match/cancel', authMiddleware, async (req, res) => {
+  try {
+    const idx = matchQueue.findIndex(function (entry) { return entry.userId === req.user.id; });
+    if (idx >= 0) matchQueue.splice(idx, 1);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: '取消匹配失败' });
   }
 });
 
