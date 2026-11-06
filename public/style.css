@@ -4855,6 +4855,7 @@ body.dashboard-mode #site-footer { display: none; }
 }
 #view-dashboard .dash-quick.is-matching .dash-chev { display: none; }
 #view-dashboard .dash-quick.is-matching .dash-match-close { display: flex; }
+#view-dashboard .dash-quick.fx-was-matching:not(.is-matching) { animation: none; }
 #view-dashboard .dash-quick.is-matching .dash-action-title { padding-right: 36px; }
 #view-dashboard .dash-quick.is-matching .dash-action-title::before {
   content: ""; display: inline-block; width: 2px; height: 1em; margin-right: 6px;

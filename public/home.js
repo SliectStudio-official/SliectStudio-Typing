@@ -214,6 +214,7 @@
     if (!card || !title || !desc) return;
     card.classList.toggle('is-matching', active);
     if (active) {
+      card.classList.add('fx-was-matching');
       try {
         var since = startedAt || Number(localStorage.getItem('raceMatchPendingSince')) || Date.now();
         if (!localStorage.getItem('raceMatchPendingSince')) localStorage.setItem('raceMatchPendingSince', String(since));
