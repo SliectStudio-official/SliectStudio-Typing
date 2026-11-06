@@ -3121,7 +3121,7 @@ app.get('/api/user/history', authMiddleware, async (req, res) => {
 
     const total = (await db.get('SELECT COUNT(*) as count FROM scores WHERE user_id = ?', req.user.id)).count;
     const scores = await db.all(
-      'SELECT s.id, s.speed, s.accuracy, s.time_seconds, s.created_at, a.title as article_title FROM scores s LEFT JOIN articles a ON s.article_id = a.id WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ? OFFSET ?',
+      'SELECT s.id, s.article_id, s.speed, s.accuracy, s.time_seconds, s.created_at, a.title as article_title FROM scores s LEFT JOIN articles a ON s.article_id = a.id WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ? OFFSET ?',
       req.user.id, limit, offset
     );
 

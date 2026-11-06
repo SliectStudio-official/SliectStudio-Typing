@@ -32,15 +32,16 @@
   <script src="loading-indicator.js?v=2"></script>
   <link rel="manifest" href="manifest.json">
 </head>
-<body class="loading" data-page="index">
+<body class="loading dashboard-mode" data-page="index">
   <div id="page-loading-overlay" class="page-loading-overlay">
     <div class="page-loading-spinner"></div>
     <div class="page-loading-text">正在加载</div>
   </div>
   <div id="site-nav"></div>
 
-  <div class="sub-nav">
+  <div class="sub-nav" id="index-subnav">
     <div class="section-name">打字练习</div>
+    <button class="race-btn race-btn-small" id="back-dashboard" type="button">返回首页</button>
   </div>
 
   <div class="offline-banner" id="offline-banner" style="display:none" role="alert" aria-label="离线访问提示">
@@ -48,6 +49,66 @@
     <span class="offline-banner-text">当前为离线访问状态，数据不可同步至服务器</span>
   </div>
 
+<section id="view-dashboard">
+  <div class="dash-viewport" id="dash-viewport">
+    <div class="dash-stage" id="dash-stage">
+      <picture class="dash-bg">
+        <source srcset="assets/bg-photo.webp" type="image/webp">
+        <img src="assets/bg-photo.jpg" alt="">
+      </picture>
+      <div class="dash-dim"></div>
+      <div class="dash-panel-gradient"></div>
+      <button class="dash-home" id="dash-home" type="button" aria-label="进入首页">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3.75 7.5V17.5H16.25V7.5L10 2.5L3.75 7.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.92 12.08V17.5H12.08V12.08H7.92Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3.75 17.5H16.25" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span>进入首页</span>
+      </button>
+      <div class="dash-greeting">欢迎回来，</div>
+      <div class="dash-username" id="dash-username">游客</div>
+      <div class="dash-actions">
+        <button class="dash-action glass" id="dash-continue" type="button">
+          <span class="dash-icon"><svg width="25" height="25" viewBox="0 0 25 25" fill="none"><path d="M3.03 3.5V7.29H6.82" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.08 12.5a10.42 10.42 0 1 0 1.4-5.21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 6.25v6.25l4.42 4.42" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dash-action-title">继续上次的练习</span>
+          <span class="dash-action-desc" id="dash-continue-desc">退出前的练习</span>
+          <span class="dash-chev"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M5.94 3.75 9.69 7.5l-3.75 3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </button>
+        <button class="dash-action glass" id="dash-quick" type="button" aria-live="polite">
+          <span class="dash-icon"><svg width="25" height="25" viewBox="0 0 25 25" fill="none"><circle cx="12.5" cy="12.5" r="10.42" stroke="currentColor" stroke-width="2"/><path d="m11.98 7.29-2.6 5.21h6.25l-2.6 5.21" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dash-action-title" id="dash-quick-title">快速开始</span>
+          <span class="dash-action-desc" id="dash-quick-desc">进行 SOLO 匹配</span>
+          <span class="dash-chev" id="dash-quick-chev"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M5.94 3.75 9.69 7.5l-3.75 3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="dash-match-close" id="dash-quick-close"><svg width="21" height="21" viewBox="0 0 21 21" fill="none"><path d="m6.13 6.13 8.74 8.74M6.13 14.87l8.74-8.74" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </button>
+        <a class="dash-action glass" href="race.html">
+          <span class="dash-icon"><svg width="25" height="25" viewBox="0 0 25 25" fill="none"><path d="M3.13 3.13h18.75v18.75H3.13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.13 3.13v18.75L12.5 18.75V6.25L3.13 3.13Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></span>
+          <span class="dash-action-title">加入比赛房间</span>
+          <span class="dash-action-desc">跳转到比赛页面</span>
+          <span class="dash-chev"><svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M5.94 3.75 9.69 7.5l-3.75 3.75" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </a>
+      </div>
+      <div class="dash-version" id="dash-version">Typing-…</div>
+      <aside class="dash-profile glass">
+        <div class="dash-profile-content">
+          <div class="dash-avatar" id="dash-avatar">游</div>
+          <div class="dash-profile-name" id="dash-profile-name">游客</div>
+          <div class="dash-stats">
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-practices">—</div><div class="dash-stat-label">练习次数</div></div>
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-chars">—</div><div class="dash-stat-label">累计字数</div></div>
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-speed">—</div><div class="dash-stat-label">平均速度</div></div>
+            <div class="dash-stat glass"><div class="dash-stat-value" id="dash-stat-winrate">—</div><div class="dash-stat-label">胜率</div></div>
+          </div>
+          <nav class="dash-rows">
+            <button class="dash-row glass" id="dash-lb" type="button"><span class="dash-row-label">排行榜</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+            <a class="dash-row glass" id="dash-profile-link" href="profile.html"><span class="dash-row-label">查看个人数据</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+            <a class="dash-row glass" href="index.html"><span class="dash-row-label">转到个人主页</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></a>
+            <button class="dash-row dash-row-danger glass" id="dash-logout" type="button"><span class="dash-row-label">退出账号登录</span><span class="dash-chev"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m7.92 5 5 5-5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
+          </nav>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+  <div id="view-practice" style="display:none">
   <div class="container">
     <div class="section-card">
       <div class="section-card-title">选择文章</div>
@@ -176,6 +237,7 @@
       <div class="history-list" id="history-list"></div>
       <div class="empty-msg" id="history-empty">暂无历史记录</div>
     </div>
+  </div>
   </div>
 
   <button class="leaderboard-btn" id="lb-btn">排行榜</button>
