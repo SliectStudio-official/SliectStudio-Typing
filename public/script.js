@@ -1146,7 +1146,7 @@ lbCategoryFilter.addEventListener('change', () => {
 
 let lbReturnFocus = null;
 function openLeaderboard() {
-  lbReturnFocus = document.activeElement || lbBtn;
+  lbReturnFocus = lbBtn;
   lbOverlay.style.display = 'flex';
   lbModal.scrollTop = 0;
   document.body.style.overflow = 'hidden';

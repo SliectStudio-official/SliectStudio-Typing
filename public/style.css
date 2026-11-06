@@ -4359,6 +4359,7 @@ button:focus-visible,
 .user-menu-danger { color: var(--primary-active); }
 .user-menu-danger:hover { background: var(--primary-lightest); }
 .user-menu-race-stats { margin-top: 0; }
+.user-menu-race-stats .user-stat span { color: var(--body); }
 .user-menu-notify { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .notify-badge {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
