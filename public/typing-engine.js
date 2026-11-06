@@ -188,12 +188,49 @@
     return ch;
   }
 
+  function splitTextWithOffsets(text, maxLen) {
+    var source = String(text == null ? '' : text);
+    var segments = splitTextIntoSegments(source, maxLen);
+    var offsets = [];
+    var cursor = 0;
+    for (var i = 0; i < segments.length; i++) {
+      var segment = segments[i];
+      var start = cursor;
+      var matched = 0;
+      while (matched < segment.length && cursor < source.length) {
+        if (source.charAt(cursor) === segment.charAt(matched)) {
+          if (matched === 0) start = cursor;
+          cursor++;
+          matched++;
+        } else if (/[ \t\u00a0\r\n]/.test(source.charAt(cursor))) {
+          // 段与段之间被 trim 的空白不计入段长，但光标必须跳过
+          cursor++;
+        } else {
+          var found = source.indexOf(segment, cursor);
+          if (found >= 0) {
+            start = found;
+            cursor = found + segment.length;
+            matched = segment.length;
+          } else {
+            start = cursor;
+            cursor += segment.length;
+            matched = segment.length;
+          }
+        }
+      }
+      offsets.push(start);
+    }
+    return { segments: segments, offsets: offsets };
+  }
+
   function create(container, options) {
     var text = options.text || '';
     var onChange = options.onChange || function () {};
     var onFinish = options.onFinish || function () {};
 
-    var segments = splitTextIntoSegments(text);
+    var split = splitTextWithOffsets(text);
+    var segments = split.segments;
+    var offsets = split.offsets;
     var charStates = new Array(text.length).fill('pending');
     var inputs = [];
     var values = [];
@@ -209,9 +246,7 @@
     for (var i = 0; i < segments.length; i++) values.push('');
 
     function offsetOf(index) {
-      var off = 0;
-      for (var i = 0; i < index; i++) off += segments[i].length;
-      return off;
+      return offsets[index] || 0;
     }
 
     function build() {
@@ -370,5 +405,5 @@
     };
   }
 
-  global.TypingEngine = { create: create, splitTextIntoSegments: splitTextIntoSegments };
+  global.TypingEngine = { create: create, splitTextIntoSegments: splitTextIntoSegments, splitTextWithOffsets: splitTextWithOffsets };
 })(window);
