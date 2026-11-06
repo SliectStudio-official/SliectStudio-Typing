@@ -554,11 +554,6 @@ async function seedData(db) {
   if (settingCount.count === 0) {
     await db.run("INSERT INTO settings (`key`, value) VALUES ('sensitive_words', '')");
   }
-  const guestSettingCount = await db.get("SELECT COUNT(*) as count FROM settings WHERE `key` = 'allow_guest_leaderboard'");
-  if (guestSettingCount.count === 0) {
-    await db.run("INSERT INTO settings (`key`, value) VALUES ('allow_guest_leaderboard', 'true')");
-  }
-
   const userCount = await db.get('SELECT COUNT(*) as count FROM users');
   if (userCount.count === 0) {
     const bsRow = await db.get("SELECT value FROM settings WHERE `key` = 'needs_bootstrap'");

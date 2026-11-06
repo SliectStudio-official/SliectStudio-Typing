@@ -928,10 +928,7 @@ app.get('/api/leaderboard', async (req, res) => {
     if (guest) {
       whereClauses.push('s.user_id IS NULL');
     } else {
-      const allowGuestRow = await db.get("SELECT value FROM settings WHERE `key` = 'allow_guest_leaderboard'");
-      if (!allowGuestRow || allowGuestRow.value !== 'true') {
-        whereClauses.push('s.user_id IS NOT NULL');
-      }
+      whereClauses.push('s.user_id IS NOT NULL');
     }
 
     const whereStr = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
@@ -953,7 +950,20 @@ app.get('/api/leaderboard', async (req, res) => {
 app.post('/api/leaderboard', async (req, res) => {
   try {
     const { nickname, speed, accuracy, time_seconds, article_id, source } = req.body;
-    if (!nickname || speed === undefined || accuracy === undefined) {
+
+    let userId = null;
+    let userRow = null;
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Bearer ')) {
+      try {
+        const decoded = jwt.verify(auth.slice(7), JWT_SECRET);
+        userRow = await db.get('SELECT id, username, nickname FROM users WHERE id = ?', decoded.id);
+        if (userRow) userId = userRow.id;
+      } catch (e) {}
+    }
+    const effectiveNickname = userId ? (userRow.nickname || userRow.username) : nickname;
+
+    if (!effectiveNickname || speed === undefined || accuracy === undefined) {
       return res.status(400).json({ error: '昵称、速度和准确率不能为空' });
     }
     if (typeof speed !== 'number' || speed < 0 || speed > 1000) {
@@ -966,21 +976,34 @@ app.post('/api/leaderboard', async (req, res) => {
       return res.status(400).json({ error: '时长数据异常' });
     }
 
-    const sensitiveWord = await containsSensitiveWord(nickname);
+    const sensitiveWord = await containsSensitiveWord(effectiveNickname);
     if (sensitiveWord) {
       return res.status(400).json({ error: '昵称包含敏感词: ' + sensitiveWord });
     }
 
-    const auth = req.headers.authorization;
-    let userId = null;
-    if (auth && auth.startsWith('Bearer ')) {
-      try {
-        const decoded = jwt.verify(auth.slice(7), JWT_SECRET);
-        userId = decoded.id;
-      } catch (e) {}
+    const hasArticle = !!article_id;
+    if (hasArticle && time_seconds > 0) {
+      const lengthExpr = isMySQL(db) ? 'CHAR_LENGTH(content)' : 'LENGTH(content)';
+      const articleRow = await db.get(`SELECT ${lengthExpr} AS char_count FROM articles WHERE id = ?`, article_id);
+      if (articleRow && articleRow.char_count > 0) {
+        const theoretical = (articleRow.char_count * 60) / time_seconds;
+        if (Math.abs(speed - theoretical) / theoretical > 0.3) {
+          console.warn('[成绩校验] 拒绝偏差过大的成绩', {
+            user_id: userId,
+            article_id,
+            reported_speed: speed,
+            theoretical_speed: Number(theoretical.toFixed(2)),
+            char_count: articleRow.char_count,
+            time_seconds
+          });
+          return res.status(400).json({ error: '成绩与文章长度不符，已拒绝' });
+        }
+      }
     }
+
+    const finalSource = hasArticle ? (source || 'normal') : 'unverified';
     const ip = req.ip || req.connection.remoteAddress || '';
-    const result = await db.run('INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', userId, nickname, speed, accuracy, time_seconds || 0, article_id || null, ip, source || 'normal');
+    const result = await db.run('INSERT INTO scores (user_id, nickname, speed, accuracy, time_seconds, article_id, ip_address, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', userId, effectiveNickname, speed, accuracy, time_seconds || 0, hasArticle ? article_id : null, ip, finalSource);
     const score = await db.get('SELECT s.*, a.title as article_title FROM scores s LEFT JOIN articles a ON s.article_id = a.id WHERE s.id = ?', result.lastInsertRowid);
     res.json(score);
   } catch (e) {
