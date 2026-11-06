@@ -4338,23 +4338,42 @@ button:focus-visible,
 /* 全局快速匹配底栏 */
 .race-match-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 500;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
   padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-  background: var(--ink); color: #fff; border-top: 1px solid rgba(255,255,255,0.12);
-  box-shadow: 0 -4px 18px rgba(0,0,0,0.18); font-family: var(--font-body); font-size: 13px;
+  background: var(--glass-bg); color: var(--ink);
+  border-top: 1px solid var(--hairline-soft);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  font-family: var(--font-body); font-size: 13px;
 }
-.race-match-bar-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.race-match-bar-action {
-  flex: 0 0 auto; border: 1px solid rgba(255,255,255,0.35); border-radius: 7px;
-  background: transparent; color: #fff; font-family: var(--font-body); font-size: 13px;
-  padding: 5px 12px; cursor: pointer; white-space: nowrap;
+.race-match-bar-text {
+  min-width: 0; max-width: calc(100vw - 100px);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums;
 }
-.race-match-bar-action:hover { background: rgba(255,255,255,0.12); }
-body.race-match-open { padding-bottom: 54px; }
+.race-match-bar-close {
+  flex: 0 0 auto; width: 26px; height: 26px; min-width: 26px; min-height: 26px;
+  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+  border: 1px solid var(--hairline-strong); border-radius: 50%;
+  background: transparent; color: var(--body-strong); cursor: pointer;
+}
+.race-match-bar-close svg { width: 14px; height: 14px; stroke: currentColor; }
+.race-match-bar-close:hover { background: var(--glass-bg-hover); color: var(--ink); }
+.race-match-bar-close:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.race-match-bar-enter {
+  flex: 0 0 auto; padding: 5px 12px; border: none; border-radius: 8px;
+  background: var(--primary); color: var(--on-primary);
+  font-family: var(--font-body); font-size: 13px; font-weight: 600; cursor: pointer;
+  white-space: nowrap;
+}
+.race-match-bar-enter:hover { background: var(--primary-active); }
+body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 @media (max-width: 480px) {
   .race-match-bar { padding: 9px 10px calc(9px + env(safe-area-inset-bottom)); font-size: 12.5px; gap: 8px; }
-  .race-match-bar-action { padding: 5px 9px; }
-  body.race-match-open { padding-bottom: 52px; }
+  .race-match-bar-text { max-width: calc(100vw - 96px); }
+  .race-match-bar-close { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
+  .race-match-bar-enter { padding: 5px 9px; }
 }
 @media (max-width: 480px) {
   .user-menu { right: -8px; min-width: 220px; }

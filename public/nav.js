@@ -104,7 +104,10 @@
     var matchBar =
       '<div class="race-match-bar" id="race-match-bar" style="display:none">' +
         '<span class="race-match-bar-text" id="race-match-bar-text"></span>' +
-        '<button class="race-match-bar-action" id="race-match-bar-action">取消</button>' +
+        '<button class="race-match-bar-enter" id="race-match-enter" style="display:none">进入比赛</button>' +
+        '<button class="race-match-bar-close" id="race-match-bar-action" aria-label="取消匹配" title="取消匹配">' +
+          '<svg viewBox="0 0 16 16" fill="none" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>' +
+        '</button>' +
       '</div>';
 
     var mount = document.getElementById('site-nav');
@@ -526,8 +529,15 @@
     return {
       bar: document.getElementById('race-match-bar'),
       text: document.getElementById('race-match-bar-text'),
-      action: document.getElementById('race-match-bar-action')
+      close: document.getElementById('race-match-bar-action'),
+      enter: document.getElementById('race-match-enter')
     };
+  }
+  function setMatchBarHeight() {
+    var els = matchBarEls();
+    if (els.bar && els.bar.style.display !== 'none') {
+      document.body.style.setProperty('--race-match-bar-h', els.bar.offsetHeight + 'px');
+    }
   }
   function matchElapsedText(ms) {
     var sec = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -535,13 +545,19 @@
     var ss = String(sec % 60).padStart(2, '0');
     return '匹配中 ' + mm + ':' + ss;
   }
-  function setMatchBar(text, actionLabel) {
+  function setMatchBar(text, mode) {
     var els = matchBarEls();
     if (!els.bar) return;
     if (els.text) els.text.textContent = text;
-    if (els.action) els.action.textContent = actionLabel || '取消';
+    if (els.close) {
+      els.close.style.display = mode === 'auto' ? 'none' : 'inline-flex';
+      els.close.setAttribute('aria-label', '取消匹配');
+      els.close.title = '取消匹配';
+    }
+    if (els.enter) els.enter.style.display = mode === 'practice' ? 'inline-flex' : 'none';
     els.bar.style.display = 'flex';
     document.body.classList.add('race-match-open');
+    setMatchBarHeight();
   }
   function stopMatchBarPolling() {
     if (matchBarTimer) { clearInterval(matchBarTimer); matchBarTimer = null; }
@@ -556,6 +572,13 @@
     var els = matchBarEls();
     if (els.bar) els.bar.style.display = 'none';
     document.body.classList.remove('race-match-open');
+    document.body.style.removeProperty('--race-match-bar-h');
+  }
+  function clearMatchPendingFlags() {
+    try {
+      localStorage.removeItem(MATCH_PENDING_KEY);
+      localStorage.removeItem(MATCH_SINCE_KEY);
+    } catch (e) {}
   }
   function isPracticeActive() {
     var inputs = document.querySelectorAll('#typing-pages .typing-line-input');
@@ -583,10 +606,14 @@
           stopMatchBarPolling();
           if (isPracticeActive()) {
             matchBarEnterCode = data.code;
-            setMatchBar('匹配成功 · 进入比赛', '进入比赛');
+            setMatchBar('匹配成功', 'practice');
           } else {
-            clearMatchBar();
-            location.href = 'race.html?code=' + encodeURIComponent(data.code);
+            clearMatchPendingFlags();
+            matchBarEnterCode = null;
+            setMatchBar('匹配成功，正在进入比赛…', 'auto');
+            setTimeout(function () {
+              location.href = 'race.html?code=' + encodeURIComponent(data.code);
+            }, 300);
           }
           return;
         }
@@ -594,39 +621,52 @@
           var text = matchElapsedText(data.elapsed);
           if (data.hint) text += ' · ' + data.hint;
           matchBarEnterCode = null;
-          setMatchBar(text, '取消');
+          setMatchBar(text, 'waiting');
           if (!matchBarTimer) matchBarTimer = setInterval(pollMatchBar, 1000);
           return;
         }
         clearMatchBar();
       })
       .catch(function (e) {
-        setMatchBar('匹配状态获取失败：' + (e.message || '网络错误'), '取消');
+        setMatchBar('匹配状态获取失败：' + (e.message || '网络错误'), 'waiting');
         if (!matchBarTimer) matchBarTimer = setInterval(pollMatchBar, 1000);
       });
   }
   function startMatchBarPolling() {
     if (localStorage.getItem(MATCH_PENDING_KEY) !== '1') return;
     if (!localStorage.getItem('token')) { clearMatchBar(); return; }
-    setMatchBar('匹配中 00:00', '取消');
+    matchBarEnterCode = null;
+    setMatchBar('匹配中 00:00', 'waiting');
     if (!matchBarTimer) matchBarTimer = setInterval(pollMatchBar, 1000);
     pollMatchBar();
   }
+  function matchBarEnter() {
+    if (!matchBarEnterCode) return;
+    var code = matchBarEnterCode;
+    clearMatchBar();
+    location.href = 'race.html?code=' + encodeURIComponent(code);
+  }
   function matchBarAction() {
-    if (matchBarEnterCode) {
-      var code = matchBarEnterCode;
-      clearMatchBar();
-      location.href = 'race.html?code=' + encodeURIComponent(code);
-      return;
-    }
+    var tk = localStorage.getItem('token') || '';
     fetch('/api/race/match/cancel', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (localStorage.getItem('token') || '') },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tk },
       body: '{}'
     }).catch(function () {}).then(clearMatchBar);
   }
+  window.addEventListener('resize', setMatchBarHeight);
   var matchBarActionBtn = document.getElementById('race-match-bar-action');
-  if (matchBarActionBtn) matchBarActionBtn.addEventListener('click', matchBarAction);
+  if (matchBarActionBtn) {
+    matchBarActionBtn.addEventListener('click', matchBarAction);
+    matchBarActionBtn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        matchBarAction();
+      }
+    });
+  }
+  var matchBarEnterBtn = document.getElementById('race-match-enter');
+  if (matchBarEnterBtn) matchBarEnterBtn.addEventListener('click', matchBarEnter);
   window.addEventListener('race-match-pending', startMatchBarPolling);
   window.addEventListener('race-match-cancel-local', clearMatchBar);
   window.addEventListener('race-room-entered', function () {
