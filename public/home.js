@@ -9,7 +9,9 @@
     matchActive: false,
     matchTimer: null,
     fitTimer: null,
-    notifyOpen: false
+    notifyOpen: false,
+    countRaf: null,
+    countTasks: []
   };
 
   function $(id) { return document.getElementById(id); }
@@ -66,21 +68,63 @@
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
   }
 
-  /* ---------- 1920×1080 画布与窄屏列表 ---------- */
+  var motionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  function reduceMotion() { return !!(motionQuery && motionQuery.matches); }
+
+  /* ---------- 数字滚动：全部任务共用一条 rAF ---------- */
+  function animateStat(el, finalText) {
+    if (!el) return;
+    if (finalText == null || finalText === '—' || reduceMotion()) {
+      el.textContent = finalText == null ? '—' : finalText;
+      return;
+    }
+    var text = String(finalText);
+    var m = text.match(/-?\d+(?:\.\d+)?/);
+    if (!m) { el.textContent = text; return; }
+    var target = Number(m[0]);
+    var decimals = (m[0].split('.')[1] || '').length;
+    var prefix = text.slice(0, m.index);
+    var suffix = text.slice(m.index + m[0].length);
+    el.textContent = prefix + (decimals ? (0).toFixed(decimals) : '0') + suffix;
+    state.countTasks.push({
+      el: el, target: target, decimals: decimals,
+      prefix: prefix, suffix: suffix, start: 0, done: false
+    });
+    startCountLoop();
+  }
+  function startCountLoop() {
+    if (state.countRaf || document.hidden || !state.countTasks.length) return;
+    state.countRaf = requestAnimationFrame(stepCountUps);
+  }
+  function stepCountUps(now) {
+    state.countRaf = null;
+    if (document.hidden) return;
+    var remaining = 0;
+    state.countTasks.forEach(function (task) {
+      if (task.done) return;
+      if (!task.start) task.start = now;
+      var p = Math.min(1, (now - task.start) / 600);
+      var eased = 1 - Math.pow(1 - p, 3);
+      var value = task.target * eased;
+      task.el.textContent = task.prefix + (task.decimals ? value.toFixed(task.decimals) : String(Math.round(value))) + task.suffix;
+      if (p >= 1) {
+        task.done = true;
+        task.el.textContent = task.prefix + (task.decimals ? task.target.toFixed(task.decimals) : String(task.target)) + task.suffix;
+      } else {
+        remaining++;
+      }
+    });
+    state.countTasks = state.countTasks.filter(function (task) { return !task.done; });
+    if (remaining) state.countRaf = requestAnimationFrame(stepCountUps);
+  }
+
+  /* ---------- 铺满画布与窄屏列表 ---------- */
   function fit() {
     var view = $('view-dashboard');
     if (!view) return;
     var list = window.innerWidth < 900 || window.innerHeight > window.innerWidth;
     view.classList.toggle('is-list', list);
     document.body.classList.toggle('dash-list-mode', list);
-    var stage = $('dash-stage');
-    if (!stage) return;
-    if (list) {
-      stage.style.transform = 'none';
-      return;
-    }
-    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-    stage.style.transform = 'scale(' + s + ')';
   }
   function scheduleFit() {
     if (state.fitTimer) clearTimeout(state.fitTimer);
@@ -128,13 +172,13 @@
     ]).then(function (rows) {
       var st = rows[0], rs = rows[1];
       if (st) {
-        if ($('dash-stat-practices')) $('dash-stat-practices').textContent = String(st.totalPractices || 0);
-        if ($('dash-stat-chars')) $('dash-stat-chars').textContent = compactNumber(st.totalKeystrokes || 0);
+        animateStat($('dash-stat-practices'), String(st.totalPractices || 0));
+        animateStat($('dash-stat-chars'), compactNumber(st.totalKeystrokes || 0));
         var speed = st.totalTimeSeconds > 0 ? Math.round((st.totalKeystrokes || 0) / st.totalTimeSeconds * 60) : 0;
-        if ($('dash-stat-speed')) $('dash-stat-speed').textContent = speed ? String(speed) : '—';
+        animateStat($('dash-stat-speed'), speed ? String(speed) : '—');
       }
-      if (rs && $('dash-stat-winrate')) {
-        $('dash-stat-winrate').textContent = rs.finishedCount > 0 ? Math.round(rs.winRate) + '%' : '—';
+      if (rs) {
+        animateStat($('dash-stat-winrate'), rs.finishedCount > 0 ? Math.round(rs.winRate) + '%' : '—');
       }
     });
   }
@@ -292,6 +336,40 @@
     if (bell) bell.setAttribute('aria-expanded', 'false');
   }
 
+  /* ---------- 指针视差与页面隐藏暂停 ---------- */
+  function resetCard(card) {
+    ['--fx-tx', '--fx-ty', '--fx-rx', '--fx-ry', '--fx-mx', '--fx-my'].forEach(function (name) {
+      card.style.removeProperty(name);
+    });
+  }
+  function bindCardEffects() {
+    if (!window.matchMedia || window.matchMedia('(pointer: coarse)').matches) return;
+    Array.prototype.forEach.call(document.querySelectorAll('#view-dashboard .dash-action'), function (card) {
+      card.addEventListener('mousemove', function (e) {
+        if (reduceMotion()) return;
+        var r = card.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        var nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+        var ny = ((e.clientY - r.top) / r.height) * 2 - 1;
+        card.style.setProperty('--fx-tx', (nx * 4).toFixed(2) + 'px');
+        card.style.setProperty('--fx-ty', (ny * 2).toFixed(2) + 'px');
+        card.style.setProperty('--fx-rx', (-ny * 2).toFixed(2) + 'deg');
+        card.style.setProperty('--fx-ry', (nx * 2).toFixed(2) + 'deg');
+        card.style.setProperty('--fx-mx', (((e.clientX - r.left) / r.width) * 100).toFixed(1) + '%');
+        card.style.setProperty('--fx-my', (((e.clientY - r.top) / r.height) * 100).toFixed(1) + '%');
+      });
+      card.addEventListener('mouseleave', function () { resetCard(card); });
+    });
+  }
+  function bindVisibilityPause() {
+    var apply = function () {
+      document.body.classList.toggle('fx-paused', !!document.hidden);
+      if (!document.hidden) startCountLoop();
+    };
+    document.addEventListener('visibilitychange', apply);
+    apply();
+  }
+
   /* ---------- 事件 ---------- */
   function goPractice() {
     window.location.href = state.continueId != null
@@ -334,6 +412,8 @@
     });
     window.addEventListener('resize', scheduleFit);
     window.addEventListener('orientationchange', scheduleFit);
+    bindCardEffects();
+    bindVisibilityPause();
   }
 
   function init() {
