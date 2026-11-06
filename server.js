@@ -379,6 +379,10 @@ const RACE_LIST_WINDOW_MS = 60 * 1000;
 const RACE_LIST_MAX_HITS = 60;
 const RACE_ROOM_GRACE_MS = 60 * 1000;
 const RACE_GUEST_LIMIT = 4;
+// 全员离线判定：选手心跳停止超过阈值才结束房间，避免一场无人的比赛挂到 charCount×2 分钟
+const RACE_OFFLINE_RACING_MS = 60 * 1000;
+const RACE_OFFLINE_COUNTDOWN_MS = 30 * 1000;
+const RACE_OFFLINE_WAITING_MS = 120 * 1000;
 const roomRegistry = new Map();
 const raceJoinFailures = new Map();
 const raceListHits = new Map();
@@ -849,7 +853,7 @@ function updateRoomPhase(room) {
   }
 }
 
-async function cancelRoom(room, reason, byId) {
+async function cancelRoom(room, reason, byId, detail) {
   if (room.status === 'cancelled') return;
   room.status = 'cancelled';
   room.cancelledReason = reason;
@@ -860,7 +864,9 @@ async function cancelRoom(room, reason, byId) {
   } catch (e) {
     console.error('[比赛] 更新取消状态失败:', e.message);
   }
-  console.warn('[比赛] 房间取消', { code: room.code, reason, by: byId || null });
+  const log = { code: room.code, reason, by: byId || null };
+  if (detail) Object.assign(log, detail);
+  console.warn('[比赛] 房间取消', log);
 }
 
 async function upsertParticipant(room, player) {
@@ -910,14 +916,35 @@ async function finalizeRoom(room, reason) {
 async function cleanupRooms() {
   const now = Date.now();
   for (const room of Array.from(roomRegistry.values())) {
-    if (room.status === 'waiting' && now - room.createdAt > 2 * 60 * 60 * 1000) {
-      await cancelRoom(room, 'timeout', null);
-    }
-    if (isActiveRoom(room) && room.hostLastSeen && now - room.hostLastSeen > 5 * 60 * 1000) {
-      await cancelRoom(room, 'host_disconnect', null);
-    }
-    if (room.status === 'racing' && room.charCount > 0 && now - room.startsAt > room.charCount * 2 * 60 * 1000) {
-      await finalizeRoom(room, 'time_limit');
+    if (isActiveRoom(room)) {
+      if (room.status === 'waiting') {
+        const players = Array.from(room.players.values());
+        const playersStale = players.every(function (p) { return now - (p.lastSeen || 0) > RACE_OFFLINE_WAITING_MS; });
+        const hostStale = !room.hostLastSeen || now - room.hostLastSeen > RACE_OFFLINE_WAITING_MS;
+        if (playersStale && hostStale) {
+          await cancelRoom(room, 'all_disconnected', null, { offline: players.length });
+          continue;
+        }
+      } else if (room.status === 'countdown') {
+        const players = Array.from(room.players.values()).filter(function (p) { return !p.finishedAt; });
+        if (players.length && players.every(function (p) { return now - (p.lastSeen || 0) > RACE_OFFLINE_COUNTDOWN_MS; })) {
+          await cancelRoom(room, 'all_disconnected', null, { offline: players.length });
+          continue;
+        }
+      } else if (room.status === 'racing') {
+        const players = Array.from(room.players.values()).filter(function (p) { return !p.finishedAt; });
+        if (players.length && players.every(function (p) { return now - (p.lastSeen || 0) > RACE_OFFLINE_RACING_MS; })) {
+          await cancelRoom(room, 'all_disconnected', null, { offline: players.length });
+          continue;
+        }
+      }
+      if (room.hostLastSeen && now - room.hostLastSeen > 5 * 60 * 1000) {
+        await cancelRoom(room, 'host_disconnect', null);
+        continue;
+      }
+      if (room.status === 'racing' && room.charCount > 0 && now - room.startsAt > room.charCount * 2 * 60 * 1000) {
+        await finalizeRoom(room, 'time_limit');
+      }
     }
     if ((room.status === 'finished' && room.finishedAt && now - room.finishedAt > RACE_ROOM_GRACE_MS) ||
         (room.status === 'cancelled' && room.cancelledAt && now - room.cancelledAt > RACE_ROOM_GRACE_MS)) {
