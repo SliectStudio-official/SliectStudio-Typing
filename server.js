@@ -14,7 +14,7 @@ const {
 } = require('./db-config');
 
 const app = express();
-const PORT = 3000;
+const PORT = Number.parseInt(process.env.PORT, 10) || 3000;
 let JWT_SECRET = '';
 
 function loadOrCreateJwtSecret() {
@@ -84,6 +84,13 @@ const assetVersion = crypto.createHash('sha256')
   .slice(0, 12);
 
 const HTML_PAGES = ['/', '/index.html', '/admin.html', '/profile.html', '/setup.html'];
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
 
 app.use(compression({
   level: 9,
@@ -221,6 +228,12 @@ function normalizeEmail(input) {
   return text.toLowerCase();
 }
 
+function validatePassword(pw) {
+  if (pw.length < 6) return '密码至少6位';
+  if (Buffer.byteLength(pw, 'utf8') > 72) return '密码不能超过 72 字节';
+  return null;
+}
+
 function calculateDifficulty(content) {
   const charCount = content.length;
   const punctuationCount = (content.match(/[，。！？、；：""''《》（）\[\]{},.!?;:'"()<>\/\\@#$%^&*+=~`]/g) || []).length;
@@ -326,8 +339,9 @@ app.post('/api/bootstrap/create-admin', async (req, res) => {
     if (username.length < 2 || username.length > 20) {
       return res.status(400).json({ error: '用户名长度2-20字符' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: '密码至少6位' });
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     if (password !== passwordConfirm) {
       return res.status(400).json({ error: '两次输入的密码不一致' });
@@ -359,11 +373,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (username.length < 2 || username.length > 20) {
       return res.status(400).json({ error: '用户名长度2-20字符' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: '密码至少6位' });
-    }
-    if (Buffer.byteLength(password, 'utf8') > 72) {
-      return res.status(400).json({ error: '密码不能超过 72 字节' });
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     const normalizedEmail = normalizeEmail(email);
     if (normalizedEmail && normalizedEmail.ok === false) {
@@ -454,11 +466,9 @@ app.put('/api/auth/me', authMiddleware, async (req, res) => {
       if (!bcrypt.compareSync(currentPassword, user.password_hash)) {
         return res.status(400).json({ error: '当前密码不正确' });
       }
-      if (newPassword.length < 6) {
-        return res.status(400).json({ error: '新密码至少6位' });
-      }
-      if (Buffer.byteLength(newPassword, 'utf8') > 72) {
-        return res.status(400).json({ error: '密码不能超过 72 字节' });
+      const passwordError = validatePassword(newPassword);
+      if (passwordError) {
+        return res.status(400).json({ error: passwordError });
       }
       const newHash = bcrypt.hashSync(newPassword, 10);
       if (username && username !== user.username) {
@@ -540,11 +550,9 @@ app.put('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res
       updates.push('role = ?'); params.push(role);
     }
     if (password) {
-      if (password.length < 6) {
-        return res.status(400).json({ error: '密码至少6位' });
-      }
-      if (Buffer.byteLength(password, 'utf8') > 72) {
-        return res.status(400).json({ error: '密码不能超过 72 字节' });
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        return res.status(400).json({ error: passwordError });
       }
       updates.push('password_hash = ?');
       params.push(bcrypt.hashSync(password, 10));
@@ -1189,11 +1197,9 @@ app.put('/api/user/password', authMiddleware, async (req, res) => {
     if (!oldPassword || !newPassword) {
       return res.status(400).json({ error: '请输入旧密码和新密码' });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: '新密码至少6位' });
-    }
-    if (Buffer.byteLength(newPassword, 'utf8') > 72) {
-      return res.status(400).json({ error: '密码不能超过 72 字节' });
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     const user = await db.get('SELECT password_hash FROM users WHERE id = ?', req.user.id);
     if (!user || !bcrypt.compareSync(oldPassword, user.password_hash)) {
