@@ -24,11 +24,16 @@ body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"
 .stats span{color:var(--muted)}
 .stats .v{color:var(--ink)}
 .wrap{flex:1;padding:18px;overflow:auto}
-.frame{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;max-width:1100px;margin:0 auto}
+.practice{max-width:900px;margin:0 auto}
+.practice-head{display:flex;align-items:center;gap:12px;padding:0 2px 12px;flex-wrap:wrap}
+.practice-head .ptext{font-size:12px;color:var(--muted)}
+.practice-head .spacer{flex:1}
+.practice-head .sel{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit}
+.frame{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;max-width:900px;margin:0 auto}
 .frame-head{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);font-family:var(--mono)}
 .dot{width:9px;height:9px;border-radius:50%;background:#3a3f4b}
 .editor{display:flex;overflow:auto;max-height:60vh;cursor:text}
-.gutter{padding:16px 10px 16px 16px;text-align:right;color:rgba(255,255,255,.18);font-family:var(--mono);font-size:14px;line-height:24px;user-select:none;position:sticky;left:0;background:var(--panel);z-index:2}
+.gutter{padding:16px 10px 16px 16px;text-align:right;color:rgba(255,255,255,.18);font-family:var(--mono);font-size:14px;line-height:24px;white-space:pre;user-select:none;position:sticky;left:0;background:var(--panel);z-index:2}
 .code{position:relative;padding:16px 20px 16px 0;flex:1;min-width:0}
 .layer{font-family:var(--mono);font-size:14px;line-height:24px;letter-spacing:0;tab-size:2;white-space:pre;margin:0}
 #ghost{color:var(--muted);pointer-events:none;min-height:24px;width:max-content;min-width:100%}
@@ -68,6 +73,15 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
   <div><span>用时</span> <b class="v" id="s-time">0.0</b> <span>秒</span></div>
 </div>
 <div class="wrap">
+  <div class="practice">
+    <div class="practice-head">
+      <div class="seg" id="modes"><button type="button" class="on">代码模式</button><button type="button">普通文章</button></div>
+      <span class="ptext">素材</span>
+      <select class="sel" id="artsel"></select>
+      <span class="spacer"></span>
+      <span class="ptext">练习页内嵌区域（不是独立页面）</span>
+    </div>
+  </div>
   <div class="frame">
     <div class="frame-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span id="fname" style="margin-left:8px"></span></div>
     <div class="editor" id="editor">
@@ -147,6 +161,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     el.input.disabled = false;
     el.result.classList.remove("show");
     renderLangs();
+    renderArticles();
     renderGutter();
     render();
     syncHeight();
@@ -162,6 +177,20 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       b.addEventListener("click", function () { loadSample(i); el.input.focus(); });
       el.langs.appendChild(b);
     });
+  }
+
+  function renderArticles() {
+    var sel = document.getElementById("artsel");
+    if (!sel) return;
+    sel.innerHTML = "";
+    SAMPLES.forEach(function (s, i) {
+      var o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = s.file + "（" + s.lang + "，" + s.code.length + " 字符）";
+      if (i === state.idx) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.onchange = function () { loadSample(Number(sel.value)); el.input.focus(); };
   }
 
   function renderGutter() {
