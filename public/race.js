@@ -381,7 +381,7 @@
     if (!snap) return 1200;
     if (state.needContent) return 1200;
     var st = snap.race.status;
-    if (st === 'reveal') return 600;
+    if (st === 'reveal') return snap.race.reveal && snap.race.reveal.resolution === 'single' ? 300 : 600;
     if (st === 'countdown') return 1200;
     if (st === 'racing' && !state.isSpectator && state.engine) {
       var engineState = state.engine.state();
@@ -1201,7 +1201,7 @@
     if (!reveal || !Array.isArray(reveal.candidates) || !reveal.candidates.length) return;
     var stage = $('race-reveal-candidates');
     if (!stage) return;
-    var key = String(reveal.resolvedArticleId) + ':' + reveal.candidates.map(function (c) { return c.articleId; }).join(',');
+    var key = String(reveal.resolution || '') + ':' + String(reveal.resolvedArticleId) + ':' + reveal.candidates.map(function (c) { return c.articleId; }).join(',');
     if (state.revealKey === key) return;
     stopRevealAnimation();
     state.revealKey = key;
@@ -1222,9 +1222,18 @@
     });
     var winner = cards.filter(function (el) { return Number(el.dataset.articleId) === Number(reveal.resolvedArticleId); })[0];
     if (!winner) return;
+    if (cards.length === 1) stage.classList.add('is-single');
     if (reduced) {
       stage.classList.add('is-gathered', 'is-reduced');
       winner.classList.add('is-winner');
+      return;
+    }
+    if (cards.length === 1) {
+      // 单卡：不做轮转，淡入并居中放大；服务端 800ms 后切 countdown
+      state.revealTimers.push(setTimeout(function () {
+        stage.classList.add('is-gathered');
+        winner.classList.add('is-winner');
+      }, 0));
       return;
     }
     state.revealTimers.push(setTimeout(function () { stage.classList.add('is-gathered'); }, 0));

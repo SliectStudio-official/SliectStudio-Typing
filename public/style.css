@@ -5210,6 +5210,10 @@ body.fx-paused #view-dashboard .dash-quick.is-matching { animation-play-state: p
   z-index: 2; opacity: 1; transform: translateX(var(--reveal-shift, 0px)) scale(1.15);
   border-color: var(--primary);
 }
+/* P27.1：单卡时居中放大，无轮转 */
+.race-reveal-stage.is-single { min-height: 240px; }
+.race-reveal-stage.is-single .race-reveal-item { flex-basis: clamp(220px, 26vw, 320px); }
+.race-reveal-stage.is-single .race-reveal-item.is-winner { transform: translateX(0) scale(1.12); }
 .race-reveal-stage .race-reveal-item.is-out { opacity: 0; transform: translateY(0) scale(.82); }
 .race-reveal-stage.is-leaving .race-reveal-item.is-winner { opacity: 0; transform: translateX(var(--reveal-shift, 0px)) scale(1.25); }
 .race-reveal-item-title { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
@@ -5220,6 +5224,7 @@ body.fx-paused #view-dashboard .dash-quick.is-matching { animation-play-state: p
   .race-reveal-stage { flex-direction: column; gap: 12px; }
   .race-reveal-item { width: min(100%, 420px); flex-basis: auto; }
   .race-reveal-stage .race-reveal-item.is-winner { transform: translateX(0) scale(1.02); }
+  .race-reveal-stage.is-single .race-reveal-item.is-winner { transform: translateX(0) scale(1.04); }
   .race-reveal-stage.is-leaving .race-reveal-item.is-winner { transform: translateX(0) scale(1.04); }
 }
 

@@ -754,7 +754,9 @@ async function createMatchedRoom(first, second, article, candidates) {
   }
   if (!code) throw new Error('生成房间码失败');
   const now = Date.now();
-  const revealEndsAt = now + REVEAL_DURATION_MS;
+  const resolution = candidates.length >= 3 ? 'three' : (candidates.length === 2 ? 'two' : 'single');
+  const revealDurationMs = resolution === 'single' ? 800 : REVEAL_DURATION_MS;
+  const revealEndsAt = now + revealDurationMs;
   const startsAt = revealEndsAt + RACE_COUNTDOWN_MS;
   const hostNickname = first.nickname || first.username;
   const room = {
@@ -773,6 +775,7 @@ async function createMatchedRoom(first, second, article, candidates) {
         };
       }),
       resolvedArticleId: article.id,
+      resolution: resolution,
       endsAt: revealEndsAt
     },
     revealedAt: null,
@@ -826,15 +829,27 @@ async function attemptMatch() {
     const second = matchQueue[1];
     if (!first || !second || first.userId === second.userId) return null;
     const rows = await db.all("SELECT id, title, content FROM articles WHERE status = 'approved'");
-    const preferred = rows.filter(function (row) { return row.content && row.content.length >= 200 && row.content.length <= 400; });
-    const fallback = rows.filter(function (row) { return row.content && row.content.length >= 100 && row.content.length <= 800; });
-    const pool = preferred.length >= 3 ? preferred : fallback;
-    if (pool.length < 3) return { hint: '可用候选文章不足三篇，请稍后再试' };
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    // 只收适合比赛的 100–800 字正文；200–400 优先，其余 100–800 稳定排在后面
+    const pool = rows
+      .filter(function (row) { return row.content && row.content.length >= 100 && row.content.length <= 800; })
+      .map(function (row, index) {
+        var len = row.content.length;
+        return { row: row, index: index, rank: len >= 200 && len <= 400 ? 0 : 1 };
+      })
+      .sort(function (a, b) { return a.rank - b.rank || a.index - b.index; })
+      .map(function (item) { return item.row; });
+    if (!pool.length) {
+      console.warn('[匹配] 候选不足 三篇→0 篇');
+      return { hint: '暂无可用文章，请稍后再试' };
     }
-    const candidates = pool.slice(0, 3);
+    const candidates = pool.slice(0, Math.min(3, pool.length));
+    if (candidates.length < 3) {
+      console.warn('[匹配] 候选不足 三篇→' + candidates.length + ' 篇');
+    }
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = candidates[i]; candidates[i] = candidates[j]; candidates[j] = tmp;
+    }
     const article = candidates[Math.floor(Math.random() * candidates.length)];
     let room;
     try {
@@ -934,6 +949,7 @@ function buildSnapshot(room, player, spectator, options) {
   const revealView = room.status === 'reveal' && room.reveal ? {
     candidates: room.reveal.candidates,
     resolvedArticleId: room.reveal.resolvedArticleId,
+    resolution: room.reveal.resolution || (room.reveal.candidates.length >= 3 ? 'three' : (room.reveal.candidates.length === 2 ? 'two' : 'single')),
     endsAt: room.reveal.endsAt,
     remainMs: Math.max(0, room.reveal.endsAt - nowMs)
   } : null;
