@@ -627,7 +627,6 @@
     return false;
   }
   function pollMatchBar() {
-    if (page === 'race') { clearMatchBar(); return; }
     var tk = localStorage.getItem('token');
     if (!tk) { clearMatchBar(); return; }
     fetch('/api/race/match/status', { headers: { Authorization: 'Bearer ' + tk } })
@@ -641,7 +640,12 @@
         if (!data) return;
         if (data.status === 'matched' && data.code) {
           stopMatchBarPolling();
-          if (isPracticeActive()) {
+          if (page === 'race') {
+            clearMatchPendingFlags();
+            matchBarEnterCode = null;
+            setMatchBar('匹配成功，正在进入比赛…', 'auto');
+            setTimeout(clearMatchBar, 300);
+          } else if (isPracticeActive()) {
             matchBarEnterCode = data.code;
             setMatchBar('匹配成功', 'practice');
           } else {
@@ -670,7 +674,6 @@
       });
   }
   function startMatchBarPolling() {
-    if (page === 'race') { clearMatchBar(); return; }
     if (localStorage.getItem(MATCH_PENDING_KEY) !== '1') return;
     if (!localStorage.getItem('token')) { clearMatchBar(); return; }
     matchBarEnterCode = null;
@@ -690,7 +693,10 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tk },
       body: '{}'
-    }).catch(function () {}).then(clearMatchBar);
+    }).catch(function () {}).then(function () {
+      clearMatchBar();
+      try { window.dispatchEvent(new Event('race-match-cancel-local')); } catch (e) {}
+    });
   }
   window.addEventListener('resize', setMatchBarHeight);
   var matchBarActionBtn = document.getElementById('race-match-bar-action');

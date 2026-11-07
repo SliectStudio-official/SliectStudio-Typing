@@ -5130,7 +5130,55 @@ body.fx-paused #view-dashboard .dash-quick.is-matching { animation-play-state: p
 /* P26：房间剩余时间，最后 5 分钟警示 */
 .race-remain-warning { color: var(--semantic-warning) !important; font-weight: 600; }
 
-/* P26：比赛大厅快速匹配按钮 → 计时 + 关闭 */
-.quick-match-active { display: inline-flex; align-items: center; gap: 8px; min-width: 96px; justify-content: center; }
-.quick-match-active #quick-match-timer { font-family: var(--font-mono); letter-spacing: .04em; }
-.quick-match-close { font-size: 18px; line-height: 1; opacity: .9; }
+/* P27：比赛大厅快速匹配按钮原地变形为计时 + × */
+#quick-match-hint { min-height: 42px; }
+#btn-quick-match {
+  width: 160px; height: 40px; padding: 0 16px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  transition: background 150ms var(--ease-out), border-color 150ms var(--ease-out);
+}
+#btn-quick-match.is-matching { background: var(--primary-active); border-color: var(--primary-active); }
+#quick-match-timer { font-family: var(--font-mono); letter-spacing: .04em; }
+.quick-match-close { font-size: 16px; line-height: 1; opacity: .9; }
+@media (max-width: 480px) { #btn-quick-match { width: 100%; } }
+
+/* P27：匹配成功后的系统抽文 */
+.race-reveal-wrap { min-height: 420px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+.race-reveal-kicker { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: var(--ink); letter-spacing: .02em; }
+.race-reveal-sub { margin-top: 8px; font-size: 14px; color: var(--muted); }
+.race-reveal-stage { display: flex; align-items: center; justify-content: center; gap: 24px; width: 100%; margin-top: 30px; min-height: 220px; }
+.race-reveal-item {
+  pointer-events: none;
+  flex: 0 0 clamp(180px, 22vw, 260px); min-width: 0;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  padding: 16px; border: 1px solid var(--hairline-strong); border-radius: 14px;
+  background: var(--surface-card); color: var(--ink);
+  opacity: 0; transform: translateY(20px) scale(.94);
+  transition: transform 300ms var(--ease-out), opacity 300ms var(--ease-out);
+}
+.race-reveal-stage.is-gathered .race-reveal-item { opacity: 1; transform: translateY(0) scale(1.05); }
+.race-reveal-stage .race-reveal-item.is-highlight {
+  border-color: var(--primary); opacity: 1; transform: translateY(0) scale(1.06);
+  box-shadow: 0 0 0 2px var(--primary-lightest);
+}
+.race-reveal-stage .race-reveal-item.is-dim { opacity: .55; }
+.race-reveal-stage .race-reveal-item.is-winner {
+  z-index: 2; opacity: 1; transform: translateX(var(--reveal-shift, 0px)) scale(1.15);
+  border-color: var(--primary);
+}
+.race-reveal-stage .race-reveal-item.is-out { opacity: 0; transform: translateY(0) scale(.82); }
+.race-reveal-stage.is-leaving .race-reveal-item.is-winner { opacity: 0; transform: translateX(var(--reveal-shift, 0px)) scale(1.25); }
+.race-reveal-item-title { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+.race-reveal-item-meta { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.race-reveal-item-preview { font-size: 12.5px; line-height: 1.65; color: var(--body); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.race-reveal-stage.is-reduced .race-reveal-item { transition: none; }
+@media (max-width: 768px) {
+  .race-reveal-stage { flex-direction: column; gap: 12px; }
+  .race-reveal-item { width: min(100%, 420px); flex-basis: auto; }
+  .race-reveal-stage .race-reveal-item.is-winner { transform: translateX(0) scale(1.02); }
+  .race-reveal-stage.is-leaving .race-reveal-item.is-winner { transform: translateX(0) scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .race-reveal-item, .race-reveal-stage.is-gathered .race-reveal-item, .race-reveal-stage .race-reveal-item.is-winner, .race-reveal-stage.is-leaving .race-reveal-item.is-winner { transition: none !important; }
+}

@@ -391,6 +391,8 @@ const RACE_DISSOLVE_MS = 30 * 1000;
 const RACE_MATCH_ROOM_TTL_MS = 60 * 60 * 1000;
 const RACE_MANUAL_DEFAULT_DURATION_MINUTES = 60;
 const RACE_MANUAL_DURATION_OPTIONS = [30, 60, 120, 180];
+const REVEAL_DURATION_MS = 1500;
+const RACE_COUNTDOWN_MS = 3000;
 const roomRegistry = new Map();
 const raceJoinFailures = new Map();
 const raceListHits = new Map();
@@ -428,7 +430,7 @@ function normalizeNickname(raw) {
 }
 
 function isActiveRoom(room) {
-  return room.status === 'waiting' || room.status === 'countdown' || room.status === 'racing';
+  return room.status === 'waiting' || room.status === 'reveal' || room.status === 'countdown' || room.status === 'racing';
 }
 
 function activeRoomCount() {
@@ -475,6 +477,14 @@ function spectatorCap(maxPlayers) {
 
 function initSpectatorState(room) {
   if (!room.spectators) room.spectators = new Map();
+  if (room.matchmade === true) {
+    room.allowSpectator = false;
+    room.spectatorEnabled = false;
+    room.spectatorMode = 'free';
+    room.spectatorSeats = 0;
+    room.maxSpectators = 0;
+    return room;
+  }
   room.maxSpectators = spectatorCap(room.maxPlayers);
   if (!Number.isInteger(room.spectatorSeats) || room.spectatorSeats < 1 || room.spectatorSeats > room.maxSpectators) {
     room.spectatorSeats = room.maxSpectators;
@@ -701,7 +711,7 @@ function findMatchEntry(userId) {
   return null;
 }
 
-async function createMatchedRoom(first, second, article) {
+async function createMatchedRoom(first, second, article, candidates) {
   let code = null;
   for (let i = 0; i < 10; i++) {
     const candidate = generateRoomCode();
@@ -711,16 +721,28 @@ async function createMatchedRoom(first, second, article) {
   }
   if (!code) throw new Error('生成房间码失败');
   const now = Date.now();
-  const startsAt = now + 3000;
+  const revealEndsAt = now + REVEAL_DURATION_MS;
+  const startsAt = revealEndsAt + RACE_COUNTDOWN_MS;
   const hostNickname = first.nickname || first.username;
   const room = {
-    code, raceId: null, hostUserId: first.userId, hostNickname, status: 'countdown',
+    code, raceId: null, hostUserId: first.userId, hostNickname, status: 'reveal',
     articleId: article.id, articleTitle: article.title, content: article.content, charCount: article.content.length,
     maxPlayers: 2, isPublic: false, passwordHash: null,
     createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
-    allowSpectator: true, spectators: new Map(), matchmade: true, abandonedPlayers: [],
+    allowSpectator: false, spectators: new Map(), matchmade: true, abandonedPlayers: [],
     maxDurationMs: RACE_MATCH_ROOM_TTL_MS,
+    reveal: {
+      candidates: candidates.map(function (c) {
+        return {
+          articleId: c.id, title: c.title, charCount: c.content.length,
+          preview: c.content.slice(0, 60)
+        };
+      }),
+      resolvedArticleId: article.id,
+      endsAt: revealEndsAt
+    },
+    revealedAt: null,
     dissolve: null, dissolveNotice: null
   };
   initSpectatorState(room);
@@ -735,7 +757,7 @@ async function createMatchedRoom(first, second, article) {
     `INSERT INTO races (code, password_hash, host_user_id, article_id, article_title, content_snapshot, char_count, status, is_public, max_players, player_count, started_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     code, null, first.userId, article.id, article.title, article.content, article.content.length,
-    'countdown', 0, 2, 2, formatDateTime(startsAt)
+    'reveal', 0, 2, 2, formatDateTime(startsAt)
   );
   room.raceId = result.lastInsertRowid;
   roomRegistry.set(code, room);
@@ -772,12 +794,18 @@ async function attemptMatch() {
     if (!first || !second || first.userId === second.userId) return null;
     const rows = await db.all("SELECT id, title, content FROM articles WHERE status = 'approved'");
     const preferred = rows.filter(function (row) { return row.content && row.content.length >= 200 && row.content.length <= 400; });
-    const pool = preferred.length ? preferred : rows.filter(function (row) { return row.content; });
-    if (!pool.length) return { hint: '暂无可用文章，请稍后再试' };
-    const article = pool[Math.floor(Math.random() * pool.length)];
+    const fallback = rows.filter(function (row) { return row.content && row.content.length >= 100 && row.content.length <= 800; });
+    const pool = preferred.length >= 3 ? preferred : fallback;
+    if (pool.length < 3) return { hint: '可用候选文章不足三篇，请稍后再试' };
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+    }
+    const candidates = pool.slice(0, 3);
+    const article = candidates[Math.floor(Math.random() * candidates.length)];
     let room;
     try {
-      room = await createMatchedRoom(first, second, article);
+      room = await createMatchedRoom(first, second, article, candidates);
     } catch (e) {
       console.error('[匹配] 创建房间失败:', e.message);
       return { hint: '创建比赛失败，请稍后再试' };
@@ -870,6 +898,12 @@ function buildSnapshot(room, player, spectator, options) {
   const nowMs = Date.now();
   const maxDurationMs = room.maxDurationMs || (room.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000);
   const remainMs = Math.max(0, room.createdAt + maxDurationMs - nowMs);
+  const revealView = room.status === 'reveal' && room.reveal ? {
+    candidates: room.reveal.candidates,
+    resolvedArticleId: room.reveal.resolvedArticleId,
+    endsAt: room.reveal.endsAt,
+    remainMs: Math.max(0, room.reveal.endsAt - nowMs)
+  } : null;
   const spectatorEntries = Array.from(room.spectators.entries());
   const spectatorTotal = spectatorEntries.length;
   var shownSpectators = spectatorEntries;
@@ -918,6 +952,7 @@ function buildSnapshot(room, player, spectator, options) {
       matchmade: room.matchmade === true,
       maxDurationMs: maxDurationMs,
       remainMs: remainMs,
+      reveal: revealView,
       mySeat: player ? 'player' : (spectator ? 'spectator' : null),
       spectatorTotal: spectatorTotal,
       serverNow: nowMs
@@ -983,7 +1018,21 @@ function buildSnapshot(room, player, spectator, options) {
 }
 
 function updateRoomPhase(room) {
-  if (room.status === 'countdown' && Date.now() >= room.startsAt) {
+  const now = Date.now();
+  if (room.status === 'reveal' && room.reveal && now >= room.reveal.endsAt && !room.revealedAt) {
+    room.revealedAt = now;
+    room.status = 'countdown';
+    room.startsAt = room.reveal.endsAt + RACE_COUNTDOWN_MS;
+    try {
+      db.run("UPDATE races SET article_id = ?, article_title = ?, content_snapshot = ?, char_count = ?, status = 'countdown', started_at = ? WHERE id = ?",
+        room.articleId, room.articleTitle, room.content, room.charCount, formatDateTime(room.startsAt), room.raceId).catch(function (e) {
+        console.error('[比赛] 更新抽文结果失败:', e.message);
+      });
+    } catch (e) {
+      console.error('[比赛] 更新抽文结果失败:', e.message);
+    }
+  }
+  if (room.status === 'countdown' && now >= room.startsAt) {
     room.status = 'racing';
   }
 }
@@ -1053,6 +1102,7 @@ async function cleanupRooms() {
   const now = Date.now();
   for (const room of Array.from(roomRegistry.values())) {
     if (isActiveRoom(room)) {
+      updateRoomPhase(room);
       if (room.status === 'waiting') {
         const players = Array.from(room.players.values());
         const playersStale = players.every(function (p) { return now - (p.lastSeen || 0) > RACE_OFFLINE_WAITING_MS; });
@@ -1416,6 +1466,9 @@ app.post('/api/race/join', async (req, res) => {
     }
     // 观战身份：不受比赛名额与阶段限制
     if (req.body && req.body.asSpectator) {
+      if (room.matchmade === true) {
+        return res.status(400).json({ error: '匹配对局不支持观战' });
+      }
       initSpectatorState(room);
       if (!room.spectatorEnabled) {
         return res.status(400).json({ error: '本房间未开放观战' });
@@ -1643,6 +1696,9 @@ app.post('/api/race/spectate/settings', authMiddleware, async (req, res) => {
     if (!room) {
       return res.status(400).json({ error: '你不在主持比赛' });
     }
+    if (room.matchmade === true) {
+      return res.status(400).json({ error: '匹配对局不支持观战' });
+    }
     if (room.status !== 'waiting') {
       return res.status(400).json({ error: '比赛已开始，不能换席' });
     }
@@ -1696,6 +1752,9 @@ app.post('/api/race/spectate/self', raceAuth, async (req, res) => {
     if (!room || (!ctx.player && !ctx.spectator)) {
       return res.status(400).json({ error: '你不在任何房间中' });
     }
+    if (room.matchmade === true) {
+      return res.status(400).json({ error: '匹配对局不支持观战' });
+    }
     if (room.status !== 'waiting') {
       return res.status(400).json({ error: '比赛已开始，不能换席' });
     }
@@ -1746,6 +1805,9 @@ app.post('/api/race/spectate/assign', authMiddleware, async (req, res) => {
     const room = findRoomByHost(req.user.id, true);
     if (!room) {
       return res.status(400).json({ error: '你不在主持比赛' });
+    }
+    if (room.matchmade === true) {
+      return res.status(400).json({ error: '匹配对局不支持观战' });
     }
     if (room.status !== 'waiting') {
       return res.status(400).json({ error: '比赛已开始，不能换席' });
@@ -1993,7 +2055,7 @@ app.post('/api/race/tick', raceAuth, async (req, res) => {
     updateRoomPhase(room);
     expireDissolveIfNeeded(room, Date.now());
     const wantContent = !!(req.body && req.body.wantContent);
-    const includeContent = wantContent || (room.status === 'racing' && !room.contentSent);
+    const includeContent = room.status !== 'reveal' && (wantContent || (room.status === 'racing' && !room.contentSent));
     if (room.status === 'racing' && includeContent) room.contentSent = true;
     if (spectator) {
       spectator.lastSeen = Date.now();

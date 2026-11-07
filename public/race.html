@@ -30,17 +30,8 @@
     <section id="view-lobby">
       <div class="section-card quick-match-card" id="quick-match-card">
         <div class="section-card-title">快速匹配</div>
-        <div id="quick-match-idle">
-          <p class="race-hint">随机文章 1v1，凑齐两人自动开始；匹配状态显示在屏幕底部。</p>
-          <button class="race-btn race-btn-primary" id="btn-quick-match" style="display:none">快速匹配</button>
-          <p class="race-hint" id="quick-match-guest-hint" style="display:none">登录后可快速匹配</p>
-        </div>
-        <div id="quick-match-waiting" style="display:none">
-          <button class="race-btn race-btn-primary quick-match-active" id="btn-quick-match-cancel" type="button">
-            <span id="quick-match-timer">00:00</span><span class="quick-match-close" aria-hidden="true">×</span>
-          </button>
-          <p class="race-hint">正在寻找对手，点击按钮取消匹配</p>
-        </div>
+        <p class="race-hint" id="quick-match-hint">随机文章 1v1，凑齐两人自动开始；匹配状态显示在屏幕底部。</p>
+        <button class="race-btn race-btn-primary" id="btn-quick-match" style="display:none">快速匹配</button>
       </div>
 
       <div class="race-grid">
@@ -148,6 +139,15 @@
         </div>
       </div>
       <div class="section-card race-dissolve-wait" id="race-dissolve-wait" style="display:none"></div>
+    </section>
+
+    <!-- 匹配成功：系统抽文 -->
+    <section id="view-reveal" style="display:none">
+      <div class="section-card race-reveal-wrap">
+        <div class="race-reveal-kicker">匹配成功</div>
+        <div class="race-reveal-sub">系统正在为你抽取文章</div>
+        <div class="race-reveal-stage" id="race-reveal-candidates"></div>
+      </div>
     </section>
 
     <!-- 比赛中 -->

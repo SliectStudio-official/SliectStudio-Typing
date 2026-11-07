@@ -16,6 +16,7 @@
     rankExpanded: false, miniPos: new Map(), miniRaf: null, miniAnims: new Map(),
     fxPrevRank: null, fxSkipOvertake: false, fxOvertakeUntil: 0, fxOvertakeTimer: null, fxDropped: 0,
     combo: 0, comboAnnounced: 0, selfNickname: null,
+    revealKey: null, revealTimers: [], revealInterval: null,
     quickMatchActive: false, quickMatchTimer: null, quickMatchPollTimer: null,
     quickMatchPollInFlight: false
   };
@@ -145,9 +146,16 @@
   /* ---------- 快速匹配（大厅按钮 = 计时 + 关闭） ---------- */
   function updateQuickMatchVisibility() {
     var btn = $('btn-quick-match');
-    var hint = $('quick-match-guest-hint');
-    if (btn && !state.quickMatchActive) btn.style.display = state.token ? 'inline-flex' : 'none';
-    if (hint) hint.style.display = state.token || state.quickMatchActive ? 'none' : 'block';
+    var hint = $('quick-match-hint');
+    if (!btn || !hint) return;
+    btn.style.display = state.token ? 'inline-flex' : 'none';
+    if (!state.token) {
+      hint.textContent = '登录后可快速匹配';
+    } else if (state.quickMatchActive) {
+      hint.textContent = '正在寻找对手，点击按钮取消匹配';
+    } else {
+      hint.textContent = '随机文章 1v1，凑齐两人自动开始；匹配状态显示在屏幕底部。';
+    }
   }
   function quickMatchTimerText(startedAt) {
     var since = Number(startedAt) || Number(localStorage.getItem('raceMatchPendingSince')) || Date.now();
@@ -157,8 +165,15 @@
   function updateQuickMatchTimer() {
     if (!state.quickMatchActive) return;
     var el = $('quick-match-timer');
-    if (el) el.textContent = quickMatchTimerText();
-    if (!localStorage.getItem('raceMatchPending')) stopQuickMatchTimers();
+    if (!el) return;
+    var bar = $('race-match-bar');
+    var barText = $('race-match-bar-text');
+    var text = '';
+    if (bar && getComputedStyle(bar).display !== 'none' && barText) {
+      var m = barText.textContent.match(/(\d{2}:\d{2})/);
+      if (m) text = m[1];
+    }
+    el.textContent = text || quickMatchTimerText();
   }
   function stopQuickMatchTimers() {
     if (state.quickMatchTimer) { clearInterval(state.quickMatchTimer); state.quickMatchTimer = null; }
@@ -166,10 +181,15 @@
   }
   function setQuickMatching(active, startedAt) {
     state.quickMatchActive = !!active;
-    var idle = $('quick-match-idle');
-    var waiting = $('quick-match-waiting');
-    if (idle) idle.style.display = active ? 'none' : 'block';
-    if (waiting) waiting.style.display = active ? 'block' : 'none';
+    var btn = $('btn-quick-match');
+    if (btn) {
+      btn.classList.toggle('is-matching', !!active);
+      if (active) {
+        btn.innerHTML = '<span id="quick-match-timer">00:00</span><span class="quick-match-close" aria-hidden="true">×</span>';
+      } else {
+        btn.textContent = '快速匹配';
+      }
+    }
     if (active) {
       try {
         if (!localStorage.getItem('raceMatchPendingSince')) {
@@ -202,7 +222,8 @@
         if (data && data.status === 'matched' && data.code) {
           clearQuickMatchFlags();
           stopQuickMatchTimers();
-          location.href = 'race.html?code=' + encodeURIComponent(data.code);
+          setQuickMatching(false);
+          enterRoom(data.code);
         } else if (data && data.status === 'idle') {
           clearQuickMatchFlags();
           setQuickMatching(false);
@@ -224,7 +245,7 @@
     api('/api/race/match/join', { method: 'POST', body: {} }).then(function (data) {
       if (data && data.status === 'matched' && data.code) {
         clearQuickMatchFlags();
-        location.href = 'race.html?code=' + encodeURIComponent(data.code);
+        enterRoom(data.code);
         return;
       }
       try {
@@ -232,16 +253,19 @@
         if (!localStorage.getItem('raceMatchPendingSince')) localStorage.setItem('raceMatchPendingSince', String(Date.now()));
       } catch (e) {}
       setQuickMatching(true);
+      window.dispatchEvent(new Event('race-match-pending'));
     }).catch(function (e) { toast(e.message); });
   }
   function cancelQuickMatch() {
     setQuickMatching(false);
     clearQuickMatchFlags();
     if (state.token) api('/api/race/match/cancel', { method: 'POST', body: {} }).catch(function () {});
+    window.dispatchEvent(new Event('race-match-cancel-local'));
   }
   function initQuickMatch() {
     if (!state.token || localStorage.getItem('raceMatchPending') !== '1') { setQuickMatching(false); return; }
     setQuickMatching(true);
+    window.dispatchEvent(new Event('race-match-pending'));
   }
 
   function quickJoin(code) {
@@ -321,6 +345,7 @@
     state.raceContent = null;
     state.needContent = true;
     state.rankExpanded = false;
+    resetRevealAnimation();
     state.fxPrevRank = null;
     state.fxSkipOvertake = false;
     hideFx();
@@ -340,6 +365,7 @@
     if (!snap) return 1200;
     if (state.needContent) return 1200;
     var st = snap.race.status;
+    if (st === 'reveal') return 600;
     if (st === 'countdown') return 1200;
     if (st === 'racing' && !state.isSpectator && state.engine) {
       var engineState = state.engine.state();
@@ -415,6 +441,8 @@
     if (seat !== 'spectator') stopMiniLoop();
     processDissolveNotice(snap);
     renderDissolve(snap);
+    if (st !== 'reveal') stopRevealAnimation();
+    syncMatchmadeUI(!!(snap.race && snap.race.matchmade));
     if (st === 'cancelled') {
       stopPolling();
       var reason = snap.race.cancelledReason;
@@ -433,6 +461,7 @@
       else { showView('spectate'); renderSpectate(snap); }
       return;
     }
+    if (st === 'reveal') { showView('reveal'); renderReveal(snap); return; }
     if (st === 'waiting') { showView('room'); renderRoom(snap); }
     else if (st === 'countdown') { showView('race'); renderCountdown(snap); }
     else if (st === 'racing') { showView('race'); renderRacing(snap); }
@@ -550,6 +579,7 @@
   }
 
   function renderSpectatorPanel(snap, isHost, seat) {
+    if (!$('spec-seats-count') || !$('spec-actions')) return;
     var race = snap.race;
     var cap = spectatorCapacity(race);
     var count = race.spectatorCount || 0;
@@ -666,6 +696,7 @@
   }
 
   function renderSpectatorLive(snap) {
+    if (!$('race-spectator-live-count') || !$('race-spectator-live-list')) return;
     var race = snap.race;
     var cap = spectatorCapacity(race);
     $('race-spectator-live-count').textContent = !race.spectatorEnabled
@@ -1124,6 +1155,83 @@
     if (state.miniAnims.size) startMiniLoop();
   }
 
+  /* ---------- 匹配房不渲染观战 UI ---------- */
+  function syncMatchmadeUI(matchmade) {
+    if (!matchmade) return;
+    var panel = $('race-spectate-panel');
+    if (panel) panel.remove();
+    var live = $('race-spectator-live');
+    if (live) live.remove();
+  }
+
+  /* ---------- 匹配成功：系统抽文 ---------- */
+  function stopRevealAnimation() {
+    if (state.revealTimers && state.revealTimers.length) {
+      state.revealTimers.forEach(function (timer) { clearTimeout(timer); });
+      state.revealTimers = [];
+    }
+    if (state.revealInterval) { clearInterval(state.revealInterval); state.revealInterval = null; }
+  }
+  function resetRevealAnimation() {
+    stopRevealAnimation();
+    state.revealKey = null;
+  }
+  function renderReveal(snap) {
+    var reveal = snap && snap.race && snap.race.reveal;
+    if (!reveal || !Array.isArray(reveal.candidates) || !reveal.candidates.length) return;
+    var stage = $('race-reveal-candidates');
+    if (!stage) return;
+    var key = String(reveal.resolvedArticleId) + ':' + reveal.candidates.map(function (c) { return c.articleId; }).join(',');
+    if (state.revealKey === key) return;
+    stopRevealAnimation();
+    state.revealKey = key;
+    stage.className = 'race-reveal-stage';
+    stage.innerHTML = '';
+    var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    var cards = [];
+    reveal.candidates.forEach(function (c) {
+      var el = document.createElement('div');
+      el.className = 'race-reveal-item';
+      el.dataset.articleId = String(c.articleId);
+      el.innerHTML =
+        '<div class="race-reveal-item-title">' + esc(c.title) + '</div>' +
+        '<div class="race-reveal-item-meta">' + c.charCount + ' 字</div>' +
+        '<div class="race-reveal-item-preview">' + esc((c.preview || '').slice(0, 60)) + '</div>';
+      stage.appendChild(el);
+      cards.push(el);
+    });
+    var winner = cards.filter(function (el) { return Number(el.dataset.articleId) === Number(reveal.resolvedArticleId); })[0];
+    if (!winner) return;
+    if (reduced) {
+      stage.classList.add('is-gathered', 'is-reduced');
+      winner.classList.add('is-winner');
+      return;
+    }
+    state.revealTimers.push(setTimeout(function () { stage.classList.add('is-gathered'); }, 0));
+    state.revealTimers.push(setTimeout(function () {
+      var idx = 0;
+      var tick = function () {
+        cards.forEach(function (el) { el.classList.remove('is-highlight'); el.classList.add('is-dim'); });
+        cards[idx % cards.length].classList.remove('is-dim');
+        cards[idx % cards.length].classList.add('is-highlight');
+        idx += 1;
+      };
+      tick();
+      state.revealInterval = setInterval(tick, 120);
+    }, 300));
+    state.revealTimers.push(setTimeout(function () {
+      if (state.revealInterval) { clearInterval(state.revealInterval); state.revealInterval = null; }
+      cards.forEach(function (el) { el.classList.remove('is-highlight', 'is-dim'); });
+      var stageRect = stage.getBoundingClientRect();
+      var winnerRect = winner.getBoundingClientRect();
+      var shift = stageRect.left + stageRect.width / 2 - (winnerRect.left + winnerRect.width / 2);
+      winner.style.setProperty('--reveal-shift', shift.toFixed(1) + 'px');
+      winner.classList.add('is-winner');
+      cards.forEach(function (el) { if (el !== winner) el.classList.add('is-out'); });
+    }, 1200));
+    state.revealTimers.push(setTimeout(function () { stage.classList.add('is-leaving'); }, 1500));
+  }
+
   /* ---------- 观战（导播台） ---------- */
   function renderSpectate(snap) {
     hideFx();
@@ -1575,10 +1683,10 @@
 
   /* ---------- 视图 ---------- */
   function showView(name) {
-    ['lobby', 'room', 'race', 'spectate', 'result'].forEach(function (v) {
+    ['lobby', 'reveal', 'room', 'race', 'spectate', 'result'].forEach(function (v) {
       $('view-' + v).style.display = v === name ? 'block' : 'none';
     });
-    $('page-title').textContent = { lobby: '比赛大厅', room: '等待开始', race: '比赛中', spectate: '观战中', result: '比赛结果' }[name] || '比赛';
+    $('page-title').textContent = { lobby: '比赛大厅', reveal: '匹配成功', room: '等待开始', race: '比赛中', spectate: '观战中', result: '比赛结果' }[name] || '比赛';
     if (name === 'lobby') {
       if (state.listTimer) clearInterval(state.listTimer);
       refreshList();
@@ -1595,6 +1703,7 @@
     state.snap = null; state.code = null; state.raceToken = state.token;
     state.finished = false; state.isSpectator = false; state.focusNick = null;
     state.raceContent = null; state.needContent = false; state.rankExpanded = false;
+    resetRevealAnimation();
     $('race-subnav-center').style.display = 'none';
     $('btn-exit-race').style.display = 'none';
     var db = $('btn-dissolve-race'); if (db) db.style.display = 'none';
@@ -1664,7 +1773,12 @@
   /* ---------- 绑定 ---------- */
   function bind() {
     $('btn-quick-match').onclick = startQuickMatch;
-    $('btn-quick-match-cancel').onclick = cancelQuickMatch;
+    window.addEventListener('race-match-cancel-local', function () {
+      if (state.quickMatchActive) {
+        setQuickMatching(false);
+        clearQuickMatchFlags();
+      }
+    });
     $('btn-create').onclick = doCreate;
     $('create-max').addEventListener('input', function () { validateCreateMax(false); });
     var maxQuick = document.querySelectorAll('#create-max-quick .race-max-quick-btn');
