@@ -5941,3 +5941,15 @@ body.fx-paused #view-dashboard .dash-quick.is-matching { animation-play-state: p
   cursor: pointer;
 }
 .port-drift-banner .port-drift-retry:hover { background: rgba(255, 255, 255, .24); }
+
+/* P37：管理页收到 503 时的离线提示 */
+.admin-offline-notice {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--semantic-error);
+  border-radius: 10px;
+  background: rgba(181, 51, 51, .1);
+  color: var(--semantic-error);
+  font-size: 13.5px;
+  font-weight: 500;
+}

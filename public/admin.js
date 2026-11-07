@@ -13,6 +13,56 @@ const adminContent = document.querySelector('.admin-layout') || document.body;
 const adminUsername = document.getElementById('admin-username');
 const adminLogoutBtn = document.getElementById('logout-btn');
 
+function clearAdminOfflineData() {
+  ['user-list', 'article-list', 'offline-article-list', 'pending-articles-list', 'category-list',
+    'lb-manage-list', 'announcement-list', 'database-table-list', 'database-table-wrap',
+    'race-list-body', 'backup-list-body', 'code-article-list', 'code-lang-list', 'code-lb-list']
+    .forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = '';
+    });
+  ['user-empty', 'article-empty', 'offline-article-empty', 'pending-empty', 'category-empty',
+    'lb-manage-empty', 'announcement-empty', 'backup-empty', 'code-article-empty',
+    'code-lang-list-empty', 'code-lb-empty'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'block';
+    });
+  categories = [];
+  articles = [];
+  leaderboardData = [];
+  codeArticles = [];
+  codeLbData = [];
+}
+function showAdminOffline() {
+  window.__adminOffline = true;
+  clearAdminOfflineData();
+  if (document.getElementById('admin-offline-notice')) return;
+  var main = document.querySelector('.admin-main');
+  if (!main) return;
+  var notice = document.createElement('div');
+  notice.id = 'admin-offline-notice';
+  notice.className = 'admin-offline-notice';
+  notice.textContent = '与服务器的连接已断开，请检查网络后刷新';
+  main.insertBefore(notice, main.firstChild);
+}
+const adminFetch = window.fetch.bind(window);
+window.fetch = function (input, init) {
+  return adminFetch(input, init).then(function (res) {
+    var url = typeof input === 'string' ? input : (input && input.url) || '';
+    var path = '';
+    try { path = new URL(url, location.href).pathname; } catch (e) {}
+    if (res.status === 503 && /^\/api\/(admin|user|article)\//.test(path)) {
+      showAdminOffline();
+      // 等调用方完成自己的 render 后再清一次，避免旧数据被重新画回 DOM
+      setTimeout(showAdminOffline, 80);
+    } else if (window.__adminOffline) {
+      // 离线后其它（可能来自缓存的）接口晚到并重新渲染时，继续清空
+      setTimeout(showAdminOffline, 0);
+    }
+    return res;
+  });
+};
+
 const newCategoryName = document.getElementById('new-category-name');
 const addCategoryBtn = document.getElementById('add-category-btn');
 const categoryList = document.getElementById('category-list');
@@ -384,12 +434,16 @@ async function checkAuth() {
       adminUsername.textContent = currentUser.nickname || currentUser.username;
       return true;
     } else {
+      if (res.status === 503) {
+        showAdminOffline();
+        return false;
+      }
       localStorage.removeItem('token');
       showAccessDenied('登录已过期');
       return false;
     }
   } catch (e) {
-    showAccessDenied('连接失败');
+    showAdminOffline();
     return false;
   }
 }

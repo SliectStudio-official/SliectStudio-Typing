@@ -291,7 +291,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 状态检测接口：网络优先且不缓存，失败时返回 503，让 checkServerReachable 正确识别离线
-  if (NETWORK_ONLY_API.includes(url.pathname)) {
+  if (NETWORK_ONLY_API.includes(url.pathname) || NETWORK_ONLY_PREFIXES.some((prefix) => url.pathname.indexOf(prefix) === 0)) {
     event.respondWith(
       fetch(request).catch(() => new Response(
         JSON.stringify({ error: 'offline', message: '服务器不可达' }),
