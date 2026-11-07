@@ -2822,6 +2822,10 @@ app.get('/api/admin/backup/download/:name', authMiddleware, adminMiddleware, (re
     }
   });
 });
+// 带路径分隔符的下载名不会命中 :name，统一按非法文件名拒绝
+app.get('/api/admin/backup/download/*', authMiddleware, adminMiddleware, (req, res) => {
+  res.status(400).json({ error: '备份文件名不合法' });
+});
 
 app.delete('/api/admin/backup/:name', authMiddleware, adminMiddleware, (req, res) => {
   const name = req.params.name;
@@ -2843,6 +2847,7 @@ app.post('/api/admin/backup/restore', authMiddleware, adminMiddleware, acquireBa
   const extractDir = path.join(BACKUP_TMP_DIR, 'restore-extract-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'));
   try {
     if (!req.file) throw backupError(400, '请选择备份文件');
+    if (!sqliteHandle()) throw backupError(400, '当前数据库类型不支持恢复');
     const validated = await extractAndValidateBackup(uploadPath, extractDir);
     try {
       await createBackupPackage({
@@ -4624,7 +4629,9 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-applyPendingRestore().then(() => initDatabase()).then(() => {
+applyPendingRestore().catch((e) => {
+  console.error('[恢复] 检查失败，继续用现库启动', e.message);
+}).then(() => initDatabase()).then(() => {
   startRaceCleanup();
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`打字练习服务器已启动 [${versionInfo.fullName}]：`);
