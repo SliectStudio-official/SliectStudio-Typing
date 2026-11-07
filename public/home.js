@@ -497,24 +497,6 @@
     window.addEventListener('mousemove', onPointerMove, { passive: true });
   }
 
-  /* 卡片局部高光仍跟随卡片内坐标；位移全部来自上面的单一指针源 */
-  function bindCardEffects() {
-    if (reduceMotion()) return;
-    if (!window.matchMedia || window.matchMedia('(pointer: coarse)').matches) return;
-    Array.prototype.forEach.call(document.querySelectorAll('#view-dashboard .dash-action'), function (card) {
-      card.addEventListener('mousemove', function (e) {
-        if (reduceMotion()) return;
-        var r = card.getBoundingClientRect();
-        if (!r.width || !r.height) return;
-        card.style.setProperty('--fx-mx', (((e.clientX - r.left) / r.width) * 100).toFixed(1) + '%');
-        card.style.setProperty('--fx-my', (((e.clientY - r.top) / r.height) * 100).toFixed(1) + '%');
-      });
-      card.addEventListener('mouseleave', function () {
-        card.style.removeProperty('--fx-mx');
-        card.style.removeProperty('--fx-my');
-      });
-    });
-  }
   function bindVisibilityPause() {
     var apply = function () {
       var hidden = !!document.hidden;
@@ -584,13 +566,13 @@
     window.addEventListener('beforeunload', stopMatchPolling);
     window.addEventListener('pagehide', stopMatchPolling);
     initParallax();
-    bindCardEffects();
     bindVisibilityPause();
   }
 
   function init() {
     state.token = getToken();
     fit();
+    document.body.classList.remove('is-matching');
     bind();
     Promise.all([
       loadVersion(),
