@@ -54,8 +54,8 @@
 | 20 | ~~P36~~ | 引导页无公告时顶栏收起（高度 0、透明、无边框），只留右上角悬浮铃铛（玻璃底 28×28、面板定位 46px）；有公告恢复 48px 条；× 关闭同帧收起且刷新仍收起 | `P36-引导页通知条收起.md` `c0b970854cd98733` | **已验收通过**（`docs/reports/P36-验收记录.md`） |
 | 21 | ~~P35.4~~ | 代码编辑器可见性（K-43）：补 `.code-input:focus{background:transparent;box-shadow:none;border:0;outline:0}`；像素级 A/B 证明聚焦后墨迹 4938 vs 旧规则 16 | `P35.4-代码编辑器可见性修复.md` `3ed0bf1ae903654f` | **已验收通过**（`docs/reports/P35.4-验收记录.md`） |
 | 22 | **P37** | 服务端韧性 + 端口漂移 + SW 不缓存管理接口（启动自证/EPIPE/EADDRINUSE/横幅已实测通过；SW 有未定义变量，见 P37.1） | `P37-服务端韧性与端口漂移.md` `6c2d1b4c2a7f820f`；P37.1 修 SW 未定义变量（`a148…`无）｜**P37 不通过**，见 `docs/reports/P37-验收记录.md` |
-| 23 | **P37.1** | **SW 未定义变量修复**：`service-worker.js:294` 引用未声明的 `NETWORK_ONLY_PREFIXES` → SW 每个请求抛 `ReferenceError`；补常量 + 横幅文案改「检测到 :x 有服务」 | `P37.1-SW未定义变量修复.md` `6eb6a982042dd86e` | **待下发**（只改 `service-worker.js`/`nav.js`） |
-| 24 | **P38** | **P0 比赛 90% 打字区消失**：`race-fx-sprint` 既当徽标元素类又当容器状态类 → ≥90% 时 `.race-main` 被 `display:none`。状态类改名 `race-sprint-active` + 徽标规则收窄作用域（含 K-45） | `P38-比赛90%打字区消失修复.md` `a9fd425945acb416` | **待下发（最高优先，不用重启）** |
+| 23 | **P37.1** | **SW 未定义变量修复**：`service-worker.js:294` 引用未声明的 `NETWORK_ONLY_PREFIXES` → SW 每个请求抛 `ReferenceError`；补常量 + 横幅文案改「检测到 :x 有服务」 | `P37.1-SW未定义变量修复.md` `6eb6a982042dd86e` | **已验收通过**（`docs/reports/P37.1-验收记录.md`：SW 异常 0 条、管理接口 0 缓存、横幅新文案） |
+| 24 | **P38** | **P0 比赛 90% 打字区消失**：`race-fx-sprint` 既当徽标元素类又当容器状态类 → ≥90% 时 `.race-main` 被 `display:none`。状态类改名 `race-sprint-active` + 徽标规则收窄作用域（含 K-45） | `P38-比赛90%打字区消失修复.md` `a9fd425945acb416` | **已验收通过**（`docs/reports/P38-验收记录.md`：90/95/100% 主区始终可见、焦点不丢） |
 
 ---
 
