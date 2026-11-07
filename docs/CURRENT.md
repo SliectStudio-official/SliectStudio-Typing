@@ -56,8 +56,7 @@
 
 ## 下一步
 
-**正式发布口径已定（2026-11-08）**：版本仍 3.x；用 git 附注 tag 标记正式发布；先发精简包（不含 MSI）；`releases/*.zip` 保留在仓库；git 身份写本仓库 `LanTest Release <release@lantest.local>`。**执行顺序见 `docs/正式发布清单.md`。**
-
+**正式发布口径（2026-11-08 定）**：版本仍 3.x；git 附注 tag 标记正式发布；先发精简包（不含 MSI）；`releases/*.zip` 留仓库；git 身份写本仓库 `LanTest Release <release@lantest.local>`；**执行顺序见 `docs/正式发布清单.md`**。
 **节奏**：P21–P24 + P25.x + P26 + P28 + P29 + P27.1 全部已验收；**已发版并 push（`a18dd9c` / `d912215` → origin/main）**：`3.1.261107.1938`（`releases/LanTest-3.1.261107.1938.zip`，见 `releases/发行记录.md`）。收尾三件已完成两件（`docs/架构.md` 重写为 93 端点 + 比赛运行时章节；`docs/模块图.md` 补 race-runtime 模块与 races/race_participants；坑库终检 42 条全部入索引且带「位置」）。**剩 P31 待下发**（PWA 图标补齐 + 加载遮罩样式单一化）→ 之后你真人点验。
 
 **手动点验表**：`docs/手动测试清单.md`（260 行 / 114 条）。首页实装（P25）之后要补一节「首页」条目。
