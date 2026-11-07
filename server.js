@@ -166,8 +166,12 @@ app.use(express.static(publicDir, {
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
+    // P31：/icons/ 不走 30 天长缓存，图标更新最迟 5 分钟可见
+    if (filePath.includes(path.sep + 'icons' + path.sep)) {
+      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    }
     // /assets/ 的图片不走长缓存：换图后必须立刻可见（P25.1 K-39）
-    if (filePath.includes(path.sep + 'assets' + path.sep)) {
+    else if (filePath.includes(path.sep + 'assets' + path.sep)) {
       res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
     }
     // HTML files: short cache, always revalidate
