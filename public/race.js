@@ -22,7 +22,8 @@
     dissolveNeeded: null,
     bootList: false, bootRestore: false, bootRoomPending: false, pageLoadingDone: false,
     renderBroken: false, lastRenderError: null, emptyTypingTicks: 0, layoutTimer: null,
-    codeAvailable: false
+    codeAvailable: false, articleCategoryMap: {}, lastList: null,
+    lobbyStatsSeq: 0, copyTimer: null
   };
 
   function finishPageLoading(roomReady) {
@@ -101,10 +102,23 @@
     state.tickFailures = 0;
   }
 
+  function articleKey(title, len) {
+    return String(title == null ? '' : title) + '\u0000' + String(len == null ? '' : len);
+  }
+
   function loadArticles() {
     api('/api/articles?limit=100').then(function (list) {
       var arr = (Array.isArray(list) ? list : (list && list.articles) || [])
         .filter(function (a) { return !a.status || a.status === 'approved'; });
+      var catMap = {};
+      arr.forEach(function (a) {
+        var len = a.content ? a.content.length : (a.charCount != null ? a.charCount : a.content_length);
+        var key = articleKey(a.title, len);
+        if (!a.category_name) return;
+        if (!catMap[key]) catMap[key] = a.category_name;
+        else if (catMap[key] !== a.category_name) catMap[key] = '__ambiguous__';
+      });
+      state.articleCategoryMap = catMap;
       var sel = $('create-article');
       sel.innerHTML = '';
       var groups = {};
@@ -139,7 +153,127 @@
         var cb = $('match-allow-code');
         if (cb) cb.checked = false;
       }
+      if (state.lastList) renderList(state.lastList);
     }).catch(function () {});
+  }
+
+  function hideLobbyStats() {
+    var row = $('lobby-my-stats');
+    if (row) row.style.display = 'none';
+  }
+
+  function refreshLobbyStats() {
+    var row = $('lobby-my-stats');
+    var text = $('lobby-my-stats-text');
+    var link = $('lobby-my-stats-link');
+    var start = $('lobby-my-stats-start');
+    if (!row || !text || !link || !start) return;
+    if (!state.token) { hideLobbyStats(); return; }
+    var seq = ++state.lobbyStatsSeq;
+    fetch('/api/user/race-stats', { headers: { Authorization: 'Bearer ' + state.token } })
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        if (seq !== state.lobbyStatsSeq) return;
+        if (!data || !Number(data.racedCount)) {
+          text.textContent = '还没打过比赛 →';
+          link.style.display = 'none';
+          start.style.display = 'inline';
+          row.style.display = 'flex';
+          return;
+        }
+        var winRateText = (Number(data.winRate) || 0).toFixed(1);
+        var bestText = data.bestRank == null ? '—' : ('第 ' + data.bestRank + ' 名');
+        text.textContent = '我的战绩：' + data.racedCount + ' 场 · 胜率 ' + winRateText + '% · 最佳 ' + bestText;
+        link.style.display = 'inline';
+        start.style.display = 'none';
+        row.style.display = 'flex';
+      })
+      .catch(function (e) {
+        if (seq !== state.lobbyStatsSeq) return;
+        hideLobbyStats();
+        console.warn('[比赛] 战绩摘要加载失败', e.message);
+      });
+  }
+
+  function scrollToCreateCard() {
+    var card = $('create-room-card');
+    if (!card) return;
+    if (card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    var first = $('create-article') || card.querySelector('input, select, button');
+    if (first) setTimeout(function () { try { first.focus(); } catch (e) {} }, 350);
+  }
+
+  function execCommandCopy(text) {
+    var el = document.createElement('textarea');
+    el.value = text;
+    el.setAttribute('readonly', 'readonly');
+    el.style.position = 'fixed';
+    el.style.left = '-9999px';
+    el.style.top = '0';
+    el.style.opacity = '0';
+    document.body.appendChild(el);
+    try {
+      el.select();
+      el.setSelectionRange(0, text.length);
+      return document.execCommand('copy');
+    } finally {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }
+  }
+
+  function copyRoomCode() {
+    var code = state.snap && state.snap.race ? state.snap.race.code : null;
+    if (!code) code = state.code;
+    if (!code) code = ($('room-code') && $('room-code').textContent || '').trim();
+    if (!code || code === '------') return;
+    var btn = $('btn-copy-code');
+    if (!btn) return;
+    var done = false;
+    function success() {
+      if (done) return;
+      done = true;
+      btn.textContent = '已复制';
+      if (state.copyTimer) clearTimeout(state.copyTimer);
+      state.copyTimer = setTimeout(function () {
+        btn.textContent = '复制';
+        state.copyTimer = null;
+      }, 1500);
+    }
+    function fail() {
+      if (done) return;
+      done = true;
+      toast('复制失败，请手动选中房号');
+    }
+    function fallback() {
+      try {
+        if (execCommandCopy(code)) {
+          console.info('[复制] 使用 execCommand 兜底');
+          success();
+        } else {
+          fail();
+        }
+      } catch (e) {
+        console.warn('[复制] execCommand 失败', e.message);
+        fail();
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        navigator.clipboard.writeText(code).then(function () {
+          console.info('[复制] 使用 Clipboard API');
+          success();
+        }).catch(function () {
+          fallback();
+        });
+      } catch (e) {
+        fallback();
+      }
+    } else {
+      fallback();
+    }
   }
 
   function remainText(ms) {
@@ -150,25 +284,55 @@
     return (Number(ms) || 0) <= 5 * 60 * 1000;
   }
   function renderList(list) {
+    state.lastList = list;
     var box = $('room-list');
     $('list-count').textContent = list.length ? '（' + list.length + '）' : '';
-    if (!list.length) { box.innerHTML = '<div class="race-empty">现在没有公开房间，自己开一个吧</div>'; return; }
+    if (!list.length) {
+      box.innerHTML = '<div class="race-empty race-empty-action"><div>现在没有公开房间，你可以自己建一个</div>' +
+        '<button type="button" class="race-btn race-btn-primary" data-action="create-from-empty">创建房间</button></div>';
+      var createBtn = box.querySelector('[data-action="create-from-empty"]');
+      if (createBtn) createBtn.onclick = scrollToCreateCard;
+      return;
+    }
     box.innerHTML = '';
+    var myCode = state.snap && state.snap.race ? state.snap.race.code : null;
+    if (!myCode) myCode = state.code;
     list.forEach(function (r) {
+      var isMine = !!(myCode && String(r.code) === String(myCode));
+      var directCategory = r.articleCategory || r.category_name || '';
+      var mappedCategory = directCategory || (state.articleCategoryMap || {})[articleKey(r.articleTitle, r.charCount)];
+      var isCode = mappedCategory === '代码';
+      var codeTag = isCode ? '<span class="race-room-cat">代码</span>' : '';
+      var mineTag = isMine ? '<span class="race-room-mine-tag">你在房间中</span>' : '';
       var row = document.createElement('div');
-      row.className = 'race-room-row';
+      row.className = 'race-room-row' + (isMine ? ' race-room-mine' : '');
       row.innerHTML =
         '<div class="race-room-row-main"><span class="race-room-code">' + esc(r.code) + '</span>' +
+        codeTag + mineTag +
         '<span class="race-room-article">' + esc(r.articleTitle) + '</span></div>' +
         '<div class="race-room-row-meta"><span>' + r.playerCount + '/' + r.maxPlayers + ' 人</span>' +
         '<span>' + r.charCount + ' 字</span><span>房主 ' + esc(r.hostNickname) + '</span>' +
-        (r.spectatorEnabled ? '<span>观战 ' + (r.spectatorCount || 0) + '/' + (r.spectatorSeats || 0) + '</span>' : '') +
+        (r.spectatorEnabled && !r.matchmade ? '<span>观战 ' + (r.spectatorCount || 0) + '/' + (r.spectatorSeats || 0) + '</span>' : '') +
         '<span class="race-remain' + (remainWarning(r.remainMs) ? ' race-remain-warning' : '') + '">' + remainText(r.remainMs) + '</span></div>' +
         '<div class="race-room-row-actions">' +
-        '<button class="race-btn race-btn-small" data-action="join">加入</button>' +
-        '<button class="race-btn race-btn-small race-btn-ghost" data-action="spectate">观战</button></div>';
-      row.querySelector('[data-action="join"]').onclick = function () { quickJoin(r.code); };
-      row.querySelector('[data-action="spectate"]').onclick = function () { quickSpectate(r.code); };
+        (isMine
+          ? '<button type="button" class="race-btn race-btn-small" data-action="back">回到房间</button>'
+          : '<button type="button" class="race-btn race-btn-small" data-action="join">加入</button>' +
+            '<button type="button" class="race-btn race-btn-small race-btn-ghost" data-action="spectate">观战</button>') +
+        '</div>';
+      if (isMine) {
+        row.onclick = function (e) {
+          if (e.target && e.target.closest && e.target.closest('button')) return;
+          enterRoom(r.code);
+        };
+        row.querySelector('[data-action="back"]').onclick = function (e) {
+          e.stopPropagation();
+          enterRoom(r.code);
+        };
+      } else {
+        row.querySelector('[data-action="join"]').onclick = function () { quickJoin(r.code); };
+        row.querySelector('[data-action="spectate"]').onclick = function () { quickSpectate(r.code); };
+      }
       box.appendChild(row);
     });
   }
@@ -1941,6 +2105,7 @@
     if (name === 'lobby') {
       if (state.listTimer) clearInterval(state.listTimer);
       refreshList();
+      refreshLobbyStats();
       state.listTimer = setInterval(refreshList, 3000);
     } else if (state.listTimer) { clearInterval(state.listTimer); state.listTimer = null; }
     updateRaceChrome();
@@ -2036,6 +2201,9 @@
   /* ---------- 绑定 ---------- */
   function bind() {
     $('btn-quick-match').onclick = startQuickMatch;
+    $('btn-refresh-list').onclick = function () { refreshList(); };
+    $('btn-copy-code').onclick = copyRoomCode;
+    $('lobby-my-stats-start').onclick = scrollToCreateCard;
     window.addEventListener('race-match-cancel-local', function () {
       if (state.quickMatchActive) {
         setQuickMatching(false);

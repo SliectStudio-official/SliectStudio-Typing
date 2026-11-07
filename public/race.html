@@ -31,6 +31,11 @@
 
     <!-- 大厅 -->
     <section id="view-lobby">
+      <div class="race-lobby-stats" id="lobby-my-stats" style="display:none">
+        <span id="lobby-my-stats-text"></span>
+        <a href="profile.html#race-history" id="lobby-my-stats-link">查看全部 →</a>
+        <button type="button" class="race-lobby-stats-start" id="lobby-my-stats-start" style="display:none">去开一局</button>
+      </div>
       <div class="section-card quick-match-card" id="quick-match-card">
         <div class="section-card-title">快速匹配</div>
         <p class="race-hint" id="quick-match-hint">随机文章 1v1，凑齐两人自动开始；匹配状态显示在屏幕底部。</p>
@@ -39,7 +44,7 @@
       </div>
 
       <div class="race-grid">
-        <div class="section-card">
+        <div class="section-card" id="create-room-card">
           <div class="section-card-title">创建房间</div>
           <p class="race-hint" id="create-hint">登录后可创建房间；未登录也能用房间码+密码加入别人的比赛。</p>
           <div class="race-form">
@@ -77,7 +82,7 @@
           </div>
         </div>
 
-        <div class="section-card">
+        <div class="section-card" id="join-room-card">
           <div class="section-card-title">加入房间</div>
           <div class="race-form">
             <label>房间码
@@ -95,7 +100,10 @@
       </div>
 
       <div class="section-card">
-        <div class="section-card-title">公开房间 <span class="race-count" id="list-count"></span></div>
+        <div class="section-card-title race-list-title">
+          <span>公开房间 <span class="race-count" id="list-count"></span></span>
+          <span class="race-list-tools"><span class="race-list-auto">每 3 秒自动刷新</span><button type="button" class="race-btn race-btn-small race-btn-ghost" id="btn-refresh-list">刷新</button></span>
+        </div>
         <div id="room-list" class="race-room-list"><div class="race-empty">加载中…</div></div>
       </div>
     </section>
@@ -107,7 +115,10 @@
           <div class="race-wait-main">
             <div class="race-room-head">
               <div>
-                <div class="race-code" id="room-code">------</div>
+                <div class="race-code-row">
+                  <div class="race-code" id="room-code">------</div>
+                  <button type="button" class="race-copy-btn" id="btn-copy-code" aria-label="复制房间码" title="复制房间码">复制</button>
+                </div>
                 <div class="race-hint" id="room-article"></div>
                 <div class="race-hint race-remain" id="room-remain"></div>
               </div>

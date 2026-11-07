@@ -4252,15 +4252,62 @@ button:focus-visible,
 .race-count { font-size: 13px; color: var(--muted); font-weight: 400; }
 .race-empty { padding: 24px; text-align: center; color: var(--muted); font-size: 14px; }
 
+/* P35 大厅战绩摘要 */
+.race-lobby-stats {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 10px 14px;
+  border: 1px solid var(--hairline-soft); border-radius: 10px;
+  background: var(--glass-bg); color: var(--body); font-size: 13px;
+}
+.race-lobby-stats a { color: var(--primary); text-decoration: none; white-space: nowrap; }
+.race-lobby-stats a:hover { text-decoration: underline; }
+.race-lobby-stats-start {
+  border: 0; background: none; color: var(--primary); font: inherit; font-weight: 500;
+  cursor: pointer; padding: 0; white-space: nowrap;
+}
+.race-lobby-stats-start:hover { text-decoration: underline; }
+
+/* P35 列表标题/刷新与分类标签 */
+.race-list-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.race-list-tools { display: inline-flex; align-items: center; gap: 8px; font-weight: 400; }
+.race-list-auto { font-size: 12px; color: var(--muted); }
+.race-list-tools .race-btn { padding: 4px 9px; font-size: 12px; min-height: 28px; }
+.race-room-cat {
+  flex: 0 0 auto; font-size: 12px; line-height: 1.4; padding: 1px 6px;
+  border: 1px solid var(--hairline-strong); border-radius: 5px; color: var(--muted);
+}
+.race-room-mine { border-color: var(--primary); background: var(--primary-lightest); }
+.race-room-mine-tag {
+  flex: 0 0 auto; font-size: 11px; line-height: 1.4; padding: 1px 6px;
+  border-radius: 5px; background: var(--primary); color: var(--on-primary);
+}
+.race-room-row { cursor: default; }
+.race-room-row.race-room-mine { cursor: pointer; }
+
 .race-room-list { display: flex; flex-direction: column; gap: 8px; }
 .race-room-row {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 10px 12px; border: 1px solid var(--hairline-soft); border-radius: 10px;
 }
 .race-room-row-main { display: flex; align-items: center; gap: 12px; flex: 1 1 240px; min-width: 0; }
-.race-room-code { font-family: var(--font-mono); font-size: 15px; letter-spacing: .12em; color: var(--primary); }
-.race-room-article { font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.race-room-row-meta { display: flex; gap: 12px; font-size: 12.5px; color: var(--muted); }
+.race-room-code { font-family: var(--font-mono); font-size: 15px; letter-spacing: .12em; color: var(--primary); flex: 0 0 auto; }
+.race-room-article { font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.race-room-row-meta { display: flex; gap: 12px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+
+/* P35 空列表行动按钮 */
+.race-empty-action { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.race-empty-action .race-btn { min-height: 36px; }
+
+/* P35 等待厅复制房号 */
+.race-code-row { display: flex; align-items: center; gap: 8px; }
+.race-copy-btn {
+  flex: 0 0 auto; min-width: 32px; min-height: 32px; padding: 4px 8px;
+  border: 1px solid var(--hairline-strong); border-radius: 7px;
+  background: var(--glass-bg); color: var(--body); font: inherit; font-size: 12px;
+  cursor: pointer; line-height: 1;
+}
+.race-copy-btn:hover { background: var(--glass-bg-hover); color: var(--ink); }
+.race-copy-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 .race-room-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
 .race-code { font-family: var(--font-mono); font-size: 28px; letter-spacing: .16em; color: var(--primary); line-height: 1.2; }
@@ -4492,6 +4539,19 @@ button:focus-visible,
   .race-room-row-actions .race-btn { flex: 1 1 0; }
   .race-spectate-panel { padding: 12px; }
   .race-spectate-list { max-height: none; }
+}
+@media (max-width: 420px) {
+  .race-grid { display: flex; flex-direction: column; }
+  #join-room-card { order: 1; }
+  #create-room-card { order: 2; }
+  #view-lobby .race-btn,
+  #view-room .race-btn,
+  #view-lobby .race-max-quick-btn { min-height: 44px; }
+  #view-lobby .race-input,
+  #view-room .race-input { min-height: 44px; }
+  .race-copy-btn { min-height: 44px; }
+  .race-lobby-stats { font-size: 12.5px; }
+  .race-list-auto { font-size: 11.5px; }
 }
 
 /* ===== 观战（导播台） ===== */
