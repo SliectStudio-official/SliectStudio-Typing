@@ -9,7 +9,8 @@ const CRITICAL_ASSETS = [
   '/custom-select.js',
   '/loading-indicator.js',
   '/page-loading.js',
-  '/race.html'
+  '/race.html',
+  '/icons/icon.svg'
 ];
 
 let cacheNamePromise = null;
