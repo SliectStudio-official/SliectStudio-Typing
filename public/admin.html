@@ -206,7 +206,10 @@
           <option value="">-- 请选择分类 --</option>
         </select>
         <label for="new-content" style="margin-top:12px">文章正文</label>
-        <textarea id="new-content" placeholder="请输入文章正文内容"></textarea>
+        <div class="code-block-wrap">
+          <textarea id="new-content" placeholder="请输入文章正文内容"></textarea>
+          <span class="code-block-count" id="new-content-count" style="display:none">0 字符</span>
+        </div>
         <div class="btn-group">
           <button class="btn-primary" id="add-article-btn">添加文章</button>
         </div>
@@ -561,6 +564,46 @@
       </div>
       <div class="section-card admin-section admin-code-only" id="section-code-articles">
         <div class="section-card-title">代码素材管理</div>
+        <p class="note" id="code-article-hint" style="margin-bottom:12px">代码素材只出现在代码模式练习与代码房间。</p>
+        <label for="code-new-title">标题</label>
+        <input type="text" id="code-new-title" placeholder="请输入代码素材标题" maxlength="100">
+        <div class="code-form-row">
+          <div class="filter-group">
+            <label for="code-new-category-select">语言</label>
+            <select id="code-new-category-select" class="custom-select">
+              <option value="">-- 请选择语言 --</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="code-new-difficulty">难度</label>
+            <select id="code-new-difficulty" class="custom-select">
+              <option value="1">简单</option>
+              <option value="2">中等</option>
+              <option value="3">困难</option>
+            </select>
+          </div>
+        </div>
+        <label for="code-new-content" style="margin-top:12px">正文</label>
+        <div class="code-block-wrap">
+          <textarea id="code-new-content" class="code-block-input" wrap="off" placeholder="请输入代码素材正文"></textarea>
+          <span class="code-block-count" id="code-new-count">0 字符</span>
+        </div>
+        <div class="btn-group">
+          <button class="btn-primary" id="code-add-article-btn">添加代码素材</button>
+        </div>
+        <p class="note" id="code-add-msg"></p>
+        <hr>
+        <div class="article-filter-summary" id="code-article-summary">共 0 篇代码素材</div>
+        <div class="database-table-wrap">
+          <table class="database-table">
+            <thead>
+              <tr><th>标题</th><th>语言</th><th>字数</th><th>难度</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody id="code-article-list"></tbody>
+          </table>
+        </div>
+        <div class="empty-msg" id="code-article-empty">还没有代码素材，点上方新增 · <a href="#code-langs">去语言分类</a></div>
+        <p class="note" id="code-article-msg"></p>
       </div>
 
       <div class="section-card admin-section admin-code-only" id="section-code-langs">
@@ -580,6 +623,21 @@
 
       <div class="section-card admin-section admin-code-only" id="section-code-lb">
         <div class="section-card-title">代码榜管理</div>
+        <div class="filter-bar">
+          <span class="note" style="margin:0">只包含代码素材的成绩</span>
+          <button class="btn-secondary" id="code-lb-refresh">刷新</button>
+          <button class="btn-dark-utility" id="clear-code-lb-btn">清空代码榜</button>
+        </div>
+        <div class="database-table-wrap">
+          <table class="database-table">
+            <thead>
+              <tr><th>昵称</th><th>文章</th><th>速度</th><th>正确率</th><th>时长</th><th>来源</th><th>时间</th><th>操作</th></tr>
+            </thead>
+            <tbody id="code-lb-list"></tbody>
+          </table>
+        </div>
+        <div class="empty-msg" id="code-lb-empty">代码榜还没有记录</div>
+        <p class="note" id="code-lb-msg"></p>
       </div>
     </main>
   </div>
@@ -619,7 +677,7 @@
         <input type="text" id="edit-title" placeholder="文章标题" maxlength="100">
       </div>
       <div class="form-group">
-        <label>分类</label>
+        <label id="edit-category-label">分类</label>
         <select id="edit-category-select" class="custom-select">
           <option value="">-- 请选择分类 --</option>
         </select>
@@ -635,7 +693,10 @@
       </div>
       <div class="form-group">
         <label>正文</label>
-        <textarea id="edit-content" placeholder="文章正文" style="min-height:200px"></textarea>
+        <div class="code-block-wrap">
+          <textarea id="edit-content" placeholder="文章正文"></textarea>
+          <span class="code-block-count" id="edit-content-count" style="display:none">0 字符</span>
+        </div>
       </div>
       <div class="auth-error" id="edit-article-error"></div>
       <div class="btn-group">

@@ -21,6 +21,7 @@ const categoryEmpty = document.getElementById('category-empty');
 const newTitle = document.getElementById('new-title');
 const newCategorySelect = document.getElementById('new-category-select');
 const newContent = document.getElementById('new-content');
+const newContentCount = document.getElementById('new-content-count');
 const addArticleBtn = document.getElementById('add-article-btn');
 const addMsg = document.getElementById('add-msg');
 const articleList = document.getElementById('article-list');
@@ -34,13 +35,32 @@ const articleFilterSummary = document.getElementById('article-filter-summary');
 const editArticleModal = document.getElementById('edit-article-modal');
 const editTitle = document.getElementById('edit-title');
 const editCategorySelect = document.getElementById('edit-category-select');
+const editCategoryLabel = document.getElementById('edit-category-label');
 const editDifficultySelect = document.getElementById('edit-difficulty-select');
 const editContent = document.getElementById('edit-content');
+const editContentCount = document.getElementById('edit-content-count');
 const editArticleError = document.getElementById('edit-article-error');
 const editArticleCancel = document.getElementById('edit-article-cancel');
 const editArticleSave = document.getElementById('edit-article-save');
 let editingArticleId = null;
 let editingArticleIsCode = false;
+
+const codeNewTitle = document.getElementById('code-new-title');
+const codeNewCategorySelect = document.getElementById('code-new-category-select');
+const codeNewDifficulty = document.getElementById('code-new-difficulty');
+const codeNewContent = document.getElementById('code-new-content');
+const codeNewCount = document.getElementById('code-new-count');
+const codeAddArticleBtn = document.getElementById('code-add-article-btn');
+const codeAddMsg = document.getElementById('code-add-msg');
+const codeArticleList = document.getElementById('code-article-list');
+const codeArticleEmpty = document.getElementById('code-article-empty');
+const codeArticleSummary = document.getElementById('code-article-summary');
+const codeArticleMsg = document.getElementById('code-article-msg');
+const codeLbList = document.getElementById('code-lb-list');
+const codeLbEmpty = document.getElementById('code-lb-empty');
+const codeLbMsg = document.getElementById('code-lb-msg');
+let codeArticles = [];
+let codeLbData = [];
 
 const crawlUrl = document.getElementById('crawl-url');
 const crawlBtn = document.getElementById('crawl-btn');
@@ -72,6 +92,7 @@ const confirmModal = document.getElementById('confirm-modal');
 const confirmMsg = document.getElementById('confirm-msg');
 const confirmCancel = document.getElementById('confirm-cancel');
 const confirmOk = document.getElementById('confirm-ok');
+let confirmAction = null;
 
 const dashTotalUsers = document.getElementById('dash-total-users');
 const dashTodayPractices = document.getElementById('dash-today-practices');
@@ -1258,6 +1279,7 @@ async function fetchCodeLanguages() {
   codeLanguagesAll = Array.isArray(data.all) ? data.all : [];
   codeCategoryIds = (Array.isArray(data.selected) ? data.selected : []).map(String);
   renderCodeLanguagePanel();
+  renderCodeLanguageSelects();
   return data;
 }
 
@@ -1311,7 +1333,10 @@ async function toggleCodeLanguage(category) {
     adminToast('已更新代码语言分类', 'success');
     renderCategories();
     renderCategorySelects();
+    renderCodeLanguageSelects();
     if (articles.length) fetchArticles();
+    if (loadedSections.has('code-articles')) fetchCodeArticles();
+    if (loadedSections.has('code-lb')) fetchCodeLeaderboard();
   } catch (e) {
     adminToast(e.message || '保存代码语言分类失败', 'error');
   } finally {
@@ -1320,11 +1345,35 @@ async function toggleCodeLanguage(category) {
   }
 }
 
+function renderCodeLanguageSelects() {
+  if (!codeNewCategorySelect) return;
+  const previous = codeNewCategorySelect.value;
+  codeNewCategorySelect.innerHTML = '<option value="">-- 请选择语言 --</option>';
+  categories.filter(c => isCodeCategoryClient(c.id)).forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name;
+    codeNewCategorySelect.appendChild(opt);
+  });
+  if (previous && [...codeNewCategorySelect.options].some(o => o.value === previous)) {
+    codeNewCategorySelect.value = previous;
+  }
+  const hasLanguages = codeCategoryIds.length > 0;
+  if (codeAddArticleBtn) codeAddArticleBtn.disabled = !hasLanguages;
+  const hint = document.getElementById('code-article-hint');
+  if (hint) {
+    hint.textContent = hasLanguages
+      ? '代码素材只出现在代码模式练习与代码房间。'
+      : '还没有可用的语言分类，请先到「语言分类」勾选。';
+  }
+}
+
 async function fetchCategories() {
   const res = await fetch('/api/categories');
   categories = await res.json();
   renderCategories();
   renderCategorySelects();
+  renderCodeLanguageSelects();
 }
 
 function renderCategories() {
@@ -1757,6 +1806,13 @@ articleFilterResetBtn.addEventListener('click', () => {
   fetchArticles();
 });
 
+newCategorySelect.addEventListener('change', refreshNewEditorState);
+editCategorySelect.addEventListener('change', refreshEditEditorState);
+bindCodeTextarea(newContent, newContentCount);
+bindCodeTextarea(editContent, editContentCount);
+bindCodeTextarea(codeNewContent, codeNewCount);
+updateCodeBlockEditor(codeNewContent, codeNewCount, true);
+
 addArticleBtn.addEventListener('click', async () => {
   const title = newTitle.value.trim();
   const content = newContent.value.trim();
@@ -1817,18 +1873,21 @@ function openEditModal(article) {
 
   editDifficultySelect.value = article.difficulty || '0';
 
+  refreshEditEditorState();
   editArticleModal.style.display = 'flex';
 }
 
 editArticleCancel.addEventListener('click', () => {
   editArticleModal.style.display = 'none';
   editingArticleId = null;
+  editingArticleIsCode = false;
 });
 
 editArticleModal.addEventListener('click', (e) => {
   if (e.target === editArticleModal) {
     editArticleModal.style.display = 'none';
     editingArticleId = null;
+    editingArticleIsCode = false;
   }
 });
 
@@ -1837,6 +1896,7 @@ editArticleSave.addEventListener('click', async () => {
   const content = editContent.value.trim();
   const category_id = editCategorySelect.value;
   const difficulty_override = parseInt(editDifficultySelect.value) || 0;
+  const isCodeContent = selectedCategoryIsCode(editCategorySelect);
 
   if (!title) {
     editArticleError.textContent = '请输入标题';
@@ -1850,6 +1910,7 @@ editArticleSave.addEventListener('click', async () => {
     editArticleError.textContent = '请输入正文内容';
     return;
   }
+  if (isCodeContent) warnIfTab(editContent.value);
 
   try {
     const res = await fetch('/api/articles/' + editingArticleId, {
@@ -1861,13 +1922,224 @@ editArticleSave.addEventListener('click', async () => {
     if (res.ok) {
       editArticleModal.style.display = 'none';
       editingArticleId = null;
+      editingArticleIsCode = false;
       await fetchArticles();
+      if (loadedSections.has('code-articles')) fetchCodeArticles();
     } else {
       const data = await res.json();
       editArticleError.textContent = data.error || '保存失败';
     }
   } catch (e) {
     editArticleError.textContent = '网络错误';
+  }
+});
+
+async function fetchCodeArticles() {
+  if (!codeLanguagesAll.length) {
+    await fetchCodeLanguages().catch(() => {});
+  }
+  const res = await fetch('/api/articles?brief=1', { headers: apiHeaders() });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || '加载代码素材失败');
+  }
+  const list = await res.json();
+  codeArticles = (Array.isArray(list) ? list : []).filter(a => isCodeArticleClient(a));
+  renderCodeArticles();
+}
+
+function codeDifficultyText(difficulty) {
+  return difficulty === 1 ? '简单' : difficulty === 2 ? '中等' : difficulty === 3 ? '困难' : '自动';
+}
+
+function codeStatusText(status) {
+  return status === 'approved' ? '已上架' : status === 'pending' ? '已下架' : '已拒绝';
+}
+
+function renderCodeArticles() {
+  if (!codeArticleList) return;
+  codeArticleList.innerHTML = '';
+  codeArticleSummary.textContent = '共 ' + codeArticles.length + ' 篇代码素材';
+  if (codeArticles.length === 0) {
+    codeArticleEmpty.style.display = 'block';
+    codeArticleEmpty.innerHTML = codeCategoryIds.length
+      ? '还没有代码素材，点上方新增 · <a href="#code-langs">去语言分类</a>'
+      : '还没有代码语言分类，请先到「语言分类」勾选 · <a href="#code-langs">去语言分类</a>';
+    return;
+  }
+  codeArticleEmpty.style.display = 'none';
+
+  codeArticles.forEach(a => {
+    const tr = document.createElement('tr');
+    const statusClass = a.status === 'approved' ? 'is-approved' : (a.status === 'pending' ? 'is-pending' : '');
+    const nextAction = a.status === 'approved' ? '下架' : '上架';
+    tr.innerHTML =
+      '<td>' + escapeHtml(a.title) + '</td>' +
+      '<td>' + escapeHtml(a.category_name || '') + '</td>' +
+      '<td>' + (a.content_length != null ? a.content_length : '?') + '</td>' +
+      '<td>' + codeDifficultyText(a.difficulty) + '</td>' +
+      '<td><span class="code-status ' + statusClass + '">' + codeStatusText(a.status) + '</span></td>' +
+      '<td><div class="code-article-actions">' +
+        '<button type="button" class="btn-secondary code-edit-btn" data-id="' + a.id + '">编辑</button>' +
+        '<button type="button" class="btn-secondary code-toggle-btn" data-id="' + a.id + '">' + nextAction + '</button>' +
+        '<button type="button" class="btn-dark-utility code-delete-btn" data-id="' + a.id + '">删除</button>' +
+      '</div></td>';
+
+    tr.querySelector('.code-edit-btn').addEventListener('click', async function() {
+      const article = a.content ? a : await fetchArticleDetail(a.id);
+      if (!article) {
+        codeArticleMsg.textContent = '文章详情加载失败';
+        return;
+      }
+      openEditModal(article);
+    });
+    tr.querySelector('.code-toggle-btn').addEventListener('click', function() {
+      toggleCodeArticleStatus(a);
+    });
+    tr.querySelector('.code-delete-btn').addEventListener('click', function() {
+      deleteCodeArticle(a);
+    });
+    codeArticleList.appendChild(tr);
+  });
+}
+
+async function toggleCodeArticleStatus(article) {
+  const next = article.status === 'approved' ? 'pending' : 'approved';
+  const actionText = next === 'approved' ? '上架' : '下架';
+  if (!confirm('确定' + actionText + '「' + article.title + '」吗？')) return;
+  codeArticleMsg.textContent = '';
+  try {
+    const detail = await fetchArticleDetail(article.id);
+    if (!detail) throw new Error('文章详情加载失败');
+    const res = await fetch('/api/articles/' + article.id, {
+      method: 'PUT',
+      headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: detail.title,
+        content: detail.content,
+        category_id: detail.category_id,
+        difficulty_override: detail.difficulty,
+        status: next
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '操作失败');
+    adminToast('已' + actionText, 'success');
+    await fetchCodeArticles();
+    if (loadedSections.has('articles')) fetchArticles();
+  } catch (e) {
+    codeArticleMsg.textContent = '操作失败：' + e.message;
+  }
+}
+
+async function deleteCodeArticle(article) {
+  if (!confirm('确定删除代码素材「' + article.title + '」吗？其成绩也会一并删除。')) return;
+  codeArticleMsg.textContent = '';
+  try {
+    const res = await fetch('/api/articles/' + article.id, { method: 'DELETE', headers: apiHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '删除失败');
+    adminToast('已删除代码素材', 'success');
+    await fetchCodeArticles();
+    if (loadedSections.has('articles')) fetchArticles();
+    if (loadedSections.has('code-lb')) fetchCodeLeaderboard();
+  } catch (e) {
+    codeArticleMsg.textContent = '删除失败：' + e.message;
+  }
+}
+
+async function fetchCodeLeaderboard() {
+  const res = await fetch('/api/leaderboard?category=code', { headers: apiHeaders() });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || '加载代码榜失败');
+  }
+  const data = await res.json();
+  codeLbData = Array.isArray(data) ? data : [];
+  renderCodeLeaderboard();
+}
+
+function codeSourceText(source) {
+  if (source === 'race') return '比赛';
+  if (source === 'race_guest') return '游客比赛';
+  if (source === 'normal') return '练习';
+  return source || '—';
+}
+
+function renderCodeLeaderboard() {
+  if (!codeLbList) return;
+  codeLbList.innerHTML = '';
+  if (codeLbData.length === 0) {
+    codeLbEmpty.style.display = 'block';
+    return;
+  }
+  codeLbEmpty.style.display = 'none';
+  codeLbData.forEach(r => {
+    const tr = document.createElement('tr');
+    const dateText = new Date(r.created_at).toLocaleString('zh-CN');
+    tr.innerHTML =
+      '<td>' + escapeHtml(r.nickname) + (r.user_id ? '' : ' <span class="guest-badge">游客</span>') + '</td>' +
+      '<td>' + escapeHtml(r.article_title || '') + '</td>' +
+      '<td>' + r.speed + ' 字/分</td>' +
+      '<td>' + r.accuracy + '%</td>' +
+      '<td>' + (r.time_seconds != null ? r.time_seconds + ' 秒' : '—') + '</td>' +
+      '<td>' + codeSourceText(r.source) + '</td>' +
+      '<td>' + escapeHtml(dateText) + '</td>' +
+      '<td><button type="button" class="btn-dark-utility code-lb-delete" data-id="' + r.id + '">删除</button></td>';
+    tr.querySelector('.code-lb-delete').addEventListener('click', async function() {
+      if (!confirm('确定删除该代码榜记录吗？')) return;
+      try {
+        const res = await fetch('/api/leaderboard/' + r.id, { method: 'DELETE', headers: apiHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '删除失败');
+        adminToast('已删除记录', 'success');
+        await fetchCodeLeaderboard();
+        if (loadedSections.has('leaderboard')) fetchLeaderboard(currentFilter);
+      } catch (e) {
+        codeLbMsg.textContent = '删除失败：' + e.message;
+      }
+    });
+    codeLbList.appendChild(tr);
+  });
+}
+
+codeAddArticleBtn.addEventListener('click', async () => {
+  const title = codeNewTitle.value.trim();
+  const content = codeNewContent.value;
+  const categoryId = codeNewCategorySelect.value;
+  const difficulty = parseInt(codeNewDifficulty.value, 10);
+  if (!title) { codeAddMsg.textContent = '请输入标题'; return; }
+  if (!categoryId) { codeAddMsg.textContent = '请选择语言'; return; }
+  if (!content.trim()) { codeAddMsg.textContent = '请输入正文内容'; return; }
+  warnIfTab(content);
+  codeAddMsg.textContent = '';
+  try {
+    const res = await fetch('/api/articles', {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ title, content, category_id: parseInt(categoryId, 10), source: '代码素材' })
+    });
+    const created = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(created.error || '添加失败');
+    if (Number.isInteger(difficulty) && difficulty >= 1 && difficulty <= 3) {
+      const putRes = await fetch('/api/articles/' + created.id, {
+        method: 'PUT',
+        headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content, category_id: parseInt(categoryId, 10), difficulty_override: difficulty })
+      });
+      if (!putRes.ok) {
+        const err = await putRes.json().catch(() => ({}));
+        throw new Error('素材已创建，但难度设置失败：' + (err.error || '未知错误'));
+      }
+    }
+    codeAddMsg.textContent = '代码素材添加成功';
+    adminToast('已添加代码素材', 'success');
+    codeNewTitle.value = '';
+    codeNewContent.value = '';
+    updateCodeBlockEditor(codeNewContent, codeNewCount, true);
+    await fetchCodeArticles();
+  } catch (e) {
+    codeAddMsg.textContent = '添加失败：' + e.message;
   }
 });
 
@@ -2165,22 +2437,58 @@ function renderLeaderboardManage() {
   });
 }
 
-clearLbBtn.addEventListener('click', () => {
-  confirmMsg.textContent = '确定要清空整个排行榜吗？此操作不可恢复！';
+function openConfirmModal(message, okText, action) {
+  confirmMsg.textContent = message;
+  confirmOk.textContent = okText || '确认';
+  confirmAction = action;
   confirmModal.style.display = 'flex';
+}
+
+clearLbBtn.addEventListener('click', () => {
+  openConfirmModal('确定要清空整个排行榜吗？此操作不可恢复！', '确认清空', async () => {
+    await fetch('/api/leaderboard', { method: 'DELETE', headers: apiHeaders() });
+    await fetchLeaderboard(currentFilter);
+    if (loadedSections.has('code-lb')) fetchCodeLeaderboard();
+    adminToast('排行榜已清空', 'success');
+  });
+});
+
+document.getElementById('code-lb-refresh').addEventListener('click', () => {
+  fetchCodeLeaderboard().catch(e => { codeLbMsg.textContent = '加载失败：' + e.message; });
+});
+
+document.getElementById('clear-code-lb-btn').addEventListener('click', () => {
+  openConfirmModal('只清空代码榜，不影响总榜。确定吗？', '确认清空代码榜', async () => {
+    const res = await fetch('/api/leaderboard?category=code', { method: 'DELETE', headers: apiHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '清空失败');
+    await fetchCodeLeaderboard();
+    if (loadedSections.has('leaderboard')) fetchLeaderboard(currentFilter);
+    adminToast('代码榜已清空', 'success');
+  });
 });
 
 confirmCancel.addEventListener('click', () => {
+  confirmAction = null;
   confirmModal.style.display = 'none';
 });
 
 confirmOk.addEventListener('click', async () => {
-  try {
-    await fetch('/api/leaderboard', { method: 'DELETE', headers: apiHeaders() });
+  const action = confirmAction;
+  if (!action) {
     confirmModal.style.display = 'none';
-    await fetchLeaderboard(currentFilter);
+    return;
+  }
+  confirmOk.disabled = true;
+  try {
+    await action();
+    confirmModal.style.display = 'none';
   } catch (e) {
-    alert('清空失败，请重试');
+    adminToast(e.message || '操作失败', 'error');
+  } finally {
+    confirmOk.disabled = false;
+    confirmAction = null;
+    confirmModal.style.display = 'none';
   }
 });
 
@@ -2208,6 +2516,54 @@ function adminToast(message, type) {
     el.classList.add('toast-exit');
     setTimeout(function () { el.remove(); }, 260);
   }, 3000);
+}
+
+function updateCodeBlockEditor(textarea, counter, isCode) {
+  if (!textarea) return;
+  textarea.classList.toggle('code-block-input', !!isCode);
+  textarea.wrap = isCode ? 'off' : 'soft';
+  if (counter) {
+    counter.style.display = isCode ? 'block' : 'none';
+    counter.textContent = textarea.value.length + ' 字符';
+  }
+}
+
+function bindCodeTextarea(textarea, counter) {
+  if (!textarea) return;
+  textarea.addEventListener('input', function () {
+    if (counter && textarea.classList.contains('code-block-input')) {
+      counter.textContent = textarea.value.length + ' 字符';
+    }
+  });
+  textarea.addEventListener('keydown', function (e) {
+    if (e.key !== 'Tab' || !textarea.classList.contains('code-block-input')) return;
+    e.preventDefault();
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.slice(0, start) + '  ' + textarea.value.slice(end);
+    textarea.selectionStart = textarea.selectionEnd = start + 2;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function selectedCategoryIsCode(select) {
+  const opt = select && select.selectedOptions && select.selectedOptions[0];
+  return !!(opt && opt.value && isCodeCategoryClient(opt.value));
+}
+
+function refreshNewEditorState() {
+  updateCodeBlockEditor(newContent, newContentCount, selectedCategoryIsCode(newCategorySelect));
+}
+
+function refreshEditEditorState() {
+  updateCodeBlockEditor(editContent, editContentCount, selectedCategoryIsCode(editCategorySelect));
+  if (editCategoryLabel) editCategoryLabel.textContent = editingArticleIsCode ? '语言' : '分类';
+}
+
+function warnIfTab(content) {
+  if (content.indexOf('\t') >= 0) {
+    adminToast('代码素材请用 2 个空格缩进，不要用 Tab', 'warning');
+  }
 }
 
 async function loadVersion() {
@@ -2712,7 +3068,7 @@ const sectionLoaders = {
   races: () => loadRaceRooms(),
   backup: () => loadBackups(),
   crawler: () => Promise.resolve(),
-  'code-articles': () => Promise.resolve(),
+  'code-articles': () => fetchCodeArticles(),
   'code-langs': async () => {
     await fetchCodeLanguages();
     if (categories.length) {
@@ -2720,7 +3076,7 @@ const sectionLoaders = {
       renderCategorySelects();
     }
   },
-  'code-lb': () => Promise.resolve()
+  'code-lb': () => fetchCodeLeaderboard()
 };
 const loadedSections = new Set();
 

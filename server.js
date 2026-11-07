@@ -3557,7 +3557,7 @@ app.put('/api/articles/:id/offline', authMiddleware, adminMiddleware, async (req
 
 app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { title, content, category_id, difficulty_override } = req.body;
+    const { title, content, category_id, difficulty_override, status } = req.body;
     if (!title || !content) {
       return res.status(400).json({ error: '标题和内容不能为空' });
     }
@@ -3567,6 +3567,9 @@ app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) =
     if (content.length > 50000) {
       return res.status(400).json({ error: '内容不能超过50000字符' });
     }
+    if (status !== undefined && status !== 'approved' && status !== 'pending') {
+      return res.status(400).json({ error: '状态必须为 approved 或 pending' });
+    }
     const existing = await db.get('SELECT * FROM articles WHERE id = ?', req.params.id);
     if (!existing) {
       return res.status(404).json({ error: '文章不存在' });
@@ -3574,8 +3577,9 @@ app.put('/api/articles/:id', authMiddleware, adminMiddleware, async (req, res) =
     const autoResult = calculateDifficulty(content);
     const finalDifficulty = (difficulty_override >= 1 && difficulty_override <= 3) ? difficulty_override : autoResult.difficulty;
     const finalScore = autoResult.difficulty_score;
+    const nextStatus = status === undefined ? existing.status : status;
     const nl = nowLocaltime(db);
-    await db.run(`UPDATE articles SET title = ?, content = ?, category_id = ?, difficulty = ?, difficulty_score = ?, updated_at = ${nl} WHERE id = ?`, title, content, category_id || existing.category_id, finalDifficulty, finalScore, req.params.id);
+    await db.run(`UPDATE articles SET title = ?, content = ?, category_id = ?, difficulty = ?, difficulty_score = ?, status = ?, updated_at = ${nl} WHERE id = ?`, title, content, category_id || existing.category_id, finalDifficulty, finalScore, nextStatus, req.params.id);
     const article = await db.get('SELECT a.*, c.name as category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', req.params.id);
     res.json(article);
   } catch (e) {
@@ -3741,8 +3745,23 @@ app.delete('/api/leaderboard/:id', authMiddleware, adminMiddleware, async (req, 
 
 app.delete('/api/leaderboard', authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const category = req.query.category;
+    if (category !== undefined && category !== 'code') {
+      return res.status(400).json({ error: '分类参数不合法' });
+    }
+    if (category === 'code') {
+      const codeIds = await getCodeCategoryIds();
+      if (codeIds.length) {
+        const placeholders = codeIds.map(() => '?').join(',');
+        await db.run(
+          'DELETE FROM scores WHERE article_id IN (SELECT id FROM articles WHERE category_id IN (' + placeholders + '))',
+          ...codeIds
+        );
+      }
+      return res.json({ success: true, scope: 'code' });
+    }
     await db.run('DELETE FROM scores');
-    res.json({ success: true });
+    res.json({ success: true, scope: 'all' });
   } catch (e) {
     res.status(500).json({ error: '清空排行榜失败' });
   }

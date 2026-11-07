@@ -1480,6 +1480,86 @@ body.admin-mode-normal .admin-sidebar .nav-menu li.admin-code-nav {
   color: var(--ink);
 }
 
+.code-form-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.code-form-row .filter-group {
+  flex: 1;
+  min-width: 160px;
+}
+
+.code-block-wrap {
+  position: relative;
+}
+
+textarea.code-block-input,
+.modal .form-group textarea.code-block-input {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 24px;
+  tab-size: 2;
+  -moz-tab-size: 2;
+  white-space: pre;
+  overflow-x: auto;
+  min-height: 240px;
+  padding-bottom: 28px;
+}
+
+.modal .form-group textarea#edit-content {
+  min-height: 200px;
+}
+
+.modal .form-group textarea#edit-content.code-block-input {
+  min-height: 240px;
+}
+
+.code-block-count {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--canvas-soft);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.code-article-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.code-article-actions button {
+  height: 28px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.code-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--surface-strong);
+  color: var(--body);
+}
+
+.code-status.is-approved {
+  color: var(--semantic-success);
+}
+
+.code-status.is-pending {
+  color: var(--semantic-warning);
+}
+
 /* Admin section tab panels: only show the active section */
 .admin-main > [id^="section-"] {
   display: none;
