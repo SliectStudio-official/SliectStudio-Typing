@@ -723,6 +723,126 @@
     clearMatchBar();
   });
 
+  /* ---------- 端口漂移守卫 ---------- */
+  var PROBE_PORTS = [3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010];
+  var portGuard = { failures: 0, checking: false, probing: false, mode: '', newPort: null, timer: null };
+  function portBanner() {
+    var el = document.getElementById('port-drift-banner');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'port-drift-banner';
+    el.className = 'port-drift-banner';
+    el.setAttribute('role', 'alert');
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    return el;
+  }
+  function hidePortBanner() {
+    var el = portBanner();
+    el.style.display = 'none';
+    el.innerHTML = '';
+    portGuard.mode = '';
+    portGuard.newPort = null;
+  }
+  function showPortBanner(mode, port) {
+    var el = portBanner();
+    portGuard.mode = mode;
+    portGuard.newPort = port || null;
+    if (mode === 'drift') {
+      var host = location.hostname;
+      var url = location.protocol + '//' + host + ':' + port + location.pathname + location.search + location.hash;
+      el.className = 'port-drift-banner';
+      el.innerHTML = '<a href="' + url.replace(/"/g, '&quot;') + '">服务已换到 :' + port + '，点此继续</a>';
+      el.style.display = 'flex';
+      el.onclick = function () { location.href = url; };
+    } else if (mode === 'down') {
+      el.className = 'port-drift-banner is-error';
+      el.innerHTML = '<span>与服务器的连接已断开，服务可能已停止</span>' +
+        '<button type="button" class="port-drift-retry" id="port-drift-retry">重试</button>';
+      el.style.display = 'flex';
+      el.onclick = null;
+      var btn = el.querySelector('#port-drift-retry');
+      if (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          retryPortGuard();
+        });
+      }
+    }
+  }
+  function fetchWithTimeout(url, ms, options) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, ms);
+    var opts = Object.assign({}, options || {}, { cache: 'no-store', signal: ctrl.signal });
+    return fetch(url, opts).then(function (res) {
+      clearTimeout(timer);
+      return res;
+    }, function (err) {
+      clearTimeout(timer);
+      throw err;
+    });
+  }
+  function probePort(port) {
+    var url = location.protocol + '//' + location.hostname + ':' + port + '/api/version';
+    // 同 host 不同端口是跨源；使用 no-cors 只判断端口是否有服务响应，不读取响应体。
+    return fetchWithTimeout(url, 1500, { mode: 'no-cors' })
+      .then(function (res) { return !!(res && res.status !== 503); })
+      .catch(function () { return false; });
+  }
+  async function probePorts() {
+    if (portGuard.probing) return;
+    portGuard.probing = true;
+    try {
+      for (var i = 0; i < PROBE_PORTS.length; i++) {
+        var port = PROBE_PORTS[i];
+        if (await probePort(port)) {
+          var current = Number(location.port || (location.protocol === 'https:' ? 443 : 80));
+          if (port === current) {
+            portGuard.failures = 0;
+            hidePortBanner();
+          } else {
+            showPortBanner('drift', port);
+          }
+          return;
+        }
+      }
+      showPortBanner('down');
+    } finally {
+      portGuard.probing = false;
+    }
+  }
+  function retryPortGuard() {
+    if (portGuard.checking || portGuard.probing) {
+      setTimeout(retryPortGuard, 250);
+      return;
+    }
+    portGuard.failures = 0;
+    checkPortOnce(true);
+  }
+  function checkPortOnce(forceProbe) {
+    if (portGuard.checking || portGuard.probing) return;
+    portGuard.checking = true;
+    fetchWithTimeout(location.origin + '/api/version', 3000)
+      .then(function (res) { return !!(res && res.ok); })
+      .catch(function () { return false; })
+      .then(function (ok) {
+        if (ok) {
+          portGuard.failures = 0;
+          if (portGuard.mode) hidePortBanner();
+          return;
+        }
+        portGuard.failures += 1;
+        if (forceProbe || portGuard.failures >= 2) return probePorts();
+      })
+      .finally(function () { portGuard.checking = false; });
+  }
+  function startPortGuard() {
+    portBanner();
+    setTimeout(function () { checkPortOnce(false); }, 1000);
+    portGuard.timer = setInterval(function () { checkPortOnce(false); }, 15000);
+  }
+  startPortGuard();
+
   var userAreaEl = document.getElementById('user-area');
   if (userAreaEl && window.MutationObserver) {
     new MutationObserver(refreshAccount).observe(userAreaEl, { attributes: true, attributeFilter: ['style', 'class'] });

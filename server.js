@@ -13,6 +13,40 @@ const {
   getMySQLCreateSQL, getSQLiteCreateSQL, runMigrations, seedData
 } = require('./db-config');
 
+function appendServerLog(text) {
+  try {
+    const dir = path.join(__dirname, 'tmp');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'server.log'), '[' + new Date().toISOString() + '] ' + text + '\n');
+  } catch (e) {}
+}
+
+function handleOutputError(streamName) {
+  return function (err) {
+    if (err && (err.code === 'EPIPE' || err.code === 'ECONNRESET')) return;
+    try {
+      const text = '[输出错误] ' + streamName + ': ' + (err && (err.stack || err.message) || err);
+      if (streamName === 'stdout') process.stderr.write(text + '\n');
+      else process.stdout.write(text + '\n');
+    } catch (e) {}
+  };
+}
+process.stdout.on('error', handleOutputError('stdout'));
+process.stderr.on('error', handleOutputError('stderr'));
+
+function crashLocation(err) {
+  if (err && err.method && err.url) return err.method + ' ' + err.url;
+  if (err && err.request) return (err.request.method || '-') + ' ' + (err.request.url || '-');
+  return '- -';
+}
+function logCrash(kind, err) {
+  const message = '[崩溃兜底] ' + kind + ' ' + crashLocation(err) + '\n' + (err && (err.stack || err.message) || String(err));
+  appendServerLog(message);
+  try { console.error(message); } catch (e) {}
+}
+process.on('uncaughtException', function (err) { logCrash('uncaughtException', err); });
+process.on('unhandledRejection', function (reason) { logCrash('unhandledRejection', reason); });
+
 const app = express();
 const PORT = Number.parseInt(process.env.PORT, 10) || 3000;
 let JWT_SECRET = '';
@@ -4790,18 +4824,35 @@ app.use((err, req, res, next) => {
   if (err && err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: '请求体不是合法 JSON' });
   }
-  if (req.path.startsWith('/api') && !res.headersSent) {
-    return res.status(err.status || 500).json({ error: err.message || '服务器内部错误' });
-  }
-  next(err);
+  const stack = err && (err.stack || err.message) || String(err);
+  appendServerLog('[请求异常] ' + req.method + ' ' + (req.originalUrl || req.url) + '\n' + stack);
+  try { console.error('[请求异常] ' + req.method + ' ' + (req.originalUrl || req.url) + '\n' + stack); } catch (e) {}
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: '服务器内部错误' });
 });
+
+function handleListenError(err) {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`[启动失败] 端口 ${PORT} 已被占用（EADDRINUSE）`);
+    console.error(`  查占用进程: netstat -ano | findstr :${PORT}`);
+    console.error(`  换端口启动: set PORT=3001 && node server.js`);
+  } else {
+    console.error('[启动失败] 监听端口时发生错误:', err && (err.stack || err.message) || err);
+  }
+  process.exit(1);
+}
 
 applyPendingRestore().catch((e) => {
   console.error('[恢复] 检查失败，继续用现库启动', e.message);
 }).then(() => initDatabase()).then(() => {
   startRaceCleanup();
-  app.listen(PORT, '0.0.0.0', async () => {
+  const server = app.listen(PORT, '0.0.0.0', async () => {
     console.log(`打字练习服务器已启动 [${versionInfo.fullName}]：`);
+    console.log(`  监听地址: 0.0.0.0:${PORT}（PORT 环境变量: ${process.env.PORT !== undefined && process.env.PORT !== '' ? '已指定' : '未指定'}）`);
+    const sqlitePath = resolveDbPathFromConfig();
+    console.log(`  数据库文件: ${sqlitePath || 'MySQL（无本地文件）'}`);
+    console.log(`  数据目录: ${path.resolve(__dirname, 'data')}`);
+    console.log(`  页面根目录: ${path.resolve(publicDir)}`);
     console.log(`  本机访问: http://localhost:${PORT}`);
     const nets = require('os').networkInterfaces();
     for (const name of Object.keys(nets)) {
@@ -4816,8 +4867,9 @@ applyPendingRestore().catch((e) => {
     } else {
       console.log('  管理员账户: 首次启动请在页面中创建');
     }
-    console.log(`  数据库类型: ${currentConfig.type === 'mysql' ? 'MySQL' : 'SQLite'}`);
+    console.log(`  数据库类型: ${currentConfig.type === 'mysql' ? 'MySQL（无本地文件）' : 'SQLite'}`);
   });
+  server.on('error', handleListenError);
 }).catch(err => {
   console.error('数据库初始化失败:', err);
   process.exit(1);
