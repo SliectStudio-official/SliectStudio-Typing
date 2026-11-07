@@ -3424,6 +3424,85 @@ app.get('/api/user/race-stats', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/user/race-history', authMiddleware, async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 10));
+    const offset = (page - 1) * limit;
+    const where = "rp.user_id = ? AND r.started_at IS NOT NULL AND r.status IN ('finished', 'cancelled', 'racing')";
+    const totalRow = await db.get(
+      `SELECT COUNT(*) AS count
+       FROM race_participants rp
+       JOIN races r ON r.id = rp.race_id
+       WHERE ${where}`,
+      req.user.id
+    );
+    const rows = await db.all(
+      `SELECT r.id AS raceId, r.code, r.article_title AS articleTitle, r.char_count AS charCount,
+              r.status, r.player_count AS playerCount, rp.rank_no AS rankNo,
+              rp.speed, rp.accuracy, rp.time_seconds AS timeSeconds,
+              rp.finished_at AS participantFinishedAt, r.finished_at AS finishedAt,
+              r.started_at AS startedAt, r.cancelled_reason AS cancelledReason
+       FROM race_participants rp
+       JOIN races r ON r.id = rp.race_id
+       WHERE ${where}
+       ORDER BY r.started_at DESC, r.id DESC
+       LIMIT ? OFFSET ?`,
+      req.user.id, limit, offset
+    );
+    const summaryRow = await db.get(
+      `SELECT COUNT(*) AS racedCount,
+              COALESCE(SUM(CASE WHEN r.status = 'finished' AND rp.rank_no IS NOT NULL THEN 1 ELSE 0 END), 0) AS finishedCount,
+              COALESCE(SUM(CASE WHEN r.status = 'finished' AND rp.rank_no = 1 THEN 1 ELSE 0 END), 0) AS winCount,
+              MIN(CASE WHEN rp.rank_no IS NOT NULL THEN rp.rank_no END) AS bestRank
+       FROM race_participants rp
+       JOIN races r ON r.id = rp.race_id
+       WHERE rp.user_id = ?`,
+      req.user.id
+    );
+    const racedCount = Number(summaryRow.racedCount) || 0;
+    const finishedCount = Number(summaryRow.finishedCount) || 0;
+    const winCount = Number(summaryRow.winCount) || 0;
+    const items = rows.map(function (row) {
+      const finished = row.participantFinishedAt != null;
+      return {
+        raceId: Number(row.raceId),
+        code: row.code,
+        articleTitle: row.articleTitle,
+        charCount: Number(row.charCount) || 0,
+        status: row.status,
+        playerCount: Number(row.playerCount) || 0,
+        rank: finished && row.rankNo != null ? Number(row.rankNo) : null,
+        speed: row.speed == null ? null : Number(row.speed),
+        accuracy: row.accuracy == null ? null : Number(row.accuracy),
+        timeSeconds: row.timeSeconds == null ? null : Number(row.timeSeconds),
+        finishedAt: row.finishedAt || null,
+        startedAt: row.startedAt || null,
+        cancelledReason: row.cancelledReason || null,
+        finished: finished
+      };
+    });
+    res.json({
+      items: items,
+      summary: {
+        racedCount: racedCount,
+        finishedCount: finishedCount,
+        winCount: winCount,
+        winRate: finishedCount > 0 ? Math.round((winCount / finishedCount) * 1000) / 10 : 0,
+        bestRank: summaryRow.bestRank == null ? null : Number(summaryRow.bestRank)
+      },
+      pagination: {
+        page: page,
+        limit: limit,
+        total: Number(totalRow.count) || 0,
+        totalPages: Math.ceil((Number(totalRow.count) || 0) / limit)
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: '获取历史战绩失败' });
+  }
+});
+
 app.get('/api/user/error-log', authMiddleware, async (req, res) => {
   try {
     const errors = await db.all(

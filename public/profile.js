@@ -206,7 +206,7 @@ function activateProfileTab(tab, updateHash) {
   if (tab === 'overview' && statsChart) {
     setTimeout(function () { try { statsChart.resize(); } catch (e) {} }, 0);
   }
-  if (tab === 'race-history' && typeof loadRaceHistory === 'function') loadRaceHistory(1);
+  if (tab === 'race-history' && currentUser && typeof loadRaceHistory === 'function') loadRaceHistory(1);
   loadProfilePanelData(tab);
 }
 function initProfileTabs() {
@@ -288,6 +288,125 @@ async function loadOverviewRaceStats() {
     if (el) el.textContent = String(finished);
   } catch (e) {
     console.error('Failed to load race overview:', e);
+  }
+}
+
+
+function raceHistoryDate(value) {
+  if (!value) return '—';
+  var d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+function raceHistoryStatus(row) {
+  if (row.finished) return '已结束';
+  if (row.status === 'cancelled') return '已解散';
+  if (row.status === 'racing') return '进行中';
+  return '中途退出';
+}
+function raceHistoryRank(row) {
+  if (!row.finished || row.rank == null) return '未完成';
+  return '第 ' + row.rank + ' 名';
+}
+function renderRaceHistorySummary(s) {
+  s = s || {};
+  var raced = Number(s.racedCount) || 0;
+  var finished = Number(s.finishedCount) || 0;
+  var winrate = raced > 0 ? (Number(s.winRate) || 0) + '%' : '—';
+  var best = s.bestRank == null ? '—' : '第 ' + s.bestRank + ' 名';
+  var rt = document.getElementById('race-summary-raced');
+  if (rt) rt.textContent = String(raced);
+  var rw = document.getElementById('race-summary-winrate');
+  if (rw) rw.textContent = winrate;
+  var rb = document.getElementById('race-summary-best');
+  if (rb) rb.textContent = best;
+  var rf = document.getElementById('race-summary-finished');
+  if (rf) rf.textContent = String(finished);
+}
+function renderRaceHistoryPagination(p) {
+  var box = document.getElementById('race-history-pagination');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!p || p.totalPages <= 1) return;
+  var prev = document.createElement('button');
+  prev.textContent = '上一页';
+  prev.className = 'page-btn';
+  prev.disabled = p.page <= 1;
+  prev.addEventListener('click', function () { loadRaceHistory(p.page - 1); });
+  box.appendChild(prev);
+  var info = document.createElement('span');
+  info.className = 'page-info';
+  info.textContent = p.page + ' / ' + p.totalPages;
+  box.appendChild(info);
+  var next = document.createElement('button');
+  next.textContent = '下一页';
+  next.className = 'page-btn';
+  next.disabled = p.page >= p.totalPages;
+  next.addEventListener('click', function () { loadRaceHistory(p.page + 1); });
+  box.appendChild(next);
+}
+function renderRaceHistory(data) {
+  var items = (data && data.items) || [];
+  var summary = (data && data.summary) || {};
+  var p = (data && data.pagination) || { page: 1, limit: 10, total: 0, totalPages: 0 };
+  renderRaceHistorySummary(summary);
+  var table = document.getElementById('race-history-table');
+  var tbody = document.getElementById('race-history-tbody');
+  var cards = document.getElementById('race-history-cards');
+  var empty = document.getElementById('race-history-empty');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (cards) cards.innerHTML = '';
+  if (!items.length) {
+    if (table) table.style.display = 'none';
+    if (cards) cards.style.display = 'none';
+    if (empty) empty.style.display = '';
+    renderRaceHistoryPagination({ page: 1, totalPages: 0 });
+    return;
+  }
+  if (table) table.style.display = '';
+  if (cards) cards.style.display = '';
+  if (empty) empty.style.display = 'none';
+  items.forEach(function (row) {
+    var dateText = raceHistoryDate(row.startedAt || row.finishedAt);
+    var rankText = raceHistoryRank(row);
+    var speedText = row.speed == null ? '—' : Math.round(row.speed) + ' 字/分';
+    var accuracyText = row.accuracy == null ? '—' : Math.round(row.accuracy) + '%';
+    var timeText = row.timeSeconds == null ? '—' : Number(row.timeSeconds).toFixed(1) + 's';
+    var statusText = raceHistoryStatus(row);
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + escapeHtml(dateText) + '</td>' +
+      '<td>' + escapeHtml(row.articleTitle || '未知文章') + '</td>' +
+      '<td>' + escapeHtml(rankText) + '</td>' +
+      '<td>' + escapeHtml(speedText) + '</td>' +
+      '<td>' + escapeHtml(accuracyText) + '</td>' +
+      '<td>' + escapeHtml(timeText) + '</td>' +
+      '<td>' + escapeHtml(statusText) + '</td>';
+    tbody.appendChild(tr);
+    if (cards) {
+      var card = document.createElement('div');
+      card.className = 'race-history-card';
+      card.innerHTML =
+        '<div class="race-history-card-date">' + escapeHtml(dateText) + '</div>' +
+        '<div class="race-history-card-title">' + escapeHtml(row.articleTitle || '未知文章') + '</div>' +
+        '<div class="race-history-card-meta"><span>' + escapeHtml(rankText) + '</span><span>' + escapeHtml(speedText) + '</span></div>';
+      cards.appendChild(card);
+    }
+  });
+  renderRaceHistoryPagination(p);
+}
+async function loadRaceHistory(page) {
+  if (!currentUser) return;
+  page = Math.max(1, parseInt(page, 10) || 1);
+  try {
+    var res = await fetch('/api/user/race-history?page=' + page + '&limit=10', {
+      headers: { 'Authorization': 'Bearer ' + getToken() }
+    });
+    if (!res.ok) return;
+    renderRaceHistory(await res.json());
+  } catch (e) {
+    console.error('Failed to load race history:', e);
   }
 }
 
