@@ -57,6 +57,7 @@
 | 21 | ~~P35.4~~ | 代码编辑器可见性（K-43）：补 `.code-input:focus{background:transparent;box-shadow:none;border:0;outline:0}`；像素级 A/B 证明聚焦后墨迹 4938 vs 旧规则 16 | `P35.4-代码编辑器可见性修复.md` `3ed0bf1ae903654f` | **已验收通过**（`docs/reports/P35.4-验收记录.md`） |
 | 22 | **P37** | 服务端韧性 + 端口漂移 + SW 不缓存管理接口（启动自证/EPIPE/EADDRINUSE/横幅已实测通过；SW 有未定义变量，见 P37.1） | `P37-服务端韧性与端口漂移.md` `6c2d1b4c2a7f820f` | **验收不通过**（`docs/reports/P37-验收记录.md`：SW 未定义变量），出 P37.1 |
 | 23 | **P37.1** | **SW 未定义变量修复**：`service-worker.js:294` 引用未声明的 `NETWORK_ONLY_PREFIXES` → SW 每个请求抛 `ReferenceError`（Chrome 兜底走网络，但离线能力全废）。补常量 + 横幅文案改「检测到 :x 有服务」 | `P37.1-SW未定义变量修复.md` `6eb6a982042dd86e` | 待下发（只改 `service-worker.js`/`nav.js`，不用重启） |
+| 24 | **P38** | **P0 比赛 90% 打字区消失**：`race-fx-sprint` 既当徽标元素类又当容器状态类 → ≥90% 时 `.race-main` 被 `display:none`。状态类改名 `race-sprint-active` + 徽标规则收窄作用域（含 K-45） | `P38-比赛90%打字区消失修复.md` `a9fd425945acb416` | **待下发（最高优先，不用重启）** |
 
 ---
 
