@@ -247,6 +247,357 @@ const txtUpload = multer({
 let db;
 let currentConfig;
 
+/* ---------- 管理端备份与恢复 ---------- */
+const BACKUP_DIR = path.join(__dirname, 'backups');
+const BACKUP_TMP_DIR = path.join(__dirname, 'tmp');
+const BACKUP_MAX_KEEP = 10;
+// 预恢复备份也以 backup- 开头、以 -pre-restore 结尾，下载/删除仍走同一白名单
+const BACKUP_NAME_RE = /^backup-\d{8}-\d{6}-[0-9.]+(?:-pre-restore)?\.zip$/;
+let backupTaskBusy = false;
+
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+function backupStamp(date) {
+  const d = date || new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+function uniqueBackupName(preRestore) {
+  ensureDir(BACKUP_DIR);
+  let offset = 0;
+  while (offset < 120) {
+    const stamp = backupStamp(new Date(Date.now() + offset * 1000));
+    const name = `backup-${stamp}-${versionInfo.version}${preRestore ? '-pre-restore' : ''}.zip`;
+    if (!fs.existsSync(path.join(BACKUP_DIR, name))) return name;
+    offset += 1;
+  }
+  throw new Error('同一分钟内备份文件过多，请稍后再试');
+}
+function parseBackupName(name) {
+  const m = name.match(/^backup-(\d{8})-(\d{6})-([0-9.]+)(-pre-restore)?\.zip$/);
+  if (!m) return null;
+  return { name, stamp: m[1] + '-' + m[2], version: m[3], preRestore: !!m[4] };
+}
+function sha256File(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+function resolveDbPathFromConfig() {
+  const cfg = currentConfig || loadConfig();
+  if (cfg.type === 'mysql') return null;
+  return path.resolve(__dirname, (cfg.sqlite && cfg.sqlite.path) || './data/typing.db');
+}
+function restorePendingPath() {
+  return path.join(__dirname, 'data', 'restore-pending.json');
+}
+function sqliteHandle() {
+  return db && db._rawType === 'sqlite' && db._sqlite ? db._sqlite : null;
+}
+function inspectSqliteSnapshot(file) {
+  const Database = require('better-sqlite3');
+  const snapshot = new Database(file, { readonly: true, fileMustExist: true });
+  try {
+    const row = snapshot.prepare("SELECT value FROM settings WHERE `key` = 'schema_version'").get();
+    const count = (table) => snapshot.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
+    return {
+      schemaVersion: row ? row.value : null,
+      counts: { users: count('users'), articles: count('articles'), scores: count('scores') }
+    };
+  } finally {
+    snapshot.close();
+  }
+}
+function runPowershell(command, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    execFile('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      { timeout: timeoutMs || 120000, windowsHide: true, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          err.stderr = stderr;
+          reject(err);
+          return;
+        }
+        resolve(stdout);
+      });
+  });
+}
+function psQuote(value) {
+  return String(value).replace(/'/g, "''");
+}
+function zipDirectory(stageDir, zipPath) {
+  const cmd = "Compress-Archive -Path '" + psQuote(path.join(stageDir, '*')) +
+    "' -DestinationPath '" + psQuote(zipPath) + "' -CompressionLevel Optimal -Force";
+  return runPowershell(cmd, 120000);
+}
+function expandZip(zipPath, destDir) {
+  const cmd = "Expand-Archive -LiteralPath '" + psQuote(zipPath) +
+    "' -DestinationPath '" + psQuote(destDir) + "' -Force";
+  return runPowershell(cmd, 120000);
+}
+function copyDirectoryFiles(srcDir, destDir) {
+  ensureDir(destDir);
+  for (const name of fs.readdirSync(srcDir)) {
+    const src = path.join(srcDir, name);
+    if (fs.statSync(src).isFile()) fs.copyFileSync(src, path.join(destDir, name));
+  }
+}
+function stageBackupFiles(stageDir, snapshotPath, options) {
+  ensureDir(stageDir);
+  fs.copyFileSync(snapshotPath, path.join(stageDir, 'typing.db'));
+  for (const file of ['VERSION', 'CONTRACT_VERSION', 'version.json']) {
+    const src = path.join(__dirname, file);
+    if (fs.existsSync(src)) fs.copyFileSync(src, path.join(stageDir, file));
+  }
+  if (!fs.existsSync(path.join(stageDir, 'version.json'))) {
+    fs.writeFileSync(path.join(stageDir, 'version.json'),
+      JSON.stringify({ version: versionInfo.version, name: versionInfo.name, fullName: versionInfo.fullName }, null, 2) + '\n', 'utf8');
+  }
+  if (options.includeDbConfig) {
+    const cfg = path.join(__dirname, 'db-config.json');
+    if (fs.existsSync(cfg)) fs.copyFileSync(cfg, path.join(stageDir, 'db-config.json'));
+  }
+  if (options.includeAvatars) copyDirectoryFiles(avatarDir, path.join(stageDir, 'public', 'avatars'));
+}
+function removeBackupFiles(name) {
+  fs.rmSync(path.join(BACKUP_DIR, name), { force: true });
+  fs.rmSync(path.join(BACKUP_DIR, name + '.meta.json'), { force: true });
+}
+function pruneBackups() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) return;
+    const names = fs.readdirSync(BACKUP_DIR).filter((n) => BACKUP_NAME_RE.test(n)).sort();
+    const overflow = names.length - BACKUP_MAX_KEEP;
+    for (let i = 0; i < overflow; i++) {
+      console.log('[备份] 保留策略删除 ' + names[i]);
+      removeBackupFiles(names[i]);
+    }
+  } catch (e) {
+    console.error('[备份] 清理旧备份失败', e.message);
+  }
+}
+async function createBackupPackage(options) {
+  options = options || {};
+  const sqlite = sqliteHandle();
+  if (!sqlite) {
+    const err = new Error('当前数据库类型不支持在线备份');
+    err.status = 400;
+    throw err;
+  }
+  ensureDir(BACKUP_DIR);
+  ensureDir(BACKUP_TMP_DIR);
+  const name = uniqueBackupName(!!options.preRestore);
+  const zipPath = path.join(BACKUP_DIR, name);
+  const token = Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex');
+  const snapshotPath = path.join(BACKUP_TMP_DIR, 'backup-snapshot-' + token + '.db');
+  const stageDir = path.join(BACKUP_TMP_DIR, 'backup-stage-' + token);
+  let completed = false;
+  try {
+    await sqlite.backup(snapshotPath);
+    const snapshotStat = fs.statSync(snapshotPath);
+    if (!snapshotStat.size) throw new Error('数据库快照为空');
+    const snapshotInfo = inspectSqliteSnapshot(snapshotPath);
+    const includeDbConfig = !!(options.includeDbConfig && fs.existsSync(path.join(__dirname, 'db-config.json')));
+    const includeAvatars = !!(options.includeAvatars && fs.existsSync(avatarDir));
+    stageBackupFiles(stageDir, snapshotPath, { includeDbConfig, includeAvatars });
+    const manifest = {
+      createdAt: new Date().toISOString(),
+      appVersion: versionInfo.version,
+      contractVersion: versionInfo.contractVersion,
+      dbSchemaVersion: snapshotInfo.schemaVersion || null,
+      dbBytes: snapshotStat.size,
+      counts: snapshotInfo.counts,
+      includesDbConfig: includeDbConfig,
+      includesAvatars: includeAvatars,
+      preRestore: !!options.preRestore,
+      sourceBackup: options.sourceBackup || null,
+      sha256: sha256File(snapshotPath)
+    };
+    fs.writeFileSync(path.join(stageDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+    await zipDirectory(stageDir, zipPath);
+    const meta = {
+      name,
+      bytes: fs.statSync(zipPath).size,
+      createdAt: formatDateTime(Date.now()),
+      appVersion: manifest.appVersion,
+      includesDbConfig: includeDbConfig,
+      includesAvatars: includeAvatars,
+      preRestore: !!options.preRestore
+    };
+    fs.writeFileSync(zipPath + '.meta.json', JSON.stringify(meta, null, 2), 'utf8');
+    pruneBackups();
+    completed = true;
+    return meta;
+  } finally {
+    try { fs.rmSync(stageDir, { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(snapshotPath, { force: true }); } catch (e) {}
+    if (!completed) {
+      try { fs.rmSync(zipPath, { force: true }); } catch (e) {}
+      try { fs.rmSync(zipPath + '.meta.json', { force: true }); } catch (e) {}
+    }
+  }
+}
+function listBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR)
+    .filter((n) => BACKUP_NAME_RE.test(n))
+    .map((name) => {
+      const stat = fs.statSync(path.join(BACKUP_DIR, name));
+      const parsed = parseBackupName(name) || {};
+      let meta = null;
+      try { meta = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, name + '.meta.json'), 'utf8')); } catch (e) {}
+      return {
+        name,
+        bytes: stat.size,
+        createdAt: formatDateTime(stat.mtimeMs),
+        version: parsed.version || '',
+        includesDbConfig: !!(meta && meta.includesDbConfig),
+        includesAvatars: !!(meta && meta.includesAvatars),
+        preRestore: !!(parsed.preRestore || (meta && meta.preRestore))
+      };
+    })
+    .sort((a, b) => b.name.localeCompare(a.name));
+}
+function queueRestore(snapshotFile, manifest, originalName) {
+  const dbPath = resolveDbPathFromConfig();
+  if (!dbPath) {
+    const err = new Error('当前数据库类型不支持恢复');
+    err.status = 400;
+    throw err;
+  }
+  ensureDir(path.dirname(dbPath));
+  const importPath = dbPath + '.import';
+  fs.copyFileSync(snapshotFile, importPath);
+  if (fs.statSync(importPath).size <= 0) {
+    fs.rmSync(importPath, { force: true });
+    throw new Error('导入文件为空');
+  }
+  const pending = {
+    fileName: originalName || path.basename(snapshotFile),
+    createdAt: new Date().toISOString(),
+    appVersion: manifest.appVersion || '',
+    contractVersion: manifest.contractVersion || '',
+    dbSchemaVersion: manifest.dbSchemaVersion || '',
+    importBytes: fs.statSync(importPath).size
+  };
+  fs.writeFileSync(restorePendingPath(), JSON.stringify(pending, null, 2), 'utf8');
+  return pending;
+}
+function backupError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+async function extractAndValidateBackup(zipPath, extractDir) {
+  try {
+    await expandZip(zipPath, extractDir);
+  } catch (e) {
+    throw backupError(400, '备份文件已损坏');
+  }
+  const manifestPath = path.join(extractDir, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) throw backupError(400, '不是本系统的备份文件');
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (e) {
+    throw backupError(400, '不是本系统的备份文件');
+  }
+  const dbFile = path.join(extractDir, 'typing.db');
+  if (!fs.existsSync(dbFile) || !manifest || typeof manifest.sha256 !== 'string' || !manifest.sha256) {
+    throw backupError(400, '不是本系统的备份文件');
+  }
+  if (sha256File(dbFile) !== manifest.sha256) throw backupError(400, '备份文件已损坏');
+  let info;
+  try {
+    info = inspectSqliteSnapshot(dbFile);
+  } catch (e) {
+    throw backupError(400, '备份文件已损坏');
+  }
+  if (!info.schemaVersion) throw backupError(400, '备份文件已损坏');
+  if (manifest.contractVersion && manifest.contractVersion !== versionInfo.contractVersion) {
+    throw backupError(400, '备份的数据规范版本不兼容');
+  }
+  return { manifest, dbFile };
+}
+async function applyPendingRestore() {
+  const pendingPath = restorePendingPath();
+  if (!fs.existsSync(pendingPath)) return false;
+  let pending;
+  try {
+    pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+  } catch (e) {
+    console.error('[恢复] 读取待恢复标记失败', e.message);
+    return false;
+  }
+  const dbPath = resolveDbPathFromConfig();
+  if (!dbPath) {
+    console.error('[恢复] 当前为 MySQL，无法应用 SQLite 备份');
+    return false;
+  }
+  const importPath = dbPath + '.import';
+  if (!fs.existsSync(importPath) || fs.statSync(importPath).size <= 0) {
+    console.error('[恢复] import 文件缺失或为空，保持现库启动');
+    return false;
+  }
+  const suffix = '.pre-restore-' + backupStamp();
+  const moved = [];
+  try {
+    if (fs.existsSync(dbPath)) {
+      fs.renameSync(dbPath, dbPath + suffix);
+      moved.push([dbPath + suffix, dbPath]);
+    }
+    for (const ext of ['-wal', '-shm']) {
+      if (fs.existsSync(dbPath + ext)) {
+        fs.renameSync(dbPath + ext, dbPath + ext + suffix);
+        moved.push([dbPath + ext + suffix, dbPath + ext]);
+      }
+    }
+    fs.renameSync(importPath, dbPath);
+  } catch (e) {
+    console.error('[恢复] 应用失败，保持现库', e.message);
+    for (const item of moved.reverse()) {
+      try {
+        if (fs.existsSync(item[0]) && !fs.existsSync(item[1])) fs.renameSync(item[0], item[1]);
+      } catch (rollbackError) {
+        console.error('[恢复] 回滚失败', rollbackError.message);
+      }
+    }
+    return false;
+  }
+  try { fs.rmSync(pendingPath, { force: true }); } catch (e) { console.error('[恢复] 删除待恢复标记失败', e.message); }
+  console.log('[恢复] 已应用 ' + (pending.fileName || path.basename(importPath)));
+  return true;
+}
+
+const backupUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      try { ensureDir(BACKUP_TMP_DIR); cb(null, BACKUP_TMP_DIR); } catch (e) { cb(e); }
+    },
+    filename: (req, file, cb) => cb(null, 'restore-upload-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex') + '.zip')
+  }),
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (path.extname(file.originalname || '').toLowerCase() === '.zip') cb(null, true);
+    else cb(new Error('仅支持 .zip 备份文件'));
+  }
+});
+function acquireBackupTask(req, res, next) {
+  if (backupTaskBusy) return res.status(409).json({ error: '已有备份任务在进行' });
+  backupTaskBusy = true;
+  next();
+}
+function backupUploadSingle(req, res, next) {
+  backupUpload.single('file')(req, res, function (err) {
+    if (err) {
+      backupTaskBusy = false;
+      if (req.file && req.file.path) { try { fs.rmSync(req.file.path, { force: true }); } catch (e) {} }
+      const message = err.code === 'LIMIT_FILE_SIZE' ? '备份文件不能超过 100 MB' : (err.message || '上传失败');
+      return res.status(400).json({ error: message });
+    }
+    next();
+  });
+}
+
 async function initDatabase() {
   currentConfig = loadConfig();
   db = await createDatabase(currentConfig);
@@ -2431,6 +2782,107 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
   }
 });
 
+app.post('/api/admin/backup/create', authMiddleware, adminMiddleware, acquireBackupTask, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const meta = await createBackupPackage({
+      includeDbConfig: body.includeDbConfig === true,
+      includeAvatars: body.includeAvatars === true
+    });
+    res.json(meta);
+  } catch (e) {
+    const status = e.status || 500;
+    if (status >= 500) console.error('[备份] 创建失败', e.message);
+    res.status(status).json({ error: status === 500 ? ('创建备份失败：' + e.message) : e.message });
+  } finally {
+    backupTaskBusy = false;
+  }
+});
+
+app.get('/api/admin/backup/list', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    res.json({
+      backups: listBackups(),
+      pendingRestore: fs.existsSync(restorePendingPath())
+    });
+  } catch (e) {
+    console.error('[备份] 列出备份失败', e.message);
+    res.status(500).json({ error: '读取备份列表失败' });
+  }
+});
+
+app.get('/api/admin/backup/download/:name', authMiddleware, adminMiddleware, (req, res) => {
+  const name = req.params.name;
+  if (!BACKUP_NAME_RE.test(name)) return res.status(400).json({ error: '备份文件名不合法' });
+  const filePath = path.join(BACKUP_DIR, name);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: '备份文件不存在' });
+  res.download(filePath, name, (err) => {
+    if (err && !res.headersSent) {
+      res.status(500).json({ error: '下载备份失败' });
+    }
+  });
+});
+
+app.delete('/api/admin/backup/:name', authMiddleware, adminMiddleware, (req, res) => {
+  const name = req.params.name;
+  if (!BACKUP_NAME_RE.test(name)) return res.status(400).json({ error: '备份文件名不合法' });
+  const filePath = path.join(BACKUP_DIR, name);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: '备份文件不存在' });
+  try {
+    removeBackupFiles(name);
+    console.log('[备份] 已删除 ' + name);
+    res.json({ success: true });
+  } catch (e) {
+    console.error('[备份] 删除失败', e.message);
+    res.status(500).json({ error: '删除备份失败' });
+  }
+});
+
+app.post('/api/admin/backup/restore', authMiddleware, adminMiddleware, acquireBackupTask, backupUploadSingle, async (req, res) => {
+  const uploadPath = req.file && req.file.path;
+  const extractDir = path.join(BACKUP_TMP_DIR, 'restore-extract-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'));
+  try {
+    if (!req.file) throw backupError(400, '请选择备份文件');
+    const validated = await extractAndValidateBackup(uploadPath, extractDir);
+    try {
+      await createBackupPackage({
+        includeDbConfig: false,
+        includeAvatars: false,
+        preRestore: true,
+        sourceBackup: req.file.originalname
+      });
+    } catch (e) {
+      console.error('[恢复] 恢复前备份失败', e.message);
+      throw backupError(500, '恢复前备份失败');
+    }
+    queueRestore(validated.dbFile, validated.manifest, req.file.originalname);
+    res.json({ success: true, needRestart: true, message: '恢复已排队，重启服务后生效' });
+  } catch (e) {
+    const status = e.status || 500;
+    if (status >= 500) console.error('[恢复] 失败', e.message);
+    if (!res.headersSent) res.status(status).json({ error: e.message });
+  } finally {
+    if (uploadPath) { try { fs.rmSync(uploadPath, { force: true }); } catch (e) {} }
+    try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch (e) {}
+    backupTaskBusy = false;
+  }
+});
+
+app.post('/api/admin/backup/restore/cancel', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const dbPath = resolveDbPathFromConfig() || path.join(__dirname, 'data', 'typing.db');
+    const importPath = dbPath + '.import';
+    let cancelled = false;
+    if (fs.existsSync(importPath)) { fs.rmSync(importPath, { force: true }); cancelled = true; }
+    const pendingPath = restorePendingPath();
+    if (fs.existsSync(pendingPath)) { fs.rmSync(pendingPath, { force: true }); cancelled = true; }
+    res.json({ success: true, cancelled });
+  } catch (e) {
+    console.error('[恢复] 取消失败', e.message);
+    res.status(500).json({ error: '取消恢复失败' });
+  }
+});
+
 app.get('/api/bootstrap/status', async (req, res) => {
   try {
     const needsBootstrap = !(await hasAdminUser());
@@ -4172,7 +4624,7 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-initDatabase().then(() => {
+applyPendingRestore().then(() => initDatabase()).then(() => {
   startRaceCleanup();
   app.listen(PORT, '0.0.0.0', async () => {
     console.log(`打字练习服务器已启动 [${versionInfo.fullName}]：`);

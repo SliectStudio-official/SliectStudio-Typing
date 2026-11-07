@@ -78,3 +78,10 @@
 拉取用的 Figma personal access token 只写在 `tmp/.figma-token`（`tmp/` 已在 .gitignore），
 只放在 HTTP 请求头里，不进命令行参数、不进日志。任务结束后建议到 Figma
 `Settings → Security → Personal access tokens` 撤销该 token。
+
+## 原型清单
+
+| 文件 | 用途 |
+| --- | --- |
+| `index.html` | 首页仪表盘设计画布（历史设计稿） |
+| `code-mode-prototype.html` | **代码模式交互原型**：VSCode 式输入框、渐隐原文、回显输入、Tab 缩进辅助、Enter 不辅助换行、禁粘贴、行号与统计。单文件，双击即可用 |

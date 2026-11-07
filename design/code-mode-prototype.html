@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>代码模式原型 · VSCode 式输入框</title>
+<style>
+:root{--bg:#0b0d12;--panel:#12151d;--line:#20242f;--ink:#e8e8e8;--muted:rgba(255,255,255,.30);--ok:#d8d8d8;--bad:#ff5d5d;--assist:rgba(120,190,255,.55);--caret:#7cc4ff;--accent:#f54e00;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Cascadia Mono","Courier New",monospace}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;display:flex;flex-direction:column;min-height:100%}
+.top{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.top h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
+.top .tag{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 8px}
+.top .spacer{flex:1}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{background:transparent;color:var(--muted);border:0;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.seg button.on{background:rgba(255,255,255,.08);color:var(--ink)}
+.btn{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;font-family:inherit}
+.btn:hover{border-color:rgba(255,255,255,.28)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.stats{display:flex;gap:22px;padding:12px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap;font-size:13px}
+.stats b{font-family:var(--mono);font-weight:600;font-size:15px}
+.stats span{color:var(--muted)}
+.stats .v{color:var(--ink)}
+.wrap{flex:1;padding:18px;overflow:auto}
+.frame{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;max-width:1100px;margin:0 auto}
+.frame-head{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted);font-family:var(--mono)}
+.dot{width:9px;height:9px;border-radius:50%;background:#3a3f4b}
+.editor{display:flex;overflow:auto;max-height:60vh;cursor:text}
+.gutter{padding:16px 10px 16px 16px;text-align:right;color:rgba(255,255,255,.18);font-family:var(--mono);font-size:14px;line-height:24px;user-select:none;position:sticky;left:0;background:var(--panel);z-index:2}
+.code{position:relative;padding:16px 20px 16px 0;flex:1;min-width:0}
+.layer{font-family:var(--mono);font-size:14px;line-height:24px;letter-spacing:0;tab-size:2;white-space:pre;margin:0}
+#ghost{color:var(--muted);pointer-events:none;min-height:24px;width:max-content;min-width:100%}
+#ghost .c.ch-pending{color:var(--muted)}
+#ghost .c.ch-ok{color:var(--ok)}
+#ghost .c.ch-bad{color:var(--bad);text-decoration:underline wavy rgba(255,93,93,.7);text-underline-offset:3px}
+#ghost .c.ch-assist{color:var(--assist)}
+#ghost .c.ch-bad.ch-typed{background:rgba(255,93,93,.14);border-radius:2px}
+#ghost .nl{position:relative}
+#ghost .nl::after{content:"¬";position:absolute;right:-14px;color:rgba(255,93,93,.75);font-size:11px}
+#input{position:absolute;inset:16px 20px 16px 0;border:0;outline:0;background:transparent;color:transparent;caret-color:var(--caret);font-family:var(--mono);font-size:14px;line-height:24px;letter-spacing:0;tab-size:2;white-space:pre;resize:none;overflow:hidden;padding:0;margin:0}
+#input::selection{background:rgba(124,196,255,.22)}
+.hint{display:flex;gap:16px;flex-wrap:wrap;padding:10px 18px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--ink)}
+.result{max-width:1100px;margin:14px auto 0;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);display:none}
+.result.show{display:block}
+.result h2{margin:0 0 8px;font-size:14px}
+.result .row{display:flex;gap:24px;flex-wrap:wrap;font-size:13px;font-family:var(--mono)}
+@media (max-width:560px){.stats{gap:14px}.wrap{padding:10px}.top{padding:10px 12px}}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>代码模式原型</h1>
+  <span class="tag">VSCode 式输入框</span>
+  <span class="tag">渐隐原文 · 回显输入 · 缩进辅助</span>
+  <span class="spacer"></span>
+  <div class="seg" id="langs"></div>
+  <button class="btn" id="reset">重来</button>
+  <button class="btn" id="toggleAssist">显示辅助字符</button>
+</div>
+<div class="stats">
+  <div><span>进度</span> <b class="v" id="s-progress">0%</b></div>
+  <div><span>速度</span> <b class="v" id="s-speed">0</b> <span>字符/分</span></div>
+  <div><span>准确率</span> <b class="v" id="s-acc">100%</b></div>
+  <div><span>错误次数</span> <b class="v" id="s-errors">0</b></div>
+  <div><span>用时</span> <b class="v" id="s-time">0.0</b> <span>秒</span></div>
+</div>
+<div class="wrap">
+  <div class="frame">
+    <div class="frame-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span id="fname" style="margin-left:8px"></span></div>
+    <div class="editor" id="editor">
+      <div class="gutter" id="gutter"></div>
+      <div class="code">
+        <pre class="layer" id="ghost"></pre>
+        <textarea class="layer" id="input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" wrap="off"></textarea>
+      </div>
+    </div>
+    <div class="hint">
+      <span><kbd>Tab</kbd> 补齐缩进（不计入击键）</span>
+      <span><kbd>Enter</kbd> 换行（不自动跳过，必须自己按）</span>
+      <span>禁止粘贴</span>
+      <span>错字退格可以改，错误次数照记</span>
+    </div>
+  </div>
+  <div class="result" id="result">
+    <h2>完成</h2>
+    <div class="row">
+      <div>击键 <b id="r-typed">0</b></div>
+      <div>正确 <b id="r-correct">0</b></div>
+      <div>准确率 <b id="r-acc">100%</b></div>
+      <div>错误次数 <b id="r-errors">0</b></div>
+      <div>用时 <b id="r-time">0.0</b> 秒</div>
+      <div>速度 <b id="r-speed">0</b> 字符/分</div>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  "use strict";
+
+  var SAMPLES = [
+    {
+      lang: "JavaScript",
+      file: "sum.js",
+      code: ["function sum(list) {", "  let total = 0;", "  for (const x of list) {", "    total += x;", "  }", "  return total;", "}", "", "console.log(sum([1, 2, 3]));"].join("\n")
+    },
+    {
+      lang: "Python",
+      file: "count.py",
+      code: ["def count_words(text):", "  words = text.split()", "  result = {}", "  for w in words:", "    result[w] = result.get(w, 0) + 1", "  return result", "", "print(count_words(\"a b a\"))"].join("\n")
+    },
+    {
+      lang: "SQL",
+      file: "top.sql",
+      code: ["SELECT u.name, COUNT(*) AS n", "FROM scores s", "JOIN users u ON u.id = s.user_id", "WHERE s.speed > 100", "GROUP BY u.name", "ORDER BY n DESC", "LIMIT 5;"].join("\n")
+    }
+  ];
+
+  var el = {};
+  var IDS = {
+    ghost: "ghost", input: "input", gutter: "gutter", editor: "editor", langs: "langs",
+    fname: "fname", progress: "s-progress", speed: "s-speed", acc: "s-acc",
+    errors: "s-errors", time: "s-time", result: "result"
+  };
+  Object.keys(IDS).forEach(function (k) { el[k] = document.getElementById(IDS[k]); });
+
+  var state = { idx: 0, text: "", assisted: [], errorSet: {}, startedAt: 0, finished: false, showAssist: false };
+
+  function esc(ch) {
+    if (ch === "&") return "&amp;";
+    if (ch === "<") return "&lt;";
+    if (ch === ">") return "&gt;";
+    return ch;
+  }
+
+  function loadSample(i) {
+    state.idx = i;
+    state.text = SAMPLES[i].code;
+    state.assisted = new Array(state.text.length).fill(false);
+    state.errorSet = {};
+    state.startedAt = 0;
+    state.finished = false;
+    el.fname.textContent = SAMPLES[i].file;
+    el.input.value = "";
+    el.input.disabled = false;
+    el.result.classList.remove("show");
+    renderLangs();
+    renderGutter();
+    render();
+    syncHeight();
+  }
+
+  function renderLangs() {
+    el.langs.innerHTML = "";
+    SAMPLES.forEach(function (s, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = s.lang;
+      if (i === state.idx) b.className = "on";
+      b.addEventListener("click", function () { loadSample(i); el.input.focus(); });
+      el.langs.appendChild(b);
+    });
+  }
+
+  function renderGutter() {
+    var lines = state.text.split("\n").length;
+    var out = [];
+    for (var i = 1; i <= lines; i++) out.push(i);
+    el.gutter.textContent = out.join("\n");
+  }
+
+  function stats() {
+    var v = el.input.value;
+    var typed = 0;
+    var correct = 0;
+    for (var i = 0; i < v.length; i++) {
+      var isAssist = state.assisted[i] === true;
+      if (!isAssist) typed += 1;
+      if (v[i] === state.text[i] && !isAssist) correct += 1;
+    }
+    var errors = 0;
+    for (var k in state.errorSet) { if (state.errorSet[k]) errors += 1; }
+    var elapsed = state.startedAt ? (Date.now() - state.startedAt) / 1000 : 0;
+    var speed = (elapsed > 0.5 && typed > 0) ? Math.round(typed / elapsed * 60) : 0;
+    var acc = typed > 0 ? Math.round(correct / typed * 1000) / 10 : 100;
+    return { typed: typed, correct: correct, errors: errors, elapsed: elapsed, speed: speed, acc: acc };
+  }
+
+  function render() {
+    var v = el.input.value;
+    var html = "";
+    for (var i = 0; i < state.text.length; i++) {
+      var ch = state.text[i];
+      var typedHere = i < v.length;
+      if (ch === "\n") {
+        if (typedHere && v[i] !== "\n") html += "<span class=\"c ch-bad ch-typed\">&#8629;</span>";
+        html += "\n";
+        continue;
+      }
+      var ok = typedHere && v[i] === ch;
+      var cls = "c ch-pending";
+      var shown = ch;
+      if (typedHere) {
+        shown = v[i];
+        if (ok) cls = state.assisted[i] && state.showAssist ? "c ch-assist" : "c ch-ok";
+        else cls = "c ch-bad ch-typed";
+      }
+      if (shown === " ") shown = "&#183;";
+      else shown = esc(shown);
+      html += "<span class=\"" + cls + "\">" + shown + "</span>";
+    }
+    el.ghost.innerHTML = html;
+    var s = stats();
+    el.progress.textContent = Math.min(100, Math.round(v.length / Math.max(1, state.text.length) * 100)) + "%";
+    el.speed.textContent = s.speed;
+    el.acc.textContent = s.acc + "%";
+    el.errors.textContent = s.errors;
+    el.time.textContent = s.elapsed.toFixed(1);
+    if (!state.finished && v.length >= state.text.length) finish(s);
+  }
+
+  function finish(s) {
+    state.finished = true;
+    el.input.disabled = true;
+    document.getElementById("r-typed").textContent = s.typed;
+    document.getElementById("r-correct").textContent = s.correct;
+    document.getElementById("r-acc").textContent = s.acc + "%";
+    document.getElementById("r-errors").textContent = s.errors;
+    document.getElementById("r-time").textContent = s.elapsed.toFixed(1);
+    document.getElementById("r-speed").textContent = s.speed;
+    el.result.classList.add("show");
+  }
+
+  function syncHeight() {
+    if (!el.input || !el.ghost) return;
+    el.input.style.height = "auto";
+    el.input.style.height = Math.max(el.ghost.scrollHeight, 24) + "px";
+  }
+
+  function insertText(str, markAssist) {
+    var start = el.input.selectionStart;
+    var end = el.input.selectionEnd;
+    var v = el.input.value;
+    var next = v.slice(0, start) + str + v.slice(end);
+    var assist = state.assisted.slice(0, start);
+    for (var i = 0; i < str.length; i++) assist.push(!!markAssist);
+    for (var j = end; j < state.assisted.length; j++) assist.push(state.assisted[j]);
+    if (next.length > state.text.length) {
+      next = next.slice(0, state.text.length);
+      assist = assist.slice(0, state.text.length);
+    }
+    while (assist.length < next.length) assist.push(false);
+    state.assisted = assist;
+    el.input.value = next;
+    var caret = Math.min(start + str.length, next.length);
+    el.input.setSelectionRange(caret, caret);
+    if (!state.startedAt) state.startedAt = Date.now();
+    recordErrors();
+    syncHeight();
+    render();
+  }
+
+  function recordErrors() {
+    var v = el.input.value;
+    for (var i = 0; i < v.length; i++) {
+      if (v[i] !== state.text[i] && !state.assisted[i]) state.errorSet[i] = true;
+    }
+  }
+
+  function handleTab() {
+    var pos = el.input.selectionStart;
+    var run = 0;
+    while (run < 8 && state.text[pos + run] === " ") run += 1;
+    if (run > 0) {
+      insertText(new Array(run + 1).join(" "), true);
+      return;
+    }
+    var v = el.input.value;
+    var col = v.slice(v.lastIndexOf("\n", pos - 1) + 1, pos).length;
+    var need = 2 - (col % 2);
+    if (need <= 0) need = 2;
+    insertText(new Array(need + 1).join(" "), false);
+  }
+
+  function handleEnter() {
+    var pos = el.input.selectionStart;
+    var nl = state.text.indexOf("\n", pos);
+    var indent = "";
+    if (nl >= 0) {
+      var m = state.text.slice(nl + 1).match(/^ */);
+      indent = m ? m[0] : "";
+      if (indent.length > 8) indent = indent.slice(0, 8);
+    }
+    var str = "\n" + indent;
+    var exact = state.text.slice(pos, pos + str.length) === str;
+    insertText(str, exact);
+  }
+
+  el.input.addEventListener("keydown", function (e) {
+    if (state.finished) return;
+    if (e.key === "Tab") { e.preventDefault(); handleTab(); return; }
+    if (e.key === "Enter") { e.preventDefault(); handleEnter(); return; }
+  });
+
+  el.input.addEventListener("input", function () {
+    if (state.finished) return;
+    var v = el.input.value;
+    if (v.length > state.text.length) { v = v.slice(0, state.text.length); el.input.value = v; }
+    if (state.assisted.length > v.length) state.assisted.length = v.length;
+    while (state.assisted.length < v.length) state.assisted.push(false);
+    if (!state.startedAt && v.length > 0) state.startedAt = Date.now();
+    recordErrors();
+    syncHeight();
+    render();
+  });
+
+  el.input.addEventListener("paste", function (e) { e.preventDefault(); });
+  el.input.addEventListener("drop", function (e) { e.preventDefault(); });
+  el.editor.addEventListener("click", function () { if (!state.finished) el.input.focus(); });
+  document.getElementById("reset").addEventListener("click", function () { loadSample(state.idx); el.input.focus(); });
+  document.getElementById("toggleAssist").addEventListener("click", function () {
+    state.showAssist = !state.showAssist;
+    this.textContent = state.showAssist ? "隐藏辅助字符" : "显示辅助字符";
+    render();
+  });
+  window.addEventListener("resize", function () { syncHeight(); });
+
+  loadSample(0);
+  el.input.focus();
+})();
+</script>
+</body>
+</html>

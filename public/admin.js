@@ -75,6 +75,30 @@ const dashTotalArticles = document.getElementById('dash-total-articles');
 const dashPendingArticles = document.getElementById('dash-pending-articles');
 const weeklyUsersChart = document.getElementById('weekly-users-chart');
 
+const backupIncludeConfig = document.getElementById('backup-include-config');
+const backupIncludeAvatars = document.getElementById('backup-include-avatars');
+const backupCreateBtn = document.getElementById('backup-create-btn');
+const backupCreateMsg = document.getElementById('backup-create-msg');
+const backupTableWrap = document.getElementById('backup-table-wrap');
+const backupListBody = document.getElementById('backup-list-body');
+const backupEmpty = document.getElementById('backup-empty');
+const backupListMsg = document.getElementById('backup-list-msg');
+const backupPendingBanner = document.getElementById('backup-pending-banner');
+const backupPendingText = document.getElementById('backup-pending-text');
+const backupCancelRestoreBtn = document.getElementById('backup-cancel-restore-btn');
+const backupRestoreFile = document.getElementById('backup-restore-file');
+const backupRestoreBtn = document.getElementById('backup-restore-btn');
+const backupRestoreMsg = document.getElementById('backup-restore-msg');
+const backupRestoreModal = document.getElementById('backup-restore-modal');
+const backupRestoreSummary = document.getElementById('backup-restore-summary');
+const backupRestoreInput = document.getElementById('backup-restore-input');
+const backupRestoreModalMsg = document.getElementById('backup-restore-modal-msg');
+const backupRestoreCancel = document.getElementById('backup-restore-cancel');
+const backupRestoreConfirm = document.getElementById('backup-restore-confirm');
+let backupList = [];
+let backupRestoreTarget = null;
+let backupBusy = false;
+
 const pendingArticlesList = document.getElementById('pending-articles-list');
 const pendingEmpty = document.getElementById('pending-empty');
 
@@ -2330,6 +2354,226 @@ if (raceSettingsSaveBtn) raceSettingsSaveBtn.addEventListener('click', saveRaceS
 const raceMembersCloseBtn = document.getElementById('race-members-close');
 if (raceMembersCloseBtn) raceMembersCloseBtn.addEventListener('click', hideRaceMembers);
 
+function formatBackupBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+function setBackupNote(el, text, isError) {
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.color = isError ? 'var(--semantic-error)' : '';
+}
+async function backupRequest(url, options) {
+  const res = await fetch(url, options || {});
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+  return data;
+}
+function renderBackupList() {
+  if (!backupListBody) return;
+  backupTableWrap.style.display = backupList.length ? 'block' : 'none';
+  backupEmpty.style.display = backupList.length ? 'none' : 'block';
+  backupListBody.innerHTML = '';
+  backupList.forEach(function (item) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td data-label="文件名"><span class="backup-file-name">' + escapeHtml(item.name) + '</span>' +
+        (item.preRestore ? ' <span class="race-admin-member-tag">pre-restore</span>' : '') + '</td>' +
+      '<td data-label="创建时间">' + escapeHtml(item.createdAt) + '</td>' +
+      '<td data-label="大小">' + formatBackupBytes(item.bytes) + '</td>' +
+      '<td data-label="版本">' + escapeHtml(item.version || '—') + '</td>' +
+      '<td data-label="含配置">' + (item.includesDbConfig ? '是' : '否') + (item.includesAvatars ? '（含头像）' : '') + '</td>' +
+      '<td data-label="操作"><div class="backup-actions">' +
+        '<button class="btn-secondary" data-backup-action="download" data-name="' + escapeHtml(item.name) + '">下载</button>' +
+        '<button class="btn-secondary" data-backup-action="restore" data-name="' + escapeHtml(item.name) + '">恢复</button>' +
+        '<button class="btn-secondary" data-backup-action="delete" data-name="' + escapeHtml(item.name) + '">删除</button>' +
+      '</div></td>';
+    backupListBody.appendChild(tr);
+  });
+}
+async function loadBackups() {
+  try {
+    setBackupNote(backupListMsg, '');
+    const data = await backupRequest('/api/admin/backup/list', { headers: apiHeaders() });
+    backupList = Array.isArray(data.backups) ? data.backups : [];
+    renderBackupList();
+    if (data.pendingRestore) {
+      backupPendingText.textContent = '已排队 1 份恢复，重启服务后生效';
+      backupPendingBanner.style.display = 'flex';
+    } else {
+      backupPendingBanner.style.display = 'none';
+    }
+  } catch (e) {
+    console.error('读取备份列表失败', e);
+    setBackupNote(backupListMsg, '读取备份列表失败：' + e.message, true);
+  }
+}
+async function createBackup() {
+  if (backupBusy) return;
+  backupBusy = true;
+  const oldText = backupCreateBtn.textContent;
+  backupCreateBtn.disabled = true;
+  backupCreateBtn.textContent = '备份中…';
+  setBackupNote(backupCreateMsg, '正在生成一致性快照并打包…');
+  try {
+    const meta = await backupRequest('/api/admin/backup/create', {
+      method: 'POST', headers: apiHeaders(),
+      body: JSON.stringify({
+        includeDbConfig: !!(backupIncludeConfig && backupIncludeConfig.checked),
+        includeAvatars: !!(backupIncludeAvatars && backupIncludeAvatars.checked)
+      })
+    });
+    setBackupNote(backupCreateMsg, '已生成 ' + meta.name + '（' + formatBackupBytes(meta.bytes) + '）');
+    await loadBackups();
+  } catch (e) {
+    setBackupNote(backupCreateMsg, '备份失败：' + e.message, true);
+  } finally {
+    backupBusy = false;
+    backupCreateBtn.disabled = false;
+    backupCreateBtn.textContent = oldText;
+  }
+}
+async function downloadBackup(name) {
+  setBackupNote(backupListMsg, '正在下载 ' + name + '…');
+  const token = getToken();
+  const res = await fetch('/api/admin/backup/download/' + encodeURIComponent(name), {
+    headers: token ? { Authorization: 'Bearer ' + token } : {}
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error((data && data.error) || ('HTTP ' + res.status));
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  setBackupNote(backupListMsg, '已下载 ' + name);
+}
+async function restoreFromBackup(name) {
+  setBackupNote(backupListMsg, '正在读取备份 ' + name + '…');
+  const token = getToken();
+  const res = await fetch('/api/admin/backup/download/' + encodeURIComponent(name), {
+    headers: token ? { Authorization: 'Bearer ' + token } : {}
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error((data && data.error) || ('HTTP ' + res.status));
+  }
+  const blob = await res.blob();
+  openBackupRestoreModal(new File([blob], name, { type: 'application/zip' }), name);
+  setBackupNote(backupListMsg, '');
+}
+function syncBackupRestoreButton() {
+  backupRestoreConfirm.disabled = backupBusy || backupRestoreInput.value.trim() !== '恢复';
+}
+function openBackupRestoreModal(file, label) {
+  backupRestoreTarget = file;
+  backupRestoreSummary.textContent = '将恢复：' + label + '（' + formatBackupBytes(file.size) + '）。恢复会先自动备份当前数据库，重启服务后生效。';
+  backupRestoreInput.value = '';
+  backupRestoreModalMsg.textContent = '';
+  syncBackupRestoreButton();
+  backupRestoreModal.style.display = 'flex';
+  backupRestoreInput.focus();
+}
+function closeBackupRestoreModal() {
+  backupRestoreTarget = null;
+  backupRestoreInput.value = '';
+  backupRestoreModalMsg.textContent = '';
+  backupRestoreModal.style.display = 'none';
+}
+async function uploadBackupRestore() {
+  if (backupBusy || !backupRestoreTarget || backupRestoreInput.value.trim() !== '恢复') return;
+  backupBusy = true;
+  backupRestoreConfirm.disabled = true;
+  backupRestoreCancel.disabled = true;
+  backupRestoreConfirm.textContent = '恢复中…';
+  backupRestoreModalMsg.textContent = '';
+  setBackupNote(backupRestoreMsg, '正在上传并校验备份…');
+  try {
+    const fd = new FormData();
+    fd.append('file', backupRestoreTarget);
+    const token = getToken();
+    const data = await backupRequest('/api/admin/backup/restore', {
+      method: 'POST',
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+      body: fd
+    });
+    closeBackupRestoreModal();
+    setBackupNote(backupRestoreMsg, data.message || '恢复已排队，重启服务后生效');
+    await loadBackups();
+  } catch (e) {
+    backupRestoreModalMsg.textContent = '恢复失败：' + e.message;
+    setBackupNote(backupRestoreMsg, '恢复失败：' + e.message, true);
+  } finally {
+    backupBusy = false;
+    backupRestoreCancel.disabled = false;
+    backupRestoreConfirm.textContent = '确认恢复';
+    syncBackupRestoreButton();
+  }
+}
+async function cancelPendingRestore() {
+  if (backupBusy) return;
+  if (!confirm('确定取消已排队的恢复？重启后仍会使用当前数据库。')) return;
+  const oldText = backupCancelRestoreBtn.textContent;
+  backupCancelRestoreBtn.disabled = true;
+  backupCancelRestoreBtn.textContent = '取消中…';
+  try {
+    await backupRequest('/api/admin/backup/restore/cancel', { method: 'POST', headers: apiHeaders(), body: '{}' });
+    setBackupNote(backupListMsg, '已取消排队恢复');
+    await loadBackups();
+  } catch (e) {
+    setBackupNote(backupListMsg, '取消恢复失败：' + e.message, true);
+  } finally {
+    backupCancelRestoreBtn.disabled = false;
+    backupCancelRestoreBtn.textContent = oldText;
+  }
+}
+if (backupCreateBtn) backupCreateBtn.addEventListener('click', createBackup);
+if (backupRestoreBtn) backupRestoreBtn.addEventListener('click', function () {
+  if (backupBusy) return;
+  const file = backupRestoreFile.files && backupRestoreFile.files[0];
+  if (!file) { setBackupNote(backupRestoreMsg, '请先选择 .zip 备份文件', true); return; }
+  if (!/\.zip$/i.test(file.name)) { setBackupNote(backupRestoreMsg, '仅支持 .zip 备份文件', true); return; }
+  if (file.size > 100 * 1024 * 1024) { setBackupNote(backupRestoreMsg, '备份文件不能超过 100 MB', true); return; }
+  openBackupRestoreModal(file, file.name);
+});
+if (backupRestoreInput) backupRestoreInput.addEventListener('input', syncBackupRestoreButton);
+if (backupRestoreCancel) backupRestoreCancel.addEventListener('click', closeBackupRestoreModal);
+if (backupRestoreConfirm) backupRestoreConfirm.addEventListener('click', uploadBackupRestore);
+if (backupCancelRestoreBtn) backupCancelRestoreBtn.addEventListener('click', cancelPendingRestore);
+if (backupListBody) backupListBody.addEventListener('click', function (e) {
+  const btn = e.target.closest('button[data-backup-action]');
+  if (!btn || backupBusy) return;
+  const name = btn.dataset.name;
+  const action = btn.dataset.backupAction;
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '处理中…';
+  (async function () {
+    try {
+      if (action === 'download') await downloadBackup(name);
+      else if (action === 'restore') await restoreFromBackup(name);
+      else if (action === 'delete') {
+        if (!confirm('确定删除备份 ' + name + '？此操作不可恢复。')) return;
+        await backupRequest('/api/admin/backup/' + encodeURIComponent(name), { method: 'DELETE', headers: apiHeaders() });
+        setBackupNote(backupListMsg, '已删除 ' + name);
+        await loadBackups();
+      }
+    } catch (err) {
+      setBackupNote(backupListMsg, '操作失败：' + err.message, true);
+    } finally {
+      if (btn.isConnected) { btn.disabled = false; btn.textContent = oldText; }
+    }
+  })();
+});
+
 const sectionLoaders = {
   overview: () => loadDashboard(),
   users: () => loadUsers(),
@@ -2345,6 +2589,7 @@ const sectionLoaders = {
     await loadDatabaseTables();
   },
   races: () => loadRaceRooms(),
+  backup: () => loadBackups(),
   crawler: () => Promise.resolve()
 };
 const loadedSections = new Set();
