@@ -109,11 +109,11 @@
 
 | 项 | 值 |
 | --- | --- |
-| 产物版本 | 3.0.261106.2038（真值 `VERSION`）；`package.json` 镜像 3.0.0 |
+| 产物版本 | **3.2.261107.2004**（真值 `VERSION`）；`package.json` 镜像 3.2.0；tag `v3.2.261107.2004` |
 | 数据规范版本 | **v3**（真值 `CONTRACT_VERSION`，库内 `schema_version`=v3，见 ADR-0003） |
 | 依赖 | bcryptjs、better-sqlite3、compression、express、jsonwebtoken、multer、mysql2（无新增） |
 | 环境 | Windows 10/11 x64 + **Node.js 25.3.0**；SQLite `data/typing.db`；**只允许单进程运行** |
 | 测试 | 0 条自动化（无测试框架；验收＝命令清单） |
-| 审计条目 | **42 条坑**，已修 41；剩 K-37/K-38（流程与理解纪律）、K-17（取舍不修） |
+| 审计条目 | **42 条坑**，已修 40 + 纪律 2 + 取舍 1；剩 K-37/K-38（流程与理解纪律）、K-17（取舍不修） |
 | 角色切换 | 5 次，已结案见 `docs/reports/角色切换登记.md` |
 | 契约 | `AGENTS.md`（冻结清单含 Node 25.3.0、VERSION、CONTRACT_VERSION；§2 已登记设计四问模板） |
