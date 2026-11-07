@@ -207,6 +207,7 @@ function activateProfileTab(tab, updateHash) {
     setTimeout(function () { try { statsChart.resize(); } catch (e) {} }, 0);
   }
   if (tab === 'race-history' && typeof loadRaceHistory === 'function') loadRaceHistory(1);
+  loadProfilePanelData(tab);
 }
 function initProfileTabs() {
   var sidebar = document.getElementById('profile-sidebar');
@@ -236,6 +237,21 @@ function initProfileTabs() {
   }
 }
 
+
+var profilePanelLoaded = {};
+function loadProfilePanelData(tab) {
+  if (!currentUser || profilePanelLoaded[tab]) return;
+  if (tab === 'overview' || tab === 'practice-history' || tab === 'account' || tab === 'race-history') {
+    profilePanelLoaded[tab] = true;
+    return;
+  }
+  profilePanelLoaded[tab] = true;
+  if (tab === 'errors') loadErrorLog();
+  else if (tab === 'submissions') loadSubmittedArticles();
+  else if (tab === 'private') loadPrivateArticles();
+  else if (tab === 'offline') loadOfflineArticlesManage();
+}
+
 async function showProfile() {
   accessDenied.style.display = 'none';
   profileContent.style.display = '';
@@ -246,14 +262,33 @@ async function showProfile() {
   }
 
   await Promise.all([loadProfile(), loadHistory(1)]);
+  loadOverviewRaceStats();
   activateProfileTab(location.hash.slice(1), false);
   scheduleIdle(() => {
     loadStats(7);
-    loadErrorLog();
-    loadSubmittedArticles();
-    loadPrivateArticles();
-    loadOfflineArticlesManage();
   });
+}
+
+async function loadOverviewRaceStats() {
+  try {
+    const res = await fetch('/api/user/race-stats', { headers: { 'Authorization': 'Bearer ' + getToken() } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const raced = Number(data.racedCount) || 0;
+    const finished = Number(data.finishedCount) || 0;
+    const winrate = raced > 0 ? (Number(data.winRate) || 0) + '%' : '—';
+    const best = data.bestRank == null ? '—' : '第 ' + data.bestRank + ' 名';
+    var el = document.getElementById('overview-race-raced');
+    if (el) el.textContent = String(raced);
+    el = document.getElementById('overview-race-winrate');
+    if (el) el.textContent = winrate;
+    el = document.getElementById('overview-race-best');
+    if (el) el.textContent = best;
+    el = document.getElementById('overview-race-finished');
+    if (el) el.textContent = String(finished);
+  } catch (e) {
+    console.error('Failed to load race overview:', e);
+  }
 }
 
 async function loadProfile() {
