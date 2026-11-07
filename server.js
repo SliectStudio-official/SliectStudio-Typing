@@ -119,6 +119,7 @@ function getAssetHash(key, checkedKeys) {
 }
 
 const HTML_PAGES = ['/', '/home.html', '/index.html', '/admin.html', '/profile.html', '/setup.html', '/race.html'];
+const BOOTSTRAP_REDIRECT_PAGES = new Set(['/', '/home.html', '/index.html']);
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -136,7 +137,17 @@ app.use(compression({
   }
 }));
 app.use(express.json({ limit: '1mb' }));
-app.get(HTML_PAGES, (req, res, next) => {
+app.get(HTML_PAGES, async (req, res, next) => {
+  // 首次引导只在这四个页面入口判定一次，其余页面不做额外查询
+  if (BOOTSTRAP_REDIRECT_PAGES.has(req.path) || req.path === '/setup.html') {
+    try {
+      const needsBootstrap = !(await hasAdminUser());
+      if (needsBootstrap && req.path !== '/setup.html') return res.redirect(302, '/setup.html');
+      if (!needsBootstrap && req.path === '/setup.html') return res.redirect(302, '/');
+    } catch (e) {
+      console.error('[引导] 检查初始化状态失败', e);
+    }
+  }
   const fileName = req.path === '/' ? 'home.html' : req.path.slice(1);
   fs.readFile(path.join(publicDir, fileName), 'utf8', (err, html) => {
     if (err) return next();
@@ -2433,7 +2444,7 @@ app.post('/api/bootstrap/create-admin', async (req, res) => {
   try {
     const ip = req.ip || '';
     if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
-      return res.status(403).json({ error: '首次初始化只允许在服务器本机进行' });
+      return res.status(403).json({ error: '首次初始化只能在服务器本机用 http://localhost:3000 打开' });
     }
     if (await hasAdminUser()) {
       return res.status(400).json({ error: '管理员账户已存在' });

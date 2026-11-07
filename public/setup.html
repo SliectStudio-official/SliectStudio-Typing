@@ -85,6 +85,20 @@
     .setup-form .error.show {
       display: block;
     }
+    .setup-alert {
+      display: none;
+      margin-bottom: 18px;
+      padding: 12px 14px;
+      border: 1px solid var(--semantic-error);
+      border-radius: 10px;
+      background: rgba(181, 51, 51, 0.08);
+      color: var(--semantic-error);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .setup-alert.show {
+      display: block;
+    }
     .setup-form button[type="submit"] {
       width: 100%;
       padding: 14px;
@@ -164,6 +178,7 @@
           <p>首次使用，请创建管理员账户</p>
         </div>
         <form class="setup-form" id="setup-form">
+          <div class="setup-alert" id="setup-alert" role="alert"></div>
           <div class="form-group">
             <label for="username">管理员用户名 *</label>
             <input type="text" id="username" name="username" placeholder="请输入用户名" autocomplete="off" required>
@@ -211,11 +226,54 @@
         var el = document.getElementById(id);
         if (el) { el.textContent = msg; el.classList.add('show'); }
       }
+      function showAlert(msg) {
+        var el = document.getElementById('setup-alert');
+        if (el) { el.textContent = msg; el.classList.add('show'); }
+      }
       function clearErrors() {
         document.querySelectorAll('.error').forEach(function(el) {
           el.textContent = '';
           el.classList.remove('show');
         });
+        var alert = document.getElementById('setup-alert');
+        if (alert) { alert.textContent = ''; alert.classList.remove('show'); }
+      }
+      function resetSubmit() {
+        submitBtn.disabled = false;
+        submitBtn.textContent = '创建管理员账户';
+      }
+      // 先确认响应确实是 JSON；不是 JSON 时给出具体 HTTP 码，不能只说“请求失败”
+      function readJson(res) {
+        var ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (ct.indexOf('application/json') < 0) {
+          var err = new Error('服务器返回异常（HTTP ' + res.status + '）');
+          err.httpStatus = res.status;
+          throw err;
+        }
+        return res.json().catch(function() {
+          var err = new Error('服务器返回异常（HTTP ' + res.status + '）');
+          err.httpStatus = res.status;
+          throw err;
+        });
+      }
+      function requestJson(url, opts) {
+        return fetch(url, opts).then(function(res) {
+          return readJson(res).then(function(data) {
+            if (!res.ok) {
+              var err = new Error((data && data.error) || ('服务器返回异常（HTTP ' + res.status + '）'));
+              err.status = res.status;
+              err.data = data;
+              throw err;
+            }
+            return data;
+          });
+        });
+      }
+      function fieldForError(msg) {
+        if (msg.indexOf('用户名') >= 0 || msg.indexOf('存在') >= 0) return 'username-error';
+        if (msg.indexOf('密码') >= 0) return 'password-error';
+        if (msg.indexOf('邮箱') >= 0) return 'email-error';
+        return null;
       }
 
       form.addEventListener('submit', function(e) {
@@ -245,49 +303,59 @@
         submitBtn.disabled = true;
         submitBtn.textContent = '创建中...';
 
-        fetch('/api/bootstrap/create-admin', {
+        requestJson('/api/bootstrap/create-admin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: username, email: email, password: password, passwordConfirm: passwordConfirm })
         })
-        .then(function(res) { return res.json(); })
         .then(function(data) {
-          if (data.error) {
-            if (data.error.includes('用户名') || data.error.includes('存在')) {
-              showError('username-error', data.error);
-            } else if (data.error.includes('密码')) {
-              showError('password-error', data.error);
-            } else {
-              showError('password-confirm-error', data.error);
-            }
-            submitBtn.disabled = false;
-            submitBtn.textContent = '创建管理员账户';
-          } else if (data.token) {
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-            formContainer.style.display = 'none';
-            successDiv.classList.add('show');
-            setTimeout(function() {
-              window.location.href = 'index.html';
-            }, 2000);
+          if (!data || !data.token) {
+            throw new Error('服务器返回异常（HTTP 200）');
           }
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          formContainer.style.display = 'none';
+          successDiv.classList.add('show');
+          setTimeout(function() {
+            window.location.href = 'index.html';
+          }, 2000);
         })
         .catch(function(err) {
-          showError('password-confirm-error', '请求失败，请稍后重试');
-          submitBtn.disabled = false;
-          submitBtn.textContent = '创建管理员账户';
+          resetSubmit();
+          var msg = err && err.message ? err.message : '服务器返回异常';
+          if (err && err.status === 403) {
+            showAlert(msg);
+            return;
+          }
+          var field = fieldForError(msg);
+          if (field) {
+            showError(field, msg);
+            return;
+          }
+          if (!err || (!err.status && !err.httpStatus)) {
+            showAlert('无法连接服务器（网络错误）');
+            return;
+          }
+          showAlert(msg);
         });
       });
 
-      // 检查是否已完成初始化
-      fetch('/api/bootstrap/status')
-        .then(function(res) { return res.json(); })
+      // 检查是否已完成初始化；检查失败必须给出具体原因，不能把表单留在那里假装正常
+      requestJson('/api/bootstrap/status', { cache: 'no-store' })
         .then(function(data) {
           if (!data.needsBootstrap) {
-            window.location.href = 'index.html';
+            window.location.replace('/');
           }
         })
-        .catch(function() {});
+        .catch(function(err) {
+          var msg;
+          if (err && err.status) msg = '无法连接服务器（HTTP ' + err.status + '）';
+          else if (err && err.httpStatus) msg = '服务器返回异常（HTTP ' + err.httpStatus + '）';
+          else msg = '无法连接服务器（网络错误）';
+          showAlert(msg);
+          submitBtn.disabled = true;
+          submitBtn.textContent = '无法连接服务器，请刷新重试';
+        });
     })();
   </script>
 </body>
