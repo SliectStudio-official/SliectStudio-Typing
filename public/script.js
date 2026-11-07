@@ -357,6 +357,10 @@ difficultyFilter.addEventListener('change', () => {
 });
 
 function hideLoadingOverlay() {
+  if (window.PageLoading) {
+    window.PageLoading.done();
+    return;
+  }
   document.body.classList.remove('loading');
   const overlay = document.getElementById('page-loading-overlay');
   if (overlay) {

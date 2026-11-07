@@ -4105,6 +4105,9 @@ button:focus-visible,
 .race-player-name { flex: 1; display: flex; align-items: center; gap: 8px; color: var(--ink); }
 .race-tag { font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--surface-strong); color: var(--body); }
 .race-tag-host { background: var(--primary-lightest); color: var(--primary-active); }
+.race-tag-offline { background: transparent; border: 1px solid var(--hairline-strong); color: var(--muted); }
+.race-player-row.race-player-offline .race-player-name { color: var(--muted); }
+.race-player-row.race-player-offline .race-ready-off { color: var(--muted-soft); }
 .race-ready-on { color: var(--primary); font-size: 13px; }
 .race-ready-off { color: var(--muted); font-size: 13px; }
 
@@ -4490,6 +4493,12 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 /* ===== 解散比赛投票（H 组） ===== */
 .race-dissolve-card { color: var(--body); }
 .race-dissolve-title { font-family: var(--font-display); font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.race-dissolve-meta { margin: -4px 0 8px; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.race-dissolve-card.race-dissolve-needed-changed { animation: raceDissolveNeededFlash 300ms var(--ease-out); }
+@keyframes raceDissolveNeededFlash {
+  0% { box-shadow: 0 0 0 2px var(--primary-lightest); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 .race-dissolve-blocks { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
 .race-dissolve-seg { flex: 1 1 0; min-width: 18px; height: 8px; border-radius: 6px; background: var(--hairline-strong); }
 .race-dissolve-seg.filled { background: var(--primary); }
@@ -5216,4 +5225,31 @@ body.fx-paused #view-dashboard .dash-quick.is-matching { animation-play-state: p
 
 @media (prefers-reduced-motion: reduce) {
   .race-reveal-item, .race-reveal-stage.is-gathered .race-reveal-item, .race-reveal-stage .race-reveal-item.is-winner, .race-reveal-stage.is-leaving .race-reveal-item.is-winner { transition: none !important; }
+}
+
+/* P29：全站首屏加载遮罩（从 index.html 内联样式迁入；page-loading.js 同步注入 critical 副本） */
+.page-loading-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  background: var(--canvas);
+  transition: opacity .3s ease, visibility .3s ease;
+}
+.page-loading-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+.page-loading-spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--hairline);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: page-loading-spin .8s linear infinite;
+}
+@keyframes page-loading-spin { to { transform: rotate(360deg); } }
+.page-loading-text { font-family: var(--font-body); font-size: 14px; color: var(--muted); }
+.page-loading-overlay.is-error .page-loading-text { color: var(--semantic-error); }
+body.loading .container, body.loading nav, body.loading .sub-nav { filter: blur(4px); pointer-events: none; }
+body.loading { overflow: hidden; }
+body.home-page .page-loading-overlay { background: #05070d; }
+body.home-page .page-loading-text { color: rgba(255,255,255,.55); }
+body.home-page .page-loading-spinner {
+  border-color: rgba(255,255,255,.16);
+  border-top-color: var(--primary);
 }

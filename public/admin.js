@@ -2389,6 +2389,8 @@ async function init() {
     loadedSections.add('categories');
   } catch (e) {
     console.error('管理后台初始化失败', e);
+  } finally {
+    if (window.PageLoading) window.PageLoading.done();
   }
 }
 

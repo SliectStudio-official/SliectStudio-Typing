@@ -7,7 +7,9 @@ const CRITICAL_ASSETS = [
   '/style.css',
   '/script.js',
   '/custom-select.js',
-  '/loading-indicator.js'
+  '/loading-indicator.js',
+  '/page-loading.js',
+  '/race.html'
 ];
 
 let cacheNamePromise = null;
@@ -24,6 +26,7 @@ function getCacheName() {
         precacheAssets = Object.keys(data.files).map(p => p + '?v=' + data.files[p]);
         if (!precacheAssets.includes('/index.html')) precacheAssets.push('/index.html');
         if (!precacheAssets.includes('/home.html')) precacheAssets.push('/home.html');
+        if (!precacheAssets.includes('/race.html')) precacheAssets.push('/race.html');
         return 'typing-' + data.version;
       } catch (e) {
         cacheNamePromise = null;

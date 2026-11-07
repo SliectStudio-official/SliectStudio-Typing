@@ -169,7 +169,7 @@
   }
   function loadProfile() {
     if (!state.token) { setGuest(); return; }
-    api('/api/user/profile').then(applyProfile).catch(function (e) {
+    return api('/api/user/profile').then(applyProfile).catch(function (e) {
       if (e.status === 401) {
         localStorage.removeItem('token');
         state.token = null;
@@ -181,7 +181,7 @@
   }
   function loadStats() {
     if (!state.token) return;
-    Promise.all([
+    return Promise.all([
       api('/api/user/stats').catch(function () { return null; }),
       api('/api/user/race-stats').catch(function () { return null; })
     ]).then(function (rows) {
@@ -198,7 +198,7 @@
     });
   }
   function loadVersion() {
-    fetch('/api/version').then(readJson).then(function (v) {
+    return fetch('/api/version').then(readJson).then(function (v) {
       if (v && v.version && $('dash-version')) $('dash-version').textContent = 'Typing-' + v.version;
     }).catch(function () {});
   }
@@ -592,9 +592,13 @@
     state.token = getToken();
     fit();
     bind();
-    loadVersion();
-    loadProfile();
-    loadStats();
+    Promise.all([
+      loadVersion(),
+      loadProfile(),
+      loadStats()
+    ].map(function (p) { return Promise.resolve(p).catch(function () {}); })).then(function () {
+      if (window.PageLoading) window.PageLoading.done();
+    });
     loadContinue();
     initMatch();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('service-worker.js').catch(function () {});

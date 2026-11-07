@@ -18,8 +18,18 @@
     combo: 0, comboAnnounced: 0, selfNickname: null,
     revealKey: null, revealTimers: [], revealInterval: null,
     quickMatchActive: false, quickMatchTimer: null, quickMatchPollTimer: null,
-    quickMatchPollInFlight: false
+    quickMatchPollInFlight: false,
+    dissolveNeeded: null,
+    bootList: false, bootRestore: false, bootRoomPending: false, pageLoadingDone: false
   };
+
+  function finishPageLoading(roomReady) {
+    if (state.pageLoadingDone) return;
+    if (roomReady || (!state.bootRoomPending && state.bootList && state.bootRestore)) {
+      state.pageLoadingDone = true;
+      if (window.PageLoading) window.PageLoading.done();
+    }
+  }
 
   var $ = function (id) { return document.getElementById(id); };
   function esc(s) {
@@ -139,8 +149,14 @@
     });
   }
   function refreshList() {
-    api('/api/race/list').then(renderList).catch(function (e) {
+    return api('/api/race/list').then(function (list) {
+      renderList(list);
+      state.bootList = true;
+      finishPageLoading(false);
+    }).catch(function (e) {
       $('room-list').innerHTML = '<div class="race-empty">' + esc(e.message) + '</div>';
+      state.bootList = true;
+      finishPageLoading(false);
     });
   }
   /* ---------- 快速匹配（大厅按钮 = 计时 + 关闭） ---------- */
@@ -435,6 +451,8 @@
   function render() {
     var snap = state.snap;
     if (!snap) return;
+    state.bootRoomPending = false;
+    finishPageLoading(true);
     var st = snap.race.status;
     var seat = mySeat(snap);
     state.isSpectator = seat === 'spectator';
@@ -484,7 +502,8 @@
         speed: x.s == null ? null : x.s,
         accuracy: x.a == null ? null : x.a,
         timeSeconds: x.t == null ? null : x.t,
-        lastSeen: null
+        lastSeen: null,
+        offline: !!(x.offline || x.o)
       };
     });
     return snap;
@@ -501,9 +520,10 @@
   function spectatorCapacity(race) {
     return race.spectatorEnabled ? (race.spectatorSeats || 0) : 0;
   }
-  function tagHtml(isHost, isGuest) {
+  function tagHtml(isHost, isGuest, offline) {
     return (isHost ? '<span class="race-tag race-tag-host">房主</span>' : '') +
-      (isGuest ? '<span class="race-tag">游客</span>' : '');
+      (isGuest ? '<span class="race-tag">游客</span>' : '') +
+      (offline ? '<span class="race-tag race-tag-offline">掉线</span>' : '');
   }
   function makeKickButton(target) {
     var kick = document.createElement('button');
@@ -541,8 +561,8 @@
     box.innerHTML = '';
     snap.players.forEach(function (p) {
       var row = document.createElement('div');
-      row.className = 'race-player-row';
-      row.innerHTML = '<span class="race-player-name">' + esc(p.nickname) + tagHtml(p.isHost, p.isGuest) + '</span>' +
+      row.className = 'race-player-row' + (p.offline ? ' race-player-offline' : '');
+      row.innerHTML = '<span class="race-player-name">' + esc(p.nickname) + tagHtml(p.isHost, p.isGuest, p.offline) + '</span>' +
         '<span class="' + (p.ready ? 'race-ready-on' : 'race-ready-off') + '">' + (p.ready ? '已准备' : '未准备') + '</span>';
       if (isHost && !p.isHost) {
         var toSpec = document.createElement('button');
@@ -1445,11 +1465,20 @@
     admin: '管理员已解散房间'
   };
 
+  function dissolveRuleSnap(snap) {
+    if (snap && snap.race && snap.race.dissolveRule) return snap.race.dissolveRule;
+    var players = snap && snap.players ? snap.players : [];
+    var total = players.length;
+    var online = players.filter(function (p) { return !p.offline; }).length;
+    if (online <= 1) return { mode: 'direct', needed: 1, online: online, total: total };
+    if (total <= 3) return { mode: 'vote', needed: online, online: online, total: total };
+    return { mode: 'vote', needed: Math.floor(online / 2) + 1, online: online, total: total };
+  }
+
   function exitConfig(snap) {
     var isHost = !!snap && isHostSnap(snap);
     var seat = snap ? mySeat(snap) : (state.isSpectator ? 'spectator' : 'player');
     var st = snap && snap.race ? snap.race.status : 'waiting';
-    var playerCount = snap && snap.players ? snap.players.length : 0;
     var spectatorFromPlayer = !!(snap && snap.spectator && snap.spectator.fromPlayer);
     var matchmade = !!(snap && snap.race && snap.race.matchmade);
     if (seat === 'spectator') {
@@ -1476,14 +1505,15 @@
       }
     }
     if (st === 'waiting' && isHost && seat === 'player') {
-      if (playerCount >= 3) {
-        return { label: '发起解散投票', confirm: '', title: '', text: '', action: 'dissolve', danger: true };
+      var rule = dissolveRuleSnap(snap);
+      if (rule.mode === 'direct') {
+        return {
+          label: '解散房间', confirm: '解散房间', title: '解散房间',
+          text: '当前在线 ' + rule.online + ' 人 / 共 ' + rule.total + ' 人，确认后<strong>立即解散本局</strong>，不再发起投票。',
+          action: 'dissolveDirect', danger: true
+        };
       }
-      return {
-        label: '解散房间', confirm: '解散房间', title: '解散房间',
-        text: '你是房主，解散后<strong>所有选手会被请回大厅</strong>，本局不产生成绩。',
-        action: 'leave', danger: true
-      };
+      return { label: '发起解散投票', confirm: '', title: '', text: '', action: 'dissolve', danger: true };
     }
     if (st === 'waiting') {
       return {
@@ -1511,10 +1541,10 @@
     var isHost = !!(snap && isHostSnap(snap));
     var seat = snap ? mySeat(snap) : (state.isSpectator ? 'spectator' : 'player');
     var st = snap && snap.race ? snap.race.status : 'waiting';
-    var playerCount = snap && snap.players ? snap.players.length : 0;
     var matchmade = !!(snap && snap.race && snap.race.matchmade);
-    var hostWaitingVote = isHost && seat === 'player' && st === 'waiting' && playerCount >= 3;
-    var canDissolve = hasRoom && isHost && !matchmade && ((hostWaitingVote) || st === 'countdown' || st === 'racing');
+    var rule = dissolveRuleSnap(snap);
+    var hostWaitingVote = isHost && seat === 'player' && st === 'waiting' && rule.mode === 'vote';
+    var canDissolve = hasRoom && isHost && !matchmade && (hostWaitingVote || st === 'countdown' || st === 'racing');
     var dissolveBtn = $('btn-dissolve-race');
     if (!canDissolve) {
       if (dissolveBtn) dissolveBtn.remove();
@@ -1531,7 +1561,7 @@
       dissolveBtn.style.display = 'inline-flex';
       dissolveBtn.textContent = '发起解散投票';
     }
-    var showExit = hasRoom && (matchmade || !(isHost && seat === 'player' && st === 'waiting' && playerCount >= 3));
+    var showExit = hasRoom && !(isHost && seat === 'player' && st === 'waiting' && hostWaitingVote);
     $('btn-exit-race').style.display = showExit ? 'inline-flex' : 'none';
     if (!hasRoom) return;
     var cfg = exitConfig(state.snap);
@@ -1565,6 +1595,7 @@
     closeExitDialog(false);
     var cfg = exitConfig(state.snap);
     if (cfg.action === 'spectateLeave') { spectateSelf('leave'); return; }
+    if (cfg.action === 'dissolveDirect') { requestDissolveStart(); return; }
     leaveRoom();
   }
 
@@ -1587,6 +1618,8 @@
     for (var i = 0; i < d.needed; i++) {
       blocks += '<span class="race-dissolve-seg' + (i < d.agreed ? ' filled' : '') + '"></span>';
     }
+    var online = d.online != null ? d.online : snap.players.filter(function (p) { return !p.offline; }).length;
+    var total = d.total != null ? d.total : snap.players.length;
     var buttons = '';
     var myVote = d.myVote || null;
     if (seat === 'player') {
@@ -1598,6 +1631,7 @@
     if (isHost) buttons += '<button class="race-btn race-btn-small race-btn-ghost race-dissolve-withdraw">撤回</button>';
     return '<div class="race-dissolve-card">' +
       '<div class="race-dissolve-title">房主发起了解散投票</div>' +
+      '<div class="race-dissolve-meta">在线 ' + online + ' 人 / 共 ' + total + ' 人 · 掉线者不计票</div>' +
       '<div class="race-dissolve-blocks" id="race-dissolve-blocks" role="progressbar" aria-valuenow="' + d.agreed + '" aria-valuemin="0" aria-valuemax="' + d.needed + '">' + blocks + '</div>' +
       '<div class="race-dissolve-count">' + d.agreed + '/' + d.needed + ' 人同意 · 剩余 ' + dissolveRemaining(snap) + 's</div>' +
       '<div class="race-dissolve-actions">' + buttons + '</div>' +
@@ -1609,7 +1643,12 @@
       var el = $(id);
       if (el) { el.style.display = 'none'; el.innerHTML = ''; }
     });
-    if (!snap || !snap.dissolve) return;
+    if (!snap || !snap.dissolve) {
+      state.dissolveNeeded = null;
+      return;
+    }
+    var d = snap.dissolve;
+    var prevNeeded = state.dissolveNeeded;
     var seat = mySeat(snap);
     var isHost = isHostSnap(snap);
     var st = snap.race.status;
@@ -1618,8 +1657,14 @@
     else if (seat === 'spectator') target = 'race-dissolve-spectate';
     var el = $(target);
     if (!el) return;
-    el.innerHTML = dissolveCardHtml(snap, snap.dissolve, seat, isHost);
+    el.innerHTML = dissolveCardHtml(snap, d, seat, isHost);
     el.style.display = 'block';
+    var card = el.querySelector('.race-dissolve-card');
+    if (card && prevNeeded != null && prevNeeded !== d.needed) {
+      card.classList.add('race-dissolve-needed-changed');
+      setTimeout(function () { card.classList.remove('race-dissolve-needed-changed'); }, 300);
+    }
+    state.dissolveNeeded = d.needed;
     var agree = el.querySelector('.race-dissolve-agree');
     var reject = el.querySelector('.race-dissolve-reject');
     var withdraw = el.querySelector('.race-dissolve-withdraw');
@@ -1641,6 +1686,8 @@
           state.snap.dissolve.agreed = r.agreed;
           state.snap.dissolve.needed = r.needed;
           state.snap.dissolve.total = r.total;
+          state.snap.dissolve.online = r.online;
+          state.snap.dissolve.mode = r.mode;
           renderDissolve(state.snap);
         }
         tick();
@@ -1656,10 +1703,16 @@
   function openDissolveDialog() {
     var snap = state.snap;
     if (!snap) return;
-    var count = snap.players.length;
-    $('race-dissolve-text').innerHTML = count < 3
-      ? '房间内不足 3 人，确认后<strong>立即解散本局</strong>。'
-      : '发起后需要<strong>超过一半的人同意</strong>（当前需 ' + (Math.floor(count / 2) + 1) + ' 人）才能解散，投票 30 秒内有效。';
+    var rule = dissolveRuleSnap(snap);
+    var confirmBtn = $('race-dissolve-confirm');
+    if (rule.mode === 'direct') {
+      $('race-dissolve-text').innerHTML = '当前在线 ' + rule.online + ' 人 / 共 ' + rule.total + ' 人，确认后<strong>立即解散本局</strong>，不再发起投票。';
+      if (confirmBtn) confirmBtn.textContent = '立即解散';
+    } else {
+      var modeText = rule.needed === rule.online ? '全票' : '超过半数';
+      $('race-dissolve-text').innerHTML = '在线 ' + rule.online + ' 人 / 共 ' + rule.total + ' 人，掉线者不计票。发起后需要 <strong>' + rule.needed + ' 人</strong>同意（' + modeText + '），投票 30 秒内有效。';
+      if (confirmBtn) confirmBtn.textContent = '发起解散';
+    }
     dissolveReturnFocus = document.activeElement;
     $('race-dissolve-overlay').style.display = 'flex';
     document.body.style.overflow = 'hidden';
@@ -1671,14 +1724,17 @@
     if (restoreFocus && dissolveReturnFocus && dissolveReturnFocus.focus) dissolveReturnFocus.focus();
     dissolveReturnFocus = null;
   }
-  function confirmDissolve() {
-    closeDissolveDialog(false);
+  function requestDissolveStart() {
     api('/api/race/dissolve/start', { method: 'POST', body: {} })
       .then(function (r) {
         if (r && r.result === 'cancelled') toast('房间已解散');
         tick();
       })
       .catch(function (e) { toast(e.message); });
+  }
+  function confirmDissolve() {
+    closeDissolveDialog(false);
+    requestDissolveStart();
   }
 
   /* ---------- 视图 ---------- */
@@ -1715,6 +1771,8 @@
       localStorage.removeItem('raceMatchPendingSince');
     } catch (e) {}
     try { window.dispatchEvent(new Event('race-match-cancel-local')); } catch (e) {}
+    state.bootRoomPending = false;
+    finishPageLoading(false);
     showView('lobby');
   }
   function leaveRoom() {
@@ -1740,12 +1798,15 @@
     if (!state.token && !guestToken) {
       if (lastCode) { try { localStorage.removeItem('lastRaceCode'); } catch (e) {} }
       if (queryCode) toast('请用房间码和密码加入');
+      state.bootRestore = true;
+      finishPageLoading(false);
       return;
     }
     state.raceToken = state.token || guestToken;
-    api('/api/race/active').then(function (r) {
+    return api('/api/race/active').then(function (r) {
       if (r && r.code) {
         state.isSpectator = !!r.isSpectator;
+        state.bootRoomPending = true;
         toast('已恢复上次的比赛');
         enterRoom(r.code);
         return;
@@ -1767,6 +1828,9 @@
     }).catch(function (e) {
       if (e.status === 401) state.raceToken = null;
       if (queryCode) toast('请用房间码和密码加入');
+    }).finally(function () {
+      state.bootRestore = true;
+      finishPageLoading(false);
     });
   }
 

@@ -174,7 +174,7 @@ async function checkAuth() {
     const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } });
     if (res.ok) {
       currentUser = await res.json();
-      showProfile();
+      await showProfile();
     } else {
       localStorage.removeItem('token');
       showDenied();
@@ -189,7 +189,7 @@ function showDenied() {
   profileContent.style.display = 'none';
 }
 
-function showProfile() {
+async function showProfile() {
   accessDenied.style.display = 'none';
   profileContent.style.display = '';
 
@@ -198,8 +198,7 @@ function showProfile() {
     adminNavItem.style.display = '';
   }
 
-  loadProfile();
-  loadHistory(1);
+  await Promise.all([loadProfile(), loadHistory(1)]);
   scheduleIdle(() => {
     loadStats(7);
     loadErrorLog();
@@ -1023,6 +1022,8 @@ async function initProfile() {
     await checkAuth();
   } catch (e) {
     console.error('个人中心初始化失败', e);
+  } finally {
+    if (window.PageLoading) window.PageLoading.done();
   }
 }
 
