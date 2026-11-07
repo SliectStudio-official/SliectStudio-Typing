@@ -388,6 +388,9 @@ const RACE_OFFLINE_RACING_MS = 60 * 1000;
 const RACE_OFFLINE_COUNTDOWN_MS = 30 * 1000;
 const RACE_OFFLINE_WAITING_MS = 120 * 1000;
 const RACE_DISSOLVE_MS = 30 * 1000;
+const RACE_MATCH_ROOM_TTL_MS = 60 * 60 * 1000;
+const RACE_MANUAL_DEFAULT_DURATION_MINUTES = 60;
+const RACE_MANUAL_DURATION_OPTIONS = [30, 60, 120, 180];
 const roomRegistry = new Map();
 const raceJoinFailures = new Map();
 const raceListHits = new Map();
@@ -717,6 +720,7 @@ async function createMatchedRoom(first, second, article) {
     createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
     allowSpectator: true, spectators: new Map(), matchmade: true, abandonedPlayers: [],
+    maxDurationMs: RACE_MATCH_ROOM_TTL_MS,
     dissolve: null, dissolveNotice: null
   };
   initSpectatorState(room);
@@ -793,12 +797,15 @@ async function getRaceSettings() {
   const maxRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_rooms'");
   const enabledRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_enabled'");
   const totalRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_total_players'");
+  const durationRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_duration_minutes'");
   let maxRooms = maxRow ? parseInt(maxRow.value, 10) : 20;
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) maxRooms = 20;
   let maxTotalPlayers = totalRow ? parseInt(totalRow.value, 10) : 200;
   if (!Number.isInteger(maxTotalPlayers) || maxTotalPlayers < 1 || maxTotalPlayers > 500) maxTotalPlayers = 200;
+  let maxDurationMinutes = durationRow ? parseInt(durationRow.value, 10) : 180;
+  if (!Number.isInteger(maxDurationMinutes) || maxDurationMinutes < 1 || maxDurationMinutes > 180) maxDurationMinutes = 180;
   const enabled = enabledRow ? enabledRow.value === 'true' : true;
-  return { maxRooms, enabled, maxTotalPlayers };
+  return { maxRooms, enabled, maxTotalPlayers, maxDurationMinutes };
 }
 
 async function setSetting(key, value) {
@@ -860,6 +867,9 @@ function buildSnapshot(room, player, spectator, options) {
   });
   const isHost = (player && player.userId !== null && player.userId === room.hostUserId) ||
     isSpectatorHost(room, spectator);
+  const nowMs = Date.now();
+  const maxDurationMs = room.maxDurationMs || (room.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000);
+  const remainMs = Math.max(0, room.createdAt + maxDurationMs - nowMs);
   const spectatorEntries = Array.from(room.spectators.entries());
   const spectatorTotal = spectatorEntries.length;
   var shownSpectators = spectatorEntries;
@@ -905,9 +915,12 @@ function buildSnapshot(room, player, spectator, options) {
       maxSpectators: room.maxSpectators,
       spectatorCount: room.spectators.size,
       isHost: !!isHost,
+      matchmade: room.matchmade === true,
+      maxDurationMs: maxDurationMs,
+      remainMs: remainMs,
       mySeat: player ? 'player' : (spectator ? 'spectator' : null),
       spectatorTotal: spectatorTotal,
-      serverNow: Date.now()
+      serverNow: nowMs
     };
   if (!includeContent) delete race.content;
   return {
@@ -1065,6 +1078,15 @@ async function cleanupRooms() {
         await cancelRoom(room, 'host_disconnect', null);
         continue;
       }
+      const maxDurationMs = room.maxDurationMs || (room.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000);
+      if (now - room.createdAt > maxDurationMs) {
+        if (room.status === 'racing' && !room.matchmade) {
+          await finalizeRoom(room, 'time_limit');
+        } else {
+          await cancelRoom(room, 'duration_limit', null);
+        }
+        continue;
+      }
       if (room.status === 'racing' && room.charCount > 0 && now - room.startsAt > room.charCount * 2 * 60 * 1000) {
         await finalizeRoom(room, 'time_limit');
       }
@@ -1177,6 +1199,19 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     if (!Number.isInteger(mp) || mp < 2 || mp > 100) {
       return res.status(400).json({ error: '房间人数上限必须在 2 到 100 之间' });
     }
+    const maxDurationMinutes = settings.maxDurationMinutes || 180;
+    let durationMinutes = req.body && req.body.durationMinutes !== undefined
+      ? parseInt(req.body.durationMinutes, 10)
+      : Math.min(RACE_MANUAL_DEFAULT_DURATION_MINUTES, maxDurationMinutes);
+    if (!Number.isInteger(durationMinutes) || durationMinutes < 1) {
+      return res.status(400).json({ error: '房间时长格式不正确' });
+    }
+    if (durationMinutes > maxDurationMinutes) {
+      return res.status(400).json({ error: '房间最长时长不能超过 ' + maxDurationMinutes + ' 分钟' });
+    }
+    if (req.body && req.body.durationMinutes !== undefined && RACE_MANUAL_DURATION_OPTIONS.indexOf(durationMinutes) < 0) {
+      return res.status(400).json({ error: '房间时长只能选择 30、60、120、180 分钟' });
+    }
     const usedSeats = Array.from(roomRegistry.values())
       .filter(function (r) { return isActiveRoom(r); })
       .reduce(function (sum, r) { return sum + (r.maxPlayers || 0); }, 0);
@@ -1211,6 +1246,7 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
       createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
       cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
       allowSpectator: isPublic === undefined ? true : true, spectators: new Map(),
+      maxDurationMs: durationMinutes * 60 * 1000,
       abandonedPlayers: [], dissolve: null, dissolveNotice: null
     };
     room.allowSpectator = req.body && req.body.allowSpectator === false ? false : true;
@@ -1241,7 +1277,11 @@ app.post('/api/race/match/join', authMiddleware, async (req, res) => {
     if (!settings.enabled) {
       return res.status(400).json({ error: '管理员已暂停创建比赛' });
     }
-    if (findRoomByUser(req.user.id, true) || findRoomBySpectator(req.user.id, true)) {
+    const existingRoom = findRoomByUser(req.user.id, true);
+    if (existingRoom) {
+      return res.json({ status: 'matched', code: existingRoom.code });
+    }
+    if (findRoomBySpectator(req.user.id, true)) {
       return res.status(400).json({ error: '你已在其他比赛房间中' });
     }
     let entry = findMatchEntry(req.user.id);
@@ -1498,6 +1538,12 @@ app.post('/api/race/leave', raceAuth, async (req, res) => {
     const key = playerMapKey(player);
     const wasHost = !player.isGuest && room.hostUserId === player.userId;
     if (room.status === 'waiting') {
+      if (room.matchmade === true) {
+        room.players.delete(key);
+        if (room.players.size === 0) await cancelRoom(room, 'all_left', player.userId);
+        else await cancelRoom(room, 'opponent_left', player.userId);
+        return res.json({ success: true });
+      }
       room.players.delete(key);
       if (wasHost) {
         invalidateDissolve(room, 'cancelled', 'host_leave');
@@ -1510,7 +1556,17 @@ app.post('/api/race/leave', raceAuth, async (req, res) => {
       return res.json({ success: true });
     }
     if (player.finishedAt) {
+      if (room.matchmade === true) {
+        room.players.delete(key);
+        await cancelRoom(room, 'opponent_left', player.userId);
+      }
       // 已完赛的成绩保留，退出只影响本端；结算仍需展示该名次
+      return res.json({ success: true });
+    }
+    if (room.matchmade === true) {
+      markAbandoned(room, player);
+      room.players.delete(key);
+      await cancelRoom(room, 'opponent_left', player.userId);
       return res.json({ success: true });
     }
     markAbandoned(room, player);
@@ -1756,6 +1812,9 @@ app.post('/api/race/dissolve/start', authMiddleware, async (req, res) => {
     if (!room) {
       return res.status(400).json({ error: '只有房主可以发起解散' });
     }
+    if (room.matchmade === true) {
+      return res.status(400).json({ error: '匹配对局不支持解散，只能退出' });
+    }
     if (room.status === 'finished' || room.status === 'cancelled') {
       return res.status(400).json({ error: '房间已结束' });
     }
@@ -1798,6 +1857,9 @@ app.post('/api/race/dissolve/vote', raceAuth, async (req, res) => {
       return res.status(403).json({ error: '观战者不参与投票' });
     }
     const room = ctx.room;
+    if (room.matchmade === true) {
+      return res.status(400).json({ error: '匹配对局不支持解散，只能退出' });
+    }
     if (room.status === 'finished' || room.status === 'cancelled') {
       return res.status(400).json({ error: '房间已结束' });
     }
@@ -1828,6 +1890,9 @@ app.post('/api/race/dissolve/cancel', authMiddleware, async (req, res) => {
     const room = findRoomByHost(req.user.id, true);
     if (!room) {
       return res.status(400).json({ error: '只有房主可以撤回解散' });
+    }
+    if (room.matchmade === true) {
+      return res.status(400).json({ error: '匹配对局不支持解散，只能退出' });
     }
     if (room.status === 'finished' || room.status === 'cancelled') {
       return res.status(400).json({ error: '房间已结束' });
@@ -2015,7 +2080,10 @@ app.get('/api/race/list', async (req, res) => {
         spectatorEnabled: !!r.spectatorEnabled, spectatorMode: r.spectatorMode || 'free',
         spectatorSeats: r.spectatorSeats || spectatorCap(r.maxPlayers),
         spectatorCount: r.spectators ? r.spectators.size : 0,
-        status: r.status, createdAt: r.createdAt
+        status: r.status, createdAt: r.createdAt,
+        matchmade: r.matchmade === true,
+        maxDurationMs: r.maxDurationMs || (r.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000),
+        remainMs: Math.max(0, r.createdAt + (r.maxDurationMs || (r.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000)) - Date.now())
       }));
     res.json(list);
   } catch (e) {
@@ -2078,6 +2146,9 @@ app.get('/api/race/:code', async (req, res) => {
       allowSpectator: room.allowSpectator !== false, spectatorCount: room.spectators ? room.spectators.size : 0,
       spectatorEnabled: room.spectatorEnabled !== false, spectatorMode: room.spectatorMode || 'free',
       spectatorSeats: room.spectatorSeats || spectatorCap(room.maxPlayers),
+      matchmade: room.matchmade === true,
+      maxDurationMs: room.maxDurationMs || (room.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000),
+      remainMs: Math.max(0, room.createdAt + (room.maxDurationMs || (room.matchmade ? RACE_MATCH_ROOM_TTL_MS : RACE_MANUAL_DEFAULT_DURATION_MINUTES * 60 * 1000)) - Date.now()),
       players: Array.from(room.players.values()).map(p => ({
         userId: p.userId, guestId: p.guestId, nickname: p.nickname,
         isHost: p.userId !== null && p.userId === room.hostUserId,
@@ -2157,7 +2228,8 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
     const maxRaw = body.maxRooms !== undefined ? body.maxRooms : body.race_max_rooms;
     const enabledRaw = body.enabled !== undefined ? body.enabled : body.race_enabled;
     const totalRaw = body.maxTotalPlayers !== undefined ? body.maxTotalPlayers : body.race_max_total_players;
-    if (maxRaw === undefined && enabledRaw === undefined && totalRaw === undefined) {
+    const durationRaw = body.maxDurationMinutes !== undefined ? body.maxDurationMinutes : body.race_max_duration_minutes;
+    if (maxRaw === undefined && enabledRaw === undefined && totalRaw === undefined && durationRaw === undefined) {
       return res.status(400).json({ error: '没有要更新的字段' });
     }
     if (maxRaw !== undefined) {
@@ -2181,6 +2253,13 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
         return res.status(400).json({ error: '总席位上限必须在 1 到 500 之间' });
       }
       await setSetting('race_max_total_players', String(n));
+    }
+    if (durationRaw !== undefined) {
+      const n = parseInt(durationRaw, 10);
+      if (!Number.isInteger(n) || n < 1 || n > 180) {
+        return res.status(400).json({ error: '房间最长时长必须在 1 到 180 分钟之间' });
+      }
+      await setSetting('race_max_duration_minutes', String(n));
     }
     res.json(await getRaceSettings());
   } catch (e) {

@@ -11,7 +11,9 @@
     fitTimer: null,
     notifyOpen: false,
     countRaf: null,
-    countTasks: []
+    countTasks: [],
+    matchPollTimer: null,
+    matchPollInFlight: false
   };
 
   function $(id) { return document.getElementById(id); }
@@ -216,6 +218,7 @@
     document.body.classList.toggle('is-matching', active);
     if (active) {
       card.classList.add('fx-was-matching');
+      startMatchPolling();
       try {
         var since = startedAt || Number(localStorage.getItem('raceMatchPendingSince')) || Date.now();
         if (!localStorage.getItem('raceMatchPendingSince')) localStorage.setItem('raceMatchPendingSince', String(since));
@@ -226,6 +229,7 @@
       if (!state.matchTimer) state.matchTimer = setInterval(updateMatchTimer, 250);
       updateMatchTimer();
     } else {
+      stopMatchPolling();
       title.textContent = '快速开始';
       desc.textContent = '进行 SOLO 匹配';
       if (bar) bar.classList.remove('is-visible');
@@ -242,11 +246,49 @@
     if (timer) timer.textContent = text;
     if (!localStorage.getItem('raceMatchPending')) setMatching(false);
   }
+  function clearMatchPendingFlags() {
+    try {
+      localStorage.removeItem('raceMatchPending');
+      localStorage.removeItem('raceMatchPendingSince');
+    } catch (e) {}
+  }
+  function stopMatchPolling() {
+    if (state.matchPollTimer) { clearInterval(state.matchPollTimer); state.matchPollTimer = null; }
+  }
+  function pollMatchStatus() {
+    if (!state.matchActive || state.matchPollInFlight) return;
+    if (!getToken()) return;
+    state.matchPollInFlight = true;
+    api('/api/race/match/status').then(function (data) {
+      if (!state.matchActive) return;
+      if (data && data.status === 'matched' && data.code) {
+        clearMatchPendingFlags();
+        stopMatchPolling();
+        window.location.href = 'race.html?code=' + encodeURIComponent(data.code);
+        return;
+      }
+      if (data && data.status === 'idle') {
+        clearMatchPendingFlags();
+        setMatching(false);
+      }
+      // waiting / 网络抖动：保持匹配态，不把卡片复位
+    }).catch(function () {
+      // 网络抖动不得复位卡片；下一轮继续查
+    }).then(function () {
+      state.matchPollInFlight = false;
+    });
+  }
+  function startMatchPolling() {
+    if (state.matchPollTimer) return;
+    state.matchPollTimer = setInterval(pollMatchStatus, 1500);
+    pollMatchStatus();
+  }
   function startMatch() {
     if (state.matchActive) { cancelMatch(); return; }
     if (!state.token) { window.location.href = 'index.html?login=1'; return; }
     api('/api/race/match/join', { method: 'POST', body: {} }).then(function (data) {
       if (data && data.status === 'matched' && data.code) {
+        clearMatchPendingFlags();
         window.location.href = 'race.html?code=' + encodeURIComponent(data.code);
         return;
       }
@@ -259,16 +301,14 @@
   }
   function cancelMatch() {
     setMatching(false);
-    try {
-      localStorage.removeItem('raceMatchPending');
-      localStorage.removeItem('raceMatchPendingSince');
-    } catch (e) {}
+    clearMatchPendingFlags();
     if (state.token) api('/api/race/match/cancel', { method: 'POST', body: {} }).catch(function () {});
   }
   function initMatch() {
     if (!state.token || localStorage.getItem('raceMatchPending') !== '1') return;
     api('/api/race/match/status').then(function (data) {
       if (data && data.status === 'matched' && data.code) {
+        clearMatchPendingFlags();
         window.location.href = 'race.html?code=' + encodeURIComponent(data.code);
         return;
       }
@@ -277,7 +317,8 @@
         try { localStorage.setItem('raceMatchPendingSince', String(since)); } catch (e) {}
         setMatching(true, since);
       } else {
-        cancelMatch();
+        clearMatchPendingFlags();
+        setMatching(false);
       }
     }).catch(function () {});
   }
@@ -414,6 +455,14 @@
     });
     window.addEventListener('resize', scheduleFit);
     window.addEventListener('orientationchange', scheduleFit);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && state.matchActive) pollMatchStatus();
+    });
+    window.addEventListener('focus', function () {
+      if (state.matchActive) pollMatchStatus();
+    });
+    window.addEventListener('beforeunload', stopMatchPolling);
+    window.addEventListener('pagehide', stopMatchPolling);
     bindCardEffects();
     bindVisibilityPause();
   }

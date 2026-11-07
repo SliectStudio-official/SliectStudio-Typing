@@ -15,7 +15,9 @@
     polling: false, tickInFlight: false, raceContent: null, needContent: false,
     rankExpanded: false, miniPos: new Map(), miniRaf: null, miniAnims: new Map(),
     fxPrevRank: null, fxSkipOvertake: false, fxOvertakeUntil: 0, fxOvertakeTimer: null, fxDropped: 0,
-    combo: 0, comboAnnounced: 0, selfNickname: null
+    combo: 0, comboAnnounced: 0, selfNickname: null,
+    quickMatchActive: false, quickMatchTimer: null, quickMatchPollTimer: null,
+    quickMatchPollInFlight: false
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -105,6 +107,13 @@
     }).catch(function () {});
   }
 
+  function remainText(ms) {
+    var minutes = Math.max(0, Math.ceil((Number(ms) || 0) / 60000));
+    return minutes > 0 ? '剩余 ' + minutes + ' 分钟' : '剩余不足 1 分钟';
+  }
+  function remainWarning(ms) {
+    return (Number(ms) || 0) <= 5 * 60 * 1000;
+  }
   function renderList(list) {
     var box = $('room-list');
     $('list-count').textContent = list.length ? '（' + list.length + '）' : '';
@@ -118,7 +127,8 @@
         '<span class="race-room-article">' + esc(r.articleTitle) + '</span></div>' +
         '<div class="race-room-row-meta"><span>' + r.playerCount + '/' + r.maxPlayers + ' 人</span>' +
         '<span>' + r.charCount + ' 字</span><span>房主 ' + esc(r.hostNickname) + '</span>' +
-        (r.spectatorEnabled ? '<span>观战 ' + (r.spectatorCount || 0) + '/' + (r.spectatorSeats || 0) + '</span>' : '') + '</div>' +
+        (r.spectatorEnabled ? '<span>观战 ' + (r.spectatorCount || 0) + '/' + (r.spectatorSeats || 0) + '</span>' : '') +
+        '<span class="race-remain' + (remainWarning(r.remainMs) ? ' race-remain-warning' : '') + '">' + remainText(r.remainMs) + '</span></div>' +
         '<div class="race-room-row-actions">' +
         '<button class="race-btn race-btn-small" data-action="join">加入</button>' +
         '<button class="race-btn race-btn-small race-btn-ghost" data-action="spectate">观战</button></div>';
@@ -132,24 +142,106 @@
       $('room-list').innerHTML = '<div class="race-empty">' + esc(e.message) + '</div>';
     });
   }
-  /* ---------- 快速匹配（全局底部条由 nav.js 管理） ---------- */
+  /* ---------- 快速匹配（大厅按钮 = 计时 + 关闭） ---------- */
   function updateQuickMatchVisibility() {
     var btn = $('btn-quick-match');
     var hint = $('quick-match-guest-hint');
-    if (btn) btn.style.display = state.token ? 'inline-flex' : 'none';
-    if (hint) hint.style.display = state.token ? 'none' : 'block';
+    if (btn && !state.quickMatchActive) btn.style.display = state.token ? 'inline-flex' : 'none';
+    if (hint) hint.style.display = state.token || state.quickMatchActive ? 'none' : 'block';
+  }
+  function quickMatchTimerText(startedAt) {
+    var since = Number(startedAt) || Number(localStorage.getItem('raceMatchPendingSince')) || Date.now();
+    var sec = Math.max(0, Math.floor((Date.now() - since) / 1000));
+    return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
+  }
+  function updateQuickMatchTimer() {
+    if (!state.quickMatchActive) return;
+    var el = $('quick-match-timer');
+    if (el) el.textContent = quickMatchTimerText();
+    if (!localStorage.getItem('raceMatchPending')) stopQuickMatchTimers();
+  }
+  function stopQuickMatchTimers() {
+    if (state.quickMatchTimer) { clearInterval(state.quickMatchTimer); state.quickMatchTimer = null; }
+    if (state.quickMatchPollTimer) { clearInterval(state.quickMatchPollTimer); state.quickMatchPollTimer = null; }
+  }
+  function setQuickMatching(active, startedAt) {
+    state.quickMatchActive = !!active;
+    var idle = $('quick-match-idle');
+    var waiting = $('quick-match-waiting');
+    if (idle) idle.style.display = active ? 'none' : 'block';
+    if (waiting) waiting.style.display = active ? 'block' : 'none';
+    if (active) {
+      try {
+        if (!localStorage.getItem('raceMatchPendingSince')) {
+          localStorage.setItem('raceMatchPendingSince', String(startedAt || Date.now()));
+        }
+      } catch (e) {}
+      updateQuickMatchTimer();
+      if (!state.quickMatchTimer) state.quickMatchTimer = setInterval(updateQuickMatchTimer, 250);
+      startQuickMatchPolling();
+    } else {
+      stopQuickMatchTimers();
+    }
+    updateQuickMatchVisibility();
+  }
+  function clearQuickMatchFlags() {
+    try {
+      localStorage.removeItem('raceMatchPending');
+      localStorage.removeItem('raceMatchPendingSince');
+    } catch (e) {}
+  }
+  function pollQuickMatchStatus() {
+    if (!state.quickMatchActive || state.quickMatchPollInFlight) return;
+    var token = localStorage.getItem('token');
+    if (!token) return;
+    state.quickMatchPollInFlight = true;
+    fetch('/api/race/match/status', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (res) { return readJson(res, '/api/race/match/status'); })
+      .then(function (data) {
+        if (!state.quickMatchActive) return;
+        if (data && data.status === 'matched' && data.code) {
+          clearQuickMatchFlags();
+          stopQuickMatchTimers();
+          location.href = 'race.html?code=' + encodeURIComponent(data.code);
+        } else if (data && data.status === 'idle') {
+          clearQuickMatchFlags();
+          setQuickMatching(false);
+        }
+      })
+      .catch(function () {
+        // 网络抖动保持匹配态，下一轮继续
+      })
+      .then(function () { state.quickMatchPollInFlight = false; });
+  }
+  function startQuickMatchPolling() {
+    if (state.quickMatchPollTimer) return;
+    state.quickMatchPollTimer = setInterval(pollQuickMatchStatus, 1500);
+    pollQuickMatchStatus();
   }
   function startQuickMatch() {
+    if (state.quickMatchActive) { cancelQuickMatch(); return; }
     if (!state.token) { toast('请先登录后再快速匹配'); return; }
-    api('/api/race/match/join', { method: 'POST', body: {} }).then(function () {
+    api('/api/race/match/join', { method: 'POST', body: {} }).then(function (data) {
+      if (data && data.status === 'matched' && data.code) {
+        clearQuickMatchFlags();
+        location.href = 'race.html?code=' + encodeURIComponent(data.code);
+        return;
+      }
       try {
         localStorage.setItem('raceMatchPending', '1');
-        localStorage.setItem('raceMatchPendingSince', String(Date.now()));
+        if (!localStorage.getItem('raceMatchPendingSince')) localStorage.setItem('raceMatchPendingSince', String(Date.now()));
       } catch (e) {}
-      window.dispatchEvent(new Event('race-match-pending'));
-    }).catch(function (e) {
-      toast(e.message);
-    });
+      setQuickMatching(true);
+    }).catch(function (e) { toast(e.message); });
+  }
+  function cancelQuickMatch() {
+    setQuickMatching(false);
+    clearQuickMatchFlags();
+    if (state.token) api('/api/race/match/cancel', { method: 'POST', body: {} }).catch(function () {});
+  }
+  function initQuickMatch() {
+    if (!state.token || localStorage.getItem('raceMatchPending') !== '1') { setQuickMatching(false); return; }
+    setQuickMatching(true);
   }
 
   function quickJoin(code) {
@@ -188,7 +280,8 @@
       method: 'POST',
       body: {
         articleId: Number($('create-article').value), password: password,
-        maxPlayers: Number($('create-max').value), isPublic: $('create-public').checked
+        maxPlayers: Number($('create-max').value), isPublic: $('create-public').checked,
+        durationMinutes: Number($('create-duration') ? $('create-duration').value : 60)
       }
     }).then(function (r) { state.raceToken = state.token; enterRoom(r.code); })
       .catch(function (e) { toast(e.message); });
@@ -216,6 +309,10 @@
 
   /* ---------- 轮询 ---------- */
   function enterRoom(code) {
+    if (state.quickMatchActive) {
+      setQuickMatching(false);
+      clearQuickMatchFlags();
+    }
     try { window.dispatchEvent(new Event('race-room-entered')); } catch (e) {}
     hideCountdownOverlay();
     state.code = code;
@@ -393,6 +490,11 @@
     var cap = spectatorCapacity(race);
     var me = snap.me;
     $('room-article').textContent = race.articleTitle + ' · ' + race.charCount + ' 字 · 上限 ' + race.maxPlayers + ' 人';
+    var remainEl = $('room-remain');
+    if (remainEl) {
+      remainEl.textContent = remainText(race.remainMs);
+      remainEl.classList.toggle('race-remain-warning', remainWarning(race.remainMs));
+    }
     $('btn-ready').style.display = seat === 'player' ? 'inline-block' : 'none';
     $('btn-ready').textContent = me && me.ready ? '取消准备' : '准备';
     $('btn-start').style.display = isHost ? 'inline-block' : 'none';
@@ -1228,6 +1330,8 @@
     all_left: '选手都已离开，房间已结束',
     all_disconnected: '所有选手离线，房间已结束',
     time_limit: '比赛超时，已结束',
+    duration_limit: '房间到达最长时长，已结束',
+    opponent_left: '对手已退出，你获胜',
     dissolve_direct: '房主已解散本局',
     vote_dissolved: '解散投票已通过，本局结束',
     admin: '管理员已解散房间'
@@ -1239,6 +1343,7 @@
     var st = snap && snap.race ? snap.race.status : 'waiting';
     var playerCount = snap && snap.players ? snap.players.length : 0;
     var spectatorFromPlayer = !!(snap && snap.spectator && snap.spectator.fromPlayer);
+    var matchmade = !!(snap && snap.race && snap.race.matchmade);
     if (seat === 'spectator') {
       if (st === 'waiting' && (isHost || spectatorFromPlayer)) {
         return { label: '回到选手席', confirm: '', title: '', text: '', action: 'spectateLeave', danger: false };
@@ -1247,6 +1352,18 @@
         return {
           label: '退出观战', confirm: '退出观战', title: '退出观战',
           text: '退出后不再占用观战席，比赛照常进行。', action: 'leave', danger: false
+        };
+      }
+    }
+    if (matchmade && seat === 'player') {
+      if (st === 'waiting') {
+        return { label: '退出比赛', confirm: '退出', title: '退出比赛', text: '退出后本局不再保留你的席位。', action: 'leave', danger: false };
+      }
+      if (st === 'countdown' || st === 'racing') {
+        return {
+          label: '退出比赛', confirm: '确认退出', title: '退出比赛',
+          text: '比赛已开始，退出后本局记为<strong>放弃本局</strong>：不计名次、不计成绩，且不能重新加入本局。',
+          action: 'leave', danger: false
         };
       }
     }
@@ -1287,14 +1404,26 @@
     var seat = snap ? mySeat(snap) : (state.isSpectator ? 'spectator' : 'player');
     var st = snap && snap.race ? snap.race.status : 'waiting';
     var playerCount = snap && snap.players ? snap.players.length : 0;
+    var matchmade = !!(snap && snap.race && snap.race.matchmade);
     var hostWaitingVote = isHost && seat === 'player' && st === 'waiting' && playerCount >= 3;
-    var canDissolve = hasRoom && isHost && ((hostWaitingVote) || st === 'countdown' || st === 'racing');
+    var canDissolve = hasRoom && isHost && !matchmade && ((hostWaitingVote) || st === 'countdown' || st === 'racing');
     var dissolveBtn = $('btn-dissolve-race');
+    if (!canDissolve) {
+      if (dissolveBtn) dissolveBtn.remove();
+    } else if (!dissolveBtn) {
+      dissolveBtn = document.createElement('button');
+      dissolveBtn.id = 'btn-dissolve-race';
+      dissolveBtn.type = 'button';
+      dissolveBtn.className = 'race-btn race-btn-small race-btn-danger';
+      dissolveBtn.onclick = openDissolveDialog;
+      var actionsBar = $('race-subnav-actions');
+      if (actionsBar) actionsBar.insertBefore(dissolveBtn, $('btn-exit-race'));
+    }
     if (dissolveBtn) {
-      dissolveBtn.style.display = canDissolve ? 'inline-flex' : 'none';
+      dissolveBtn.style.display = 'inline-flex';
       dissolveBtn.textContent = '发起解散投票';
     }
-    var showExit = hasRoom && !(isHost && seat === 'player' && st === 'waiting' && playerCount >= 3);
+    var showExit = hasRoom && (matchmade || !(isHost && seat === 'player' && st === 'waiting' && playerCount >= 3));
     $('btn-exit-race').style.display = showExit ? 'inline-flex' : 'none';
     if (!hasRoom) return;
     var cfg = exitConfig(state.snap);
@@ -1480,8 +1609,12 @@
     showView('lobby');
   }
   function leaveRoom() {
+    var matchmade = !!(state.snap && state.snap.race && state.snap.race.matchmade);
     return api('/api/race/leave', { method: 'POST', body: {} })
-      .then(backToLobby)
+      .then(function () {
+        backToLobby();
+        if (matchmade) toast('已退出本局');
+      })
       .catch(function (e) { toast(e.message); });
   }
 
@@ -1531,6 +1664,7 @@
   /* ---------- 绑定 ---------- */
   function bind() {
     $('btn-quick-match').onclick = startQuickMatch;
+    $('btn-quick-match-cancel').onclick = cancelQuickMatch;
     $('btn-create').onclick = doCreate;
     $('create-max').addEventListener('input', function () { validateCreateMax(false); });
     var maxQuick = document.querySelectorAll('#create-max-quick .race-max-quick-btn');
@@ -1582,6 +1716,13 @@
         closeDissolveDialog(true);
       }
     });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && state.quickMatchActive) pollQuickMatchStatus();
+    });
+    window.addEventListener('focus', function () {
+      if (state.quickMatchActive) pollQuickMatchStatus();
+    });
+    window.addEventListener('beforeunload', stopQuickMatchTimers);
     $('spec-enabled').onchange = function () {
       updateSpectatorSetting({ enabled: $('spec-enabled').checked });
     };
@@ -1613,6 +1754,7 @@
   });
   bind();
   updateQuickMatchVisibility();
+  initQuickMatch();
   showView('lobby');
   loadArticles();
   restoreRace();

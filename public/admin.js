@@ -2078,7 +2078,7 @@ async function loadVersion() {
 
 let raceRoomsCache = [];
 let raceMembersCode = null;
-let raceSettingsCache = { maxRooms: 20, enabled: true, maxTotalPlayers: 200 };
+let raceSettingsCache = { maxRooms: 20, enabled: true, maxTotalPlayers: 200, maxDurationMinutes: 180 };
 
 function setRaceListMsg(text, isError) {
   const el = document.getElementById('race-list-msg');
@@ -2193,12 +2193,14 @@ async function loadRaceSettings() {
     const res = await fetch('/api/admin/race-settings', { headers: apiHeaders() });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200 };
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200, maxDurationMinutes: data.maxDurationMinutes || 180 };
     const input = document.getElementById('race-max-rooms');
     const totalInput = document.getElementById('race-max-total');
+    const durationInput = document.getElementById('race-max-duration');
     const check = document.getElementById('race-enabled');
     if (input) input.value = raceSettingsCache.maxRooms;
     if (totalInput) totalInput.value = raceSettingsCache.maxTotalPlayers;
+    if (durationInput) durationInput.value = raceSettingsCache.maxDurationMinutes;
     if (check) check.checked = raceSettingsCache.enabled;
     setRaceSettingsMsg('', false);
   } catch (e) {
@@ -2209,9 +2211,11 @@ async function loadRaceSettings() {
 async function saveRaceSettings() {
   const input = document.getElementById('race-max-rooms');
   const totalInput = document.getElementById('race-max-total');
+  const durationInput = document.getElementById('race-max-duration');
   const check = document.getElementById('race-enabled');
   const maxRooms = Number(input && input.value);
   const maxTotalPlayers = Number(totalInput && totalInput.value);
+  const maxDurationMinutes = Number(durationInput && durationInput.value);
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) {
     setRaceSettingsMsg('房间数上限必须在 1 到 50 之间', true);
     return;
@@ -2220,16 +2224,21 @@ async function saveRaceSettings() {
     setRaceSettingsMsg('总席位上限必须在 1 到 500 之间', true);
     return;
   }
+  if (!Number.isInteger(maxDurationMinutes) || maxDurationMinutes < 1 || maxDurationMinutes > 180) {
+    setRaceSettingsMsg('房间最长时长必须在 1 到 180 分钟之间', true);
+    return;
+  }
   try {
     const res = await fetch('/api/admin/race-settings', {
       method: 'PUT', headers: apiHeaders(),
-      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked), maxTotalPlayers: maxTotalPlayers })
+      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked), maxTotalPlayers: maxTotalPlayers, maxDurationMinutes: maxDurationMinutes })
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200 };
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200, maxDurationMinutes: data.maxDurationMinutes || 180 };
     if (input) input.value = raceSettingsCache.maxRooms;
     if (totalInput) totalInput.value = raceSettingsCache.maxTotalPlayers;
+    if (durationInput) durationInput.value = raceSettingsCache.maxDurationMinutes;
     if (check) check.checked = raceSettingsCache.enabled;
     renderRaceSummary();
     setRaceSettingsMsg('设置已保存', false);

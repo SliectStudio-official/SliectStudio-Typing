@@ -627,6 +627,7 @@
     return false;
   }
   function pollMatchBar() {
+    if (page === 'race') { clearMatchBar(); return; }
     var tk = localStorage.getItem('token');
     if (!tk) { clearMatchBar(); return; }
     fetch('/api/race/match/status', { headers: { Authorization: 'Bearer ' + tk } })
@@ -669,6 +670,7 @@
       });
   }
   function startMatchBarPolling() {
+    if (page === 'race') { clearMatchBar(); return; }
     if (localStorage.getItem(MATCH_PENDING_KEY) !== '1') return;
     if (!localStorage.getItem('token')) { clearMatchBar(); return; }
     matchBarEnterCode = null;

@@ -35,6 +35,12 @@
           <button class="race-btn race-btn-primary" id="btn-quick-match" style="display:none">快速匹配</button>
           <p class="race-hint" id="quick-match-guest-hint" style="display:none">登录后可快速匹配</p>
         </div>
+        <div id="quick-match-waiting" style="display:none">
+          <button class="race-btn race-btn-primary quick-match-active" id="btn-quick-match-cancel" type="button">
+            <span id="quick-match-timer">00:00</span><span class="quick-match-close" aria-hidden="true">×</span>
+          </button>
+          <p class="race-hint">正在寻找对手，点击按钮取消匹配</p>
+        </div>
       </div>
 
       <div class="race-grid">
@@ -62,6 +68,14 @@
                 </div>
               </div>
               <span class="race-max-hint" id="create-max-hint">2–100 人，观战席自动为约 10%</span>
+            </label>
+            <label>房间最长时长
+              <select id="create-duration" class="race-input">
+                <option value="30">30 分钟</option>
+                <option value="60" selected>60 分钟</option>
+                <option value="120">120 分钟</option>
+                <option value="180">180 分钟</option>
+              </select>
             </label>
             <label class="race-checkbox"><input type="checkbox" id="create-public" checked> 公开房间（出现在大厅列表）</label>
             <button class="race-btn race-btn-primary" id="btn-create">创建比赛</button>
@@ -100,6 +114,7 @@
               <div>
                 <div class="race-code" id="room-code">------</div>
                 <div class="race-hint" id="room-article"></div>
+                <div class="race-hint race-remain" id="room-remain"></div>
               </div>
               <div class="race-room-actions">
                 <button class="race-btn" id="btn-ready">准备</button>
