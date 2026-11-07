@@ -112,6 +112,18 @@ function apiHeaders() {
   return h;
 }
 
+async function apiWrite(url, options) {
+  const opts = Object.assign({}, options || {});
+  const original = String(opts.method || 'POST').toUpperCase();
+  const headers = Object.assign({}, opts.headers || {});
+  if (original === 'PUT' || original === 'PATCH' || original === 'DELETE') {
+    headers['x-http-method-override'] = original;
+    opts.method = 'POST';
+  }
+  opts.headers = headers;
+  return fetch(url, opts);
+}
+
 async function getSWController() {
   if (!('serviceWorker' in navigator)) return null;
   try {
@@ -680,7 +692,7 @@ async function loadPrivateArticles() {
       btn.addEventListener('click', async () => {
         if (!confirm('确定删除该文章？')) return;
         try {
-          const res = await fetch('/api/user/private-articles/' + btn.dataset.id, {
+          const res = await apiWrite('/api/user/private-articles/' + btn.dataset.id, {
             method: 'DELETE',
             headers: { 'Authorization': 'Bearer ' + getToken() }
           });
@@ -1077,7 +1089,7 @@ saveNicknameBtn.addEventListener('click', async () => {
     return;
   }
   try {
-    const res = await fetch('/api/user/profile', {
+    const res = await apiWrite('/api/user/profile', {
       method: 'PUT',
       headers: apiHeaders(),
       body: JSON.stringify({ nickname })
@@ -1123,7 +1135,7 @@ changePasswordBtn.addEventListener('click', async () => {
   }
 
   try {
-    const res = await fetch('/api/user/password', {
+    const res = await apiWrite('/api/user/password', {
       method: 'PUT',
       headers: apiHeaders(),
       body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd })
