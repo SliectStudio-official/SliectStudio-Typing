@@ -92,155 +92,213 @@
     </div>
 
     <div id="profile-content" style="display:none">
-      <div class="profile-header">
-        <div class="avatar-wrapper">
-          <img id="profile-avatar-img" src="" alt="头像" class="avatar-img">
-          <div class="avatar-overlay" id="avatar-overlay">
-            <span>更换</span>
-          </div>
-          <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp" style="display:none">
-        </div>
-        <div class="profile-meta">
-          <div class="profile-nickname" id="profile-nickname"></div>
-          <div class="profile-username">@<span id="profile-username"></span></div>
-          <div class="profile-email" id="profile-email"></div>
-          <div class="profile-role" id="profile-role"></div>
-        </div>
-      </div>
+      <div class="admin-layout profile-layout">
+        <aside class="admin-sidebar profile-sidebar expanded" id="profile-sidebar">
+          <button class="profile-sidebar-toggle" id="profile-sidebar-toggle" type="button" aria-label="折叠导航" aria-expanded="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            我的账户
+          </button>
 
-      <div class="section-card">
-        <div class="section-card-title">练习统计</div>
-        <div class="stats-bar" id="stats-summary">
-          <div class="stat-item">
-            <div class="stat-label">总练习次数</div>
-            <div class="stat-value" id="stat-total-practices">0</div>
+          <div class="section-card profile-identity">
+            <div class="avatar-wrapper">
+              <img id="profile-avatar-img" src="" alt="头像" class="avatar-img">
+              <div class="avatar-overlay" id="avatar-overlay">
+                <span>更换</span>
+              </div>
+              <input type="file" id="avatar-input" accept=".jpg,.jpeg,.png,.webp" style="display:none">
+            </div>
+            <div class="profile-meta">
+              <div class="profile-nickname" id="profile-nickname"></div>
+              <div class="profile-username">@<span id="profile-username"></span></div>
+              <div class="profile-email" id="profile-email"></div>
+              <div class="profile-role" id="profile-role"></div>
+            </div>
           </div>
-          <div class="stat-item">
-            <div class="stat-label">总击键数</div>
-            <div class="stat-value" id="stat-total-keystrokes">0</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-label">总用时</div>
-            <div class="stat-value" id="stat-total-time">0分钟</div>
-          </div>
-        </div>
-        <div class="day-range-selector" style="margin-bottom:16px;display:flex;gap:8px">
-          <button class="btn-secondary day-range-btn active" data-days="7">近7天</button>
-          <button class="btn-secondary day-range-btn" data-days="30">近30天</button>
-        </div>
-        <div style="position:relative;height:300px">
-          <canvas id="stats-chart"></canvas>
-        </div>
-      </div>
 
-      <div class="section-card">
-        <div class="section-card-title">修改昵称</div>
-        <div class="profile-form-row">
-          <input type="text" id="nickname-input" placeholder="输入新昵称" maxlength="30">
-          <button class="btn-primary" id="save-nickname-btn">保存</button>
-        </div>
-        <p class="note" id="nickname-msg"></p>
-      </div>
-
-      <div class="section-card">
-        <div class="section-card-title">修改密码</div>
-        <div class="profile-form-col">
-          <div class="form-group">
-            <label>旧密码</label>
-            <input type="password" id="old-password" placeholder="输入旧密码">
+          <div class="section-card profile-nav-card">
+            <div class="section-card-title">个人导航</div>
+            <ul class="nav-menu profile-nav">
+              <li><a href="#overview" data-tab="overview" class="active">概览</a></li>
+              <li><a href="#race-history" data-tab="race-history">历史战绩</a></li>
+              <li><a href="#practice-history" data-tab="practice-history">练习历史</a></li>
+              <li><a href="#errors" data-tab="errors">错字本</a></li>
+              <li><a href="#submissions" data-tab="submissions">我的投稿</a></li>
+              <li><a href="#private" data-tab="private">私人文章</a></li>
+              <li><a href="#offline" data-tab="offline">离线文章</a></li>
+              <li><a href="#account" data-tab="account">账号设置</a></li>
+            </ul>
           </div>
-          <div class="form-group">
-            <label>新密码</label>
-            <input type="password" id="new-password" placeholder="至少6位">
-          </div>
-          <div class="form-group">
-            <label>确认新密码</label>
-            <input type="password" id="confirm-password" placeholder="再次输入新密码">
-          </div>
-        </div>
-        <button class="btn-primary" id="change-password-btn">修改密码</button>
-        <p class="note" id="password-msg"></p>
-      </div>
 
-      <div class="section-card">
-        <div class="section-card-title">错字本</div>
-        <table class="history-table" id="error-log-table">
-          <thead>
-            <tr>
-              <th>期望字符</th>
-              <th>实际输入</th>
-              <th>错误次数</th>
-            </tr>
-          </thead>
-          <tbody id="error-log-tbody"></tbody>
-        </table>
-        <div class="empty-msg" id="error-log-empty" style="display:none">暂无错误记录</div>
-        <div class="btn-group" id="error-log-actions" style="display:none">
-          <button class="btn-primary" id="generate-error-practice-btn">生成针对性练习</button>
-        </div>
-      </div>
+          <button class="profile-logout" id="profile-logout-btn" type="button">退出登录</button>
+        </aside>
 
-      <div class="section-card">
-        <div class="section-card-title">练习历史</div>
-        <table class="history-table" id="history-table">
-          <thead>
-            <tr>
-              <th>文章</th>
-              <th>速度</th>
-              <th>准确率</th>
-              <th>用时</th>
-              <th>日期</th>
-            </tr>
-          </thead>
-          <tbody id="history-tbody"></tbody>
-        </table>
-        <div class="empty-msg" id="history-empty" style="display:none">暂无练习记录</div>
-        <div class="pagination" id="pagination"></div>
-      </div>
+        <main class="admin-main profile-main">
+          <section class="profile-section profile-section-active" id="panel-overview">
+            <div class="section-card">
+              <div class="section-card-title">概览</div>
+              <div class="stats-bar" id="stats-summary">
+                <div class="stat-item">
+                  <div class="stat-label">总练习次数</div>
+                  <div class="stat-value" id="stat-total-practices">0</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-label">总击键数</div>
+                  <div class="stat-value" id="stat-total-keystrokes">0</div>
+                </div>
+                <div class="stat-item">
+                  <div class="stat-label">总用时</div>
+                  <div class="stat-value" id="stat-total-time">0分钟</div>
+                </div>
+              </div>
+              <div class="day-range-selector" style="margin-bottom:16px;display:flex;gap:8px">
+                <button class="btn-secondary day-range-btn active" data-days="7">近7天</button>
+                <button class="btn-secondary day-range-btn" data-days="30">近30天</button>
+              </div>
+              <div class="profile-chart-wrap">
+                <canvas id="stats-chart"></canvas>
+              </div>
+              <div class="section-card-title profile-subtitle">比赛战绩</div>
+              <div class="stats-bar race-summary-bar">
+                <div class="stat-item"><div class="stat-label">场次</div><div class="stat-value" id="overview-race-raced">0</div></div>
+                <div class="stat-item"><div class="stat-label">胜率</div><div class="stat-value" id="overview-race-winrate">—</div></div>
+                <div class="stat-item"><div class="stat-label">最佳名次</div><div class="stat-value" id="overview-race-best">—</div></div>
+                <div class="stat-item"><div class="stat-label">已完赛场次</div><div class="stat-value" id="overview-race-finished">0</div></div>
+              </div>
+            </div>
+          </section>
 
-      <div class="section-card">
-        <div class="section-card-title">我的投稿</div>
-        <table class="history-table" id="submitted-articles-table">
-          <thead>
-            <tr>
-              <th>标题</th>
-              <th>状态</th>
-              <th>审核备注</th>
-              <th>日期</th>
-            </tr>
-          </thead>
-          <tbody id="submitted-articles-tbody"></tbody>
-        </table>
-        <div class="empty-msg" id="submitted-articles-empty" style="display:none">暂无投稿记录</div>
-      </div>
+          <section class="profile-section" id="panel-race-history">
+            <div class="section-card">
+              <div class="section-card-title">历史战绩</div>
+              <div class="stats-bar race-summary-bar">
+                <div class="stat-item"><div class="stat-label">场次</div><div class="stat-value" id="race-summary-raced">0</div></div>
+                <div class="stat-item"><div class="stat-label">胜率</div><div class="stat-value" id="race-summary-winrate">—</div></div>
+                <div class="stat-item"><div class="stat-label">最佳名次</div><div class="stat-value" id="race-summary-best">—</div></div>
+                <div class="stat-item"><div class="stat-label">完赛场次</div><div class="stat-value" id="race-summary-finished">0</div></div>
+              </div>
+              <div class="race-history-wrap">
+                <table class="history-table race-history-table" id="race-history-table">
+                  <thead>
+                    <tr><th>日期时间</th><th>文章</th><th>名次</th><th>速度</th><th>正确率</th><th>用时</th><th>状态</th></tr>
+                  </thead>
+                  <tbody id="race-history-tbody"></tbody>
+                </table>
+                <div class="race-history-cards" id="race-history-cards"></div>
+              </div>
+              <div class="empty-msg race-history-empty" id="race-history-empty" style="display:none">
+                还没有比赛记录，去比赛大厅开一局
+                <a class="btn-primary race-history-cta" href="race.html">去比赛大厅</a>
+              </div>
+              <div class="pagination" id="race-history-pagination"></div>
+            </div>
+          </section>
 
-      <div class="section-card">
-        <div class="section-card-title">私人文章</div>
-        <div class="profile-form-col" style="margin-bottom:16px">
-          <div class="form-group">
-            <label>标题</label>
-            <input type="text" id="private-title-input" placeholder="输入文章标题">
-          </div>
-          <div class="form-group">
-            <label>内容</label>
-            <textarea id="private-content-input" placeholder="输入文章内容" rows="4"></textarea>
-          </div>
-          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-            <button class="btn-primary" id="add-private-article-btn">添加</button>
-            <span style="color:var(--muted);font-size:14px">或</span>
-            <input type="file" id="private-file-input" accept=".txt" style="font-size:14px">
-            <button class="btn-secondary" id="upload-private-article-btn">上传TXT</button>
-          </div>
-        </div>
-        <div id="private-articles-list"></div>
-        <div class="empty-msg" id="private-articles-empty" style="display:none">暂无私人文章</div>
-      </div>
+          <section class="profile-section" id="panel-practice-history">
+            <div class="section-card">
+              <div class="section-card-title">练习历史</div>
+              <table class="history-table" id="history-table">
+                <thead>
+                  <tr><th>文章</th><th>速度</th><th>准确率</th><th>用时</th><th>日期</th></tr>
+                </thead>
+                <tbody id="history-tbody"></tbody>
+              </table>
+              <div class="empty-msg" id="history-empty" style="display:none">暂无练习记录</div>
+              <div class="pagination" id="pagination"></div>
+            </div>
+          </section>
 
-      <div class="section-card">
-        <div class="section-card-title">离线文章管理</div>
-        <p class="note" style="margin-bottom:12px">从已审核文章中选择加入个人离线缓存，断网时仍可练习。管理员标记的全局离线文章无需重复添加。</p>
-        <div id="offline-manage-list"></div>
-        <div class="empty-msg" id="offline-manage-empty" style="display:none">暂无可选文章</div>
+          <section class="profile-section" id="panel-errors">
+            <div class="section-card">
+              <div class="section-card-title">错字本</div>
+              <table class="history-table" id="error-log-table">
+                <thead>
+                  <tr><th>期望字符</th><th>实际输入</th><th>错误次数</th></tr>
+                </thead>
+                <tbody id="error-log-tbody"></tbody>
+              </table>
+              <div class="empty-msg" id="error-log-empty" style="display:none">暂无错误记录</div>
+              <div class="btn-group" id="error-log-actions" style="display:none">
+                <button class="btn-primary" id="generate-error-practice-btn">生成针对性练习</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="profile-section" id="panel-submissions">
+            <div class="section-card">
+              <div class="section-card-title">我的投稿</div>
+              <table class="history-table" id="submitted-articles-table">
+                <thead>
+                  <tr><th>标题</th><th>状态</th><th>审核备注</th><th>日期</th></tr>
+                </thead>
+                <tbody id="submitted-articles-tbody"></tbody>
+              </table>
+              <div class="empty-msg" id="submitted-articles-empty" style="display:none">暂无投稿记录</div>
+            </div>
+          </section>
+
+          <section class="profile-section" id="panel-private">
+            <div class="section-card">
+              <div class="section-card-title">私人文章</div>
+              <div class="profile-form-col" style="margin-bottom:16px">
+                <div class="form-group">
+                  <label>标题</label>
+                  <input type="text" id="private-title-input" placeholder="输入文章标题">
+                </div>
+                <div class="form-group">
+                  <label>内容</label>
+                  <textarea id="private-content-input" placeholder="输入文章内容" rows="4"></textarea>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                  <button class="btn-primary" id="add-private-article-btn">添加</button>
+                  <span style="color:var(--muted);font-size:14px">或</span>
+                  <input type="file" id="private-file-input" accept=".txt" style="font-size:14px">
+                  <button class="btn-secondary" id="upload-private-article-btn">上传TXT</button>
+                </div>
+              </div>
+              <div id="private-articles-list"></div>
+              <div class="empty-msg" id="private-articles-empty" style="display:none">暂无私人文章</div>
+            </div>
+          </section>
+
+          <section class="profile-section" id="panel-offline">
+            <div class="section-card">
+              <div class="section-card-title">离线文章管理</div>
+              <p class="note" style="margin-bottom:12px">从已审核文章中选择加入个人离线缓存，断网时仍可练习。管理员标记的全局离线文章无需重复添加。</p>
+              <div id="offline-manage-list"></div>
+              <div class="empty-msg" id="offline-manage-empty" style="display:none">暂无可选文章</div>
+            </div>
+          </section>
+
+          <section class="profile-section" id="panel-account">
+            <div class="section-card">
+              <div class="section-card-title">修改昵称</div>
+              <div class="profile-form-row">
+                <input type="text" id="nickname-input" placeholder="输入新昵称" maxlength="30">
+                <button class="btn-primary" id="save-nickname-btn">保存</button>
+              </div>
+              <p class="note" id="nickname-msg"></p>
+            </div>
+            <div class="section-card">
+              <div class="section-card-title">修改密码</div>
+              <div class="profile-form-col">
+                <div class="form-group">
+                  <label>旧密码</label>
+                  <input type="password" id="old-password" placeholder="输入旧密码">
+                </div>
+                <div class="form-group">
+                  <label>新密码</label>
+                  <input type="password" id="new-password" placeholder="至少6位">
+                </div>
+                <div class="form-group">
+                  <label>确认新密码</label>
+                  <input type="password" id="confirm-password" placeholder="再次输入新密码">
+                </div>
+              </div>
+              <button class="btn-primary" id="change-password-btn">修改密码</button>
+              <p class="note" id="password-msg"></p>
+            </div>
+          </section>
+        </main>
       </div>
     </div>
   </div>
@@ -266,9 +324,7 @@
     </div>
   </div>
 
-  <!-- Toast Container -->
   <div class="toast-container" id="toast-container"></div>
-
   <footer class="site-footer" id="site-footer">Loading...</footer>
   <script src="nav.js"></script>
   <script src="announcement-bar.js"></script>

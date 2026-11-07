@@ -189,6 +189,53 @@ function showDenied() {
   profileContent.style.display = 'none';
 }
 
+
+/* ---------- P30：个人中心面板切换 / 侧栏折叠 ---------- */
+var PROFILE_TABS = ['overview', 'race-history', 'practice-history', 'errors', 'submissions', 'private', 'offline', 'account'];
+function activateProfileTab(tab, updateHash) {
+  if (PROFILE_TABS.indexOf(tab) < 0) tab = 'overview';
+  document.querySelectorAll('.profile-sidebar .nav-menu a[data-tab]').forEach(function (link) {
+    link.classList.toggle('active', link.dataset.tab === tab);
+  });
+  document.querySelectorAll('.profile-main .profile-section').forEach(function (panel) {
+    panel.classList.toggle('profile-section-active', panel.id === 'panel-' + tab);
+  });
+  if (updateHash && location.hash !== '#' + tab) {
+    try { history.replaceState(null, '', '#' + tab); } catch (e) { location.hash = tab; }
+  }
+  if (tab === 'overview' && statsChart) {
+    setTimeout(function () { try { statsChart.resize(); } catch (e) {} }, 0);
+  }
+  if (tab === 'race-history' && typeof loadRaceHistory === 'function') loadRaceHistory(1);
+}
+function initProfileTabs() {
+  var sidebar = document.getElementById('profile-sidebar');
+  var toggle = document.getElementById('profile-sidebar-toggle');
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', function () {
+      var collapsed = sidebar.classList.toggle('collapsed');
+      sidebar.classList.toggle('expanded', !collapsed);
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    });
+  }
+  document.querySelectorAll('.profile-sidebar .nav-menu a[data-tab]').forEach(function (link) {
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      activateProfileTab(link.dataset.tab, true);
+    });
+  });
+  window.addEventListener('hashchange', function () {
+    activateProfileTab(location.hash.slice(1), false);
+  });
+  activateProfileTab(location.hash.slice(1), false);
+  var profileLogout = document.getElementById('profile-logout-btn');
+  if (profileLogout) {
+    profileLogout.addEventListener('click', function () {
+      if (logoutBtn) logoutBtn.click();
+    });
+  }
+}
+
 async function showProfile() {
   accessDenied.style.display = 'none';
   profileContent.style.display = '';
@@ -199,6 +246,7 @@ async function showProfile() {
   }
 
   await Promise.all([loadProfile(), loadHistory(1)]);
+  activateProfileTab(location.hash.slice(1), false);
   scheduleIdle(() => {
     loadStats(7);
     loadErrorLog();
@@ -1028,6 +1076,7 @@ async function initProfile() {
 }
 
 initProfile();
+initProfileTabs();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('service-worker.js').catch(() => {});

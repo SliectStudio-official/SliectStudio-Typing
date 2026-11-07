@@ -5233,3 +5233,239 @@ body.home-page .page-loading-spinner {
   border-color: rgba(255,255,255,.16);
   border-top-color: var(--primary);
 }
+
+/* P30 B：个人中心两栏布局 */
+#profile-container.container {
+  max-width: 1400px;
+  padding: 0;
+}
+.profile-layout {
+  display: flex;
+  gap: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 20px;
+}
+.profile-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 74px;
+  align-self: flex-start;
+  transition: width 0.2s ease;
+}
+.profile-main {
+  flex: 1;
+  min-width: 0;
+}
+.profile-section {
+  display: none;
+}
+.profile-section.profile-section-active {
+  display: block;
+}
+.profile-section .section-card {
+  margin-bottom: 16px;
+}
+.profile-section .section-card:last-child {
+  margin-bottom: 0;
+}
+.profile-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.profile-identity .profile-meta {
+  align-items: center;
+  width: 100%;
+}
+.profile-identity .profile-nickname {
+  font-size: 20px;
+}
+.profile-identity .profile-email {
+  word-break: break-all;
+}
+.profile-nav-card {
+  padding: 10px;
+}
+.profile-nav-card .section-card-title {
+  margin-bottom: 8px;
+}
+.profile-sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  background: var(--glass-bg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--glass-radius-xs);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.profile-sidebar-toggle:hover {
+  background: var(--glass-bg-hover);
+}
+.profile-sidebar-toggle svg {
+  transition: transform 0.2s ease;
+}
+.profile-sidebar.collapsed {
+  width: 64px;
+}
+.profile-sidebar.collapsed .profile-identity,
+.profile-sidebar.collapsed .profile-nav-card,
+.profile-sidebar.collapsed .profile-logout {
+  display: none;
+}
+.profile-sidebar.collapsed .profile-sidebar-toggle svg {
+  transform: rotate(180deg);
+}
+.profile-logout {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 10px;
+  background: var(--glass-bg);
+  color: var(--semantic-error);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.profile-logout:hover {
+  background: var(--glass-bg-hover);
+}
+.profile-chart-wrap {
+  position: relative;
+  height: 300px;
+}
+.profile-subtitle {
+  margin-top: 20px;
+  font-size: 15px;
+}
+.race-summary-bar {
+  margin-bottom: 16px;
+}
+.race-summary-bar .stat-item {
+  min-width: 0;
+}
+.race-history-wrap {
+  margin-top: 8px;
+}
+.race-history-cards {
+  display: none;
+}
+.race-history-empty {
+  padding: 24px 0;
+}
+.race-history-cta {
+  margin-left: 8px;
+  text-decoration: none;
+}
+.race-history-card {
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: var(--glass-bg);
+}
+.race-history-card-date {
+  font-size: 12px;
+  color: var(--muted);
+}
+.race-history-card-title {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.race-history-card-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--body);
+}
+@media (max-width: 767px) {
+  .profile-layout {
+    flex-direction: column;
+    padding: 16px 12px;
+    gap: 12px;
+  }
+  .profile-sidebar {
+    width: 100%;
+    position: static;
+  }
+  .profile-sidebar-toggle {
+    display: none;
+  }
+  .profile-identity {
+    flex-direction: row;
+    align-items: center;
+    text-align: left;
+    gap: 12px;
+  }
+  .profile-identity .avatar-wrapper,
+  .profile-identity .avatar-img {
+    width: 48px;
+    height: 48px;
+  }
+  .profile-identity .profile-meta {
+    align-items: flex-start;
+  }
+  .profile-identity .profile-role {
+    align-self: flex-start;
+  }
+  .profile-nav-card {
+    padding: 8px;
+  }
+  .profile-nav-card .section-card-title {
+    display: none;
+  }
+  .profile-sidebar .nav-menu {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .profile-sidebar .nav-menu li {
+    flex: 0 0 auto;
+    margin: 0;
+  }
+  .profile-sidebar .nav-menu a {
+    white-space: nowrap;
+    padding: 8px 12px;
+  }
+  .profile-logout {
+    display: none;
+  }
+  .profile-main {
+    width: 100%;
+  }
+}
+@media (max-width: 480px) {
+  .race-summary-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .race-history-table {
+    display: none;
+  }
+  .race-history-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
