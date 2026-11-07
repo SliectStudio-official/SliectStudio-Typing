@@ -1046,6 +1046,13 @@ textarea {
 .code-input::selection { background: transparent; color: transparent; }
 .code-input::-moz-selection { background: transparent; color: transparent; }
 .code-input:disabled { opacity: 1; }
+.code-input:focus,
+.code-editor .code-input:focus {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  outline: 0;
+}
 .code-measure {
   position: absolute;
   left: -9999px;
