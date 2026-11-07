@@ -52,6 +52,8 @@ const NETWORK_ONLY_API = [
   '/api/version',
   '/api/bootstrap/status'
 ];
+// 鉴权/管理类 GET 不得缓存：离线时若回旧数据，会把“连不上”伪装成“在线”
+const NETWORK_ONLY_PREFIXES = ['/api/admin/', '/api/user/', '/api/article/'];
 
 function openIDB() {
   return new Promise((resolve, reject) => {

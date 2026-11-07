@@ -744,6 +744,9 @@
     portGuard.mode = '';
     portGuard.newPort = null;
   }
+  function currentPort() {
+    return location.port || (location.protocol === 'https:' ? '443' : '80');
+  }
   function showPortBanner(mode, port) {
     var el = portBanner();
     portGuard.mode = mode;
@@ -752,9 +755,14 @@
       var host = location.hostname;
       var url = location.protocol + '//' + host + ':' + port + location.pathname + location.search + location.hash;
       el.className = 'port-drift-banner';
-      el.innerHTML = '<a href="' + url.replace(/"/g, '&quot;') + '">服务已换到 :' + port + '，点此继续</a>';
+      el.innerHTML = '<a href="' + url.replace(/"/g, '&quot;') + '">检测到 :' + port + ' 有服务，点此继续（当前 :' + currentPort() + '）</a>';
       el.style.display = 'flex';
       el.onclick = function () { location.href = url; };
+    } else if (mode === 'recovered') {
+      el.className = 'port-drift-banner';
+      el.innerHTML = '<a href="' + location.href.replace(/"/g, '&quot;') + '">与服务器的连接已恢复，点此重试</a>';
+      el.style.display = 'flex';
+      el.onclick = function () { location.reload(); };
     } else if (mode === 'down') {
       el.className = 'port-drift-banner is-error';
       el.innerHTML = '<span>与服务器的连接已断开，服务可能已停止</span>' +
@@ -796,10 +804,10 @@
       for (var i = 0; i < PROBE_PORTS.length; i++) {
         var port = PROBE_PORTS[i];
         if (await probePort(port)) {
-          var current = Number(location.port || (location.protocol === 'https:' ? 443 : 80));
+          var current = Number(currentPort());
           if (port === current) {
             portGuard.failures = 0;
-            hidePortBanner();
+            showPortBanner('recovered', port);
           } else {
             showPortBanner('drift', port);
           }
