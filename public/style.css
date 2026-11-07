@@ -4115,6 +4115,10 @@ button:focus-visible,
 .race-stage { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 14px; align-items: start; }
 @media (max-width: 1024px) { .race-stage { grid-template-columns: 280px minmax(0, 1fr); } }
 @media (max-width: 768px) { .race-stage { grid-template-columns: 1fr; } }
+/* P32：由 race.js 按当前窗口宽度重算，避免 resize 后卡在旧的断点布局 */
+#view-race.race-layout-compact .race-stage { grid-template-columns: 280px minmax(0, 1fr); }
+#view-race.race-layout-narrow .race-stage { grid-template-columns: 1fr; }
+#view-race.race-layout-narrow .race-side { position: static; }
 
 .race-side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 116px; }
 @media (max-width: 768px) { .race-side { position: static; } }
@@ -4236,6 +4240,13 @@ button:focus-visible,
 #race-typing .typing-line-input { font-size: 18px; }
 /* 打字区禁止动效（与首页红线一致） */
 #race-typing, #race-typing * { animation: none !important; }
+/* P32：连续两次 tick 打字区仍为空时的兜底，不允许留白 */
+.race-typing-fallback {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 32px 16px; margin-bottom: 12px;
+  border: 1px dashed var(--hairline-strong); border-radius: 12px;
+  color: var(--muted); font-size: 14px; text-align: center;
+}
 
 /* ===== 房间底部：观战开关 ===== */
 .race-room-foot { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }

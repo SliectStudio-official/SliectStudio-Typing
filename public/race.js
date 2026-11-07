@@ -20,7 +20,8 @@
     quickMatchActive: false, quickMatchTimer: null, quickMatchPollTimer: null,
     quickMatchPollInFlight: false,
     dissolveNeeded: null,
-    bootList: false, bootRestore: false, bootRoomPending: false, pageLoadingDone: false
+    bootList: false, bootRestore: false, bootRoomPending: false, pageLoadingDone: false,
+    renderBroken: false, lastRenderError: null, emptyTypingTicks: 0, layoutTimer: null
   };
 
   function finishPageLoading(roomReady) {
@@ -431,7 +432,13 @@
       if (state.snap.me && state.snap.me.nickname) state.selfNickname = state.snap.me.nickname;
       persistRaceRestore();
       render();
+      updateTypingFallback();
     }).catch(function (e) {
+      if (e && state.lastRenderError === e) {
+        // 渲染异常已在 render 内记录；不能当成网络失败，否则会误报“连接中断”
+        updateTypingFallback();
+        return;
+      }
       if (e.status === 401 || e.status === 400) {
         stopPolling();
         var msg = e.message || '';
@@ -452,7 +459,22 @@
     var snap = state.snap;
     if (!snap) return;
     state.bootRoomPending = false;
+    // 页面已拿到快照就算加载完成；即使下面渲染失败，也不能让全屏加载遮住兜底提示
     finishPageLoading(true);
+    var forceRedraw = state.renderBroken;
+    state.renderBroken = false;
+    try {
+      if (forceRedraw) resetDynamicDom();
+      renderSnapshot(snap);
+    } catch (e) {
+      state.renderBroken = true;
+      state.lastRenderError = e;
+      console.error('[比赛] 渲染异常', e, e && e.stack);
+      throw e;
+    }
+  }
+
+  function renderSnapshot(snap) {
     var st = snap.race.status;
     var seat = mySeat(snap);
     state.isSpectator = seat === 'spectator';
@@ -944,7 +966,7 @@
     hideCountdownOverlay();
     $('race-article').textContent = snap.race.articleTitle;
     $('race-meta').textContent = snap.race.charCount + ' 字';
-    mountEngine(snap, true);
+    ensureTypingMounted(snap);
     renderDuel(snap);
     updateOvertake(snap);
     updateSprint(snap);
@@ -998,6 +1020,90 @@
       }
     }
     if (enable && state.engineReady) { state.engine.enable(true); }
+  }
+
+  // 比赛进行中打字区缺失时自愈：清空旧容器和引擎，重建后按服务端进度恢复
+  function ensureTypingMounted(snap) {
+    if (state.isSpectator || !snap.me) return;
+    var box = $('race-typing');
+    var chars = box ? box.querySelectorAll('.char').length : 0;
+    if (state.engine && box && chars > 0) {
+      if (state.engineReady) state.engine.enable(true);
+      return;
+    }
+    if (state.engine) {
+      try { state.engine.destroy(); } catch (e) { console.error('[比赛] 清理打字引擎失败', e); }
+    }
+    state.engine = null;
+    state.engineReady = false;
+    box = ensureTypingContainer();
+    if (box) box.innerHTML = '';
+    state.needContent = true;
+    mountEngine(snap, true);
+  }
+
+  function ensureTypingContainer() {
+    var box = $('race-typing');
+    if (box) return box;
+    var main = document.querySelector('#view-race .race-main');
+    if (!main) return null;
+    box = document.createElement('div');
+    box.id = 'race-typing';
+    box.className = 'typing-pages';
+    var hint = $('race-typing-hint');
+    if (hint && hint.parentNode === main) main.insertBefore(box, hint.nextSibling);
+    else main.appendChild(box);
+    return box;
+  }
+
+  function resetDynamicDom() {
+    ['race-rank', 'race-spectator-live-list', 'race-mine', 'result-list', 'spec-board', 'room-players'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.innerHTML = '';
+    });
+    hideFx();
+  }
+
+  // 连续两次 tick 打字区仍为空时给出兜底入口，避免停在半成品页面
+  function updateTypingFallback() {
+    var snap = state.snap;
+    var racing = !!(snap && snap.race && snap.race.status === 'racing' && !state.isSpectator && snap.me);
+    if (!racing) {
+      state.emptyTypingTicks = 0;
+      removeTypingFallback();
+      return;
+    }
+    var box = $('race-typing');
+    var chars = box ? box.querySelectorAll('.char').length : 0;
+    if (chars > 0) {
+      state.emptyTypingTicks = 0;
+      removeTypingFallback();
+      return;
+    }
+    state.emptyTypingTicks += 1;
+    if (state.emptyTypingTicks >= 2) showTypingFallback();
+  }
+
+  function showTypingFallback() {
+    var snap = state.snap;
+    if (!snap || !snap.race || snap.race.status !== 'racing') return;
+    var main = document.querySelector('#view-race .race-main');
+    if (!main || $('race-typing-fallback')) return;
+    var wrap = document.createElement('div');
+    wrap.id = 'race-typing-fallback';
+    wrap.className = 'race-typing-fallback';
+    wrap.innerHTML = '<div>打字区没有正常载入。可以点下面按钮重新载入本局。</div>' +
+      '<button type="button" class="race-btn race-btn-primary" id="race-typing-reload">重新载入本局</button>';
+    var typing = $('race-typing');
+    if (typing && typing.parentNode === main) main.insertBefore(wrap, typing);
+    else main.appendChild(wrap);
+    var btn = wrap.querySelector('#race-typing-reload');
+    if (btn) btn.onclick = function () { location.reload(); };
+  }
+
+  function removeTypingFallback() {
+    var el = $('race-typing-fallback');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
   function renderRank(snap) {
@@ -1795,9 +1901,13 @@
     hideCountdownOverlay();
     clearRaceRestore();
     if (state.engine) { state.engine.destroy(); state.engine = null; }
+    state.engineReady = false;
     state.snap = null; state.code = null; state.raceToken = state.token;
     state.finished = false; state.isSpectator = false; state.focusNick = null;
     state.raceContent = null; state.needContent = false; state.rankExpanded = false;
+    state.renderBroken = false; state.lastRenderError = null;
+    state.emptyTypingTicks = 0;
+    removeTypingFallback();
     resetRevealAnimation();
     $('race-subnav-center').style.display = 'none';
     $('btn-exit-race').style.display = 'none';
@@ -1965,14 +2075,42 @@
   }
 
   state.token = localStorage.getItem('token');
-  window.addEventListener('resize', function () {
+
+  // 窗口尺寸/缩放变化后重算 #view-race 的断点类，避免卡在窄屏单列布局
+  function recalcRaceLayout() {
+    var view = $('view-race');
+    if (!view) return;
+    var w = window.innerWidth || document.documentElement.clientWidth || 0;
+    view.classList.toggle('race-layout-compact', w > 768 && w <= 1024);
+    view.classList.toggle('race-layout-narrow', w <= 768);
     updateRaceChrome();
     if (state.snap && state.isSpectator) renderSpectate(state.snap);
+  }
+  function scheduleRaceLayout() {
+    if (state.layoutTimer) clearTimeout(state.layoutTimer);
+    state.layoutTimer = setTimeout(function () {
+      state.layoutTimer = null;
+      recalcRaceLayout();
+    }, 200);
+  }
+
+  window.addEventListener('error', function (ev) {
+    var err = ev.error;
+    var where = ev.filename ? (ev.filename + ':' + ev.lineno + ':' + ev.colno) : '';
+    console.error('[比赛] 未捕获', ev.message, where, err && err.stack ? err.stack : '');
   });
+  window.addEventListener('unhandledrejection', function (ev) {
+    var reason = ev.reason;
+    console.error('[比赛] 未捕获', reason && (reason.stack || reason.message) || reason);
+  });
+  window.addEventListener('resize', scheduleRaceLayout);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleRaceLayout);
+
   bind();
   updateQuickMatchVisibility();
   initQuickMatch();
   showView('lobby');
   loadArticles();
   restoreRace();
+  recalcRaceLayout();
 })();
