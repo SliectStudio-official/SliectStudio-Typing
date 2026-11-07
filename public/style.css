@@ -4689,10 +4689,17 @@ body.dashboard-mode #site-footer { display: none; }
   color: #fff; background: #05070d; font-family: var(--font-body);
 }
 #view-dashboard .dash-viewport { position: absolute; inset: 0; overflow: hidden; }
-#view-dashboard .dash-stage { position: relative; width: 100%; height: 100%; overflow: hidden; color: #fff; }
+#view-dashboard .dash-stage {
+  position: relative; width: 100%; height: 100%; overflow: hidden; color: #fff;
+  perspective: 1400px; transform-style: preserve-3d;
+}
 
 /* 背景永远铺满：固定全视口 + cover，不再按 1920 画布缩放 */
-#view-dashboard .dash-bg { position: fixed; inset: 0; z-index: 0; }
+#view-dashboard .dash-bg {
+  position: fixed; inset: -24px; z-index: 0;
+  will-change: transform;
+  transform: translate3d(calc(var(--px, 0) * 16px), calc(var(--py, 0) * 12px), 0);
+}
 #view-dashboard .dash-bg img {
   display: block; width: 100%; height: 100%; object-fit: cover; object-position: center;
   transform: scale(1.04);
@@ -4712,6 +4719,8 @@ body.dashboard-mode #site-footer { display: none; }
 /* 科技网格与扫描线：纯 CSS 叠层，不拦截点击 */
 #view-dashboard .fx-grid {
   position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  will-change: transform;
+  transform: translate3d(calc(var(--px, 0) * 9.6px), calc(var(--py, 0) * 7.2px), 10px);
   background-image:
     repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 48px),
     repeating-linear-gradient(90deg, rgba(255,255,255,.05) 0 1px, transparent 1px 48px);
@@ -4741,8 +4750,14 @@ body.is-matching #view-dashboard .fx-scan {
   width: 100%; height: 100%;
   padding: clamp(120px, 26vh, 300px) clamp(24px, 4.7vw, 72px) clamp(24px, 4vh, 48px);
   align-items: start;
+  transform-style: preserve-3d;
 }
-#view-dashboard .dash-hero { grid-column: 1; grid-row: 1; align-self: start; min-width: 0; }
+#view-dashboard .dash-hero {
+  grid-column: 1; grid-row: 1; align-self: start; min-width: 0;
+  will-change: transform;
+  transform: translate3d(calc(var(--px, 0) * 6px), calc(var(--py, 0) * 4.5px), 30px)
+    rotateX(calc(var(--py, 0) * -1.2deg)) rotateY(calc(var(--px, 0) * 1.2deg));
+}
 #view-dashboard .dash-greeting {
   font-size: 14px; line-height: 1.5; font-weight: 400;
   color: rgba(255,255,255,.72);
@@ -4780,6 +4795,7 @@ body.is-matching #view-dashboard .fx-scan {
   display: block;
   width: clamp(280px, 22vw, 425px);
   min-width: 0;
+  transform-style: preserve-3d;
 }
 #view-dashboard .dash-action {
   --fx-ring-color: var(--primary);
@@ -4800,9 +4816,8 @@ body.is-matching #view-dashboard .fx-scan {
   box-shadow: 0 4px 5px rgba(0,0,0,.15);
   backdrop-filter: blur(var(--glass-blur-strong)) saturate(1.1);
   -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(1.1);
-  transform: perspective(700px) translate3d(var(--fx-tx, 0px), var(--fx-ty, 0px), 0)
-    rotateX(var(--fx-rx, 0deg)) rotateY(var(--fx-ry, 0deg));
-  transition: background 240ms ease, border-color 180ms ease, transform 120ms var(--ease-out);
+  transform: translate3d(var(--fx-tx, 0px), var(--fx-ty, 0px), 30px);
+  transition: background 240ms ease, border-color 180ms ease;
   animation: fxEnter 240ms var(--ease-out) backwards;
 }
 #view-dashboard .dash-action + .dash-action { margin-top: clamp(10px, 1vw, 15px); }
@@ -4893,6 +4908,7 @@ body.is-matching #view-dashboard .fx-scan {
   box-shadow: 0 4px 15px 5px rgba(0,0,0,.35);
   backdrop-filter: blur(var(--glass-blur-strong)) saturate(1.1);
   -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(1.1);
+  transform: translate3d(calc(var(--px, 0) * -6.4px), calc(var(--py, 0) * -4.8px), 40px);
   animation: fxEnter 240ms var(--ease-out) backwards;
   animation-delay: 240ms;
 }
@@ -4986,6 +5002,16 @@ body.is-matching #view-dashboard .fx-scan {
 #view-dashboard .dash-status-close:hover { background: rgba(255,255,255,.18); }
 #view-dashboard .dash-status-close svg { width: 16px; height: 16px; }
 
+/* P28：iOS 13+ 陀螺仪授权提示点；极淡、不抢焦点，仅授权前出现 */
+.fx-gyro-dot {
+  position: fixed; right: 16px; bottom: 16px; z-index: 6;
+  width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(255,255,255,.22);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.12);
+  opacity: .38; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* 顶部通知条（P25.1 行为不变） */
 .home-page .home-topbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
@@ -5057,11 +5083,14 @@ body.dashboard-mode.dash-list-mode { overflow: auto; }
   display: flex; flex-direction: column; gap: 16px;
   width: 100%; height: auto; min-height: 100vh; overflow: visible;
   padding: calc(48px + 16px) 16px 32px;
+  perspective: none;
+  transform-style: flat;
 }
 .home-page #view-dashboard.is-list .dash-home { position: static; order: 0; margin: 0 0 4px; }
 .home-page #view-dashboard.is-list .dash-main {
   display: flex; flex-direction: column; gap: 16px;
   width: 100%; height: auto; padding: 0; order: 1;
+  perspective: 1400px;
 }
 .home-page #view-dashboard.is-list .dash-hero { order: 0; }
 .home-page #view-dashboard.is-list .dash-actions { order: 1; display: grid; grid-template-columns: 1fr; gap: 12px; width: 100%; }
@@ -5124,6 +5153,12 @@ body.fx-paused #view-dashboard .dash-quick.is-matching { animation-play-state: p
   #view-dashboard .dash-quick.is-matching,
   #view-dashboard .dash-quick.is-matching .dash-action-title::before,
   #view-dashboard .dash-status-bar { animation: none !important; transition: none !important; }
+  #view-dashboard .dash-stage,
+  #view-dashboard .dash-main { perspective: none !important; }
+  #view-dashboard .dash-bg,
+  #view-dashboard .fx-grid,
+  #view-dashboard .dash-hero,
+  #view-dashboard .dash-profile,
   #view-dashboard .dash-action { transform: none !important; }
 }
 

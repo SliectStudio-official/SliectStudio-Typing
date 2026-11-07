@@ -13,7 +13,20 @@
     countRaf: null,
     countTasks: [],
     matchPollTimer: null,
-    matchPollInFlight: false
+    matchPollInFlight: false,
+    fx: {
+      active: false,
+      raf: null,
+      x: 0,
+      y: 0,
+      tx: 0,
+      ty: 0,
+      idleTimer: null,
+      gyroBound: false,
+      gyroSeen: false,
+      gyroTimer: null,
+      gyroDenied: false
+    }
   };
 
   function $(id) { return document.getElementById(id); }
@@ -379,35 +392,142 @@
     if (bell) bell.setAttribute('aria-expanded', 'false');
   }
 
-  /* ---------- 指针视差与页面隐藏暂停 ---------- */
-  function resetCard(card) {
-    ['--fx-tx', '--fx-ty', '--fx-rx', '--fx-ry', '--fx-mx', '--fx-my'].forEach(function (name) {
-      card.style.removeProperty(name);
-    });
+  /* ---------- 指针视差：单一来源 + 单 rAF 阻尼 ----------
+     mousemove 与陀螺仪只写 state.fx.tx/ty，所有层都消费同一组 CSS 变量；
+     每帧只写 dash-stage 一个元素，避免各元素各绑一套事件。 */
+  var FX_LERP = 0.1;
+  var FX_IDLE_MS = 400;
+  function clampPointer(v) { return v < -1 ? -1 : (v > 1 ? 1 : v); }
+  function writePointerFrame() {
+    var stage = $('dash-stage');
+    if (!stage) return;
+    var fx = state.fx;
+    stage.style.setProperty('--px', fx.x.toFixed(3));
+    stage.style.setProperty('--py', fx.y.toFixed(3));
+    stage.style.setProperty('--fx-tx', (fx.x * 4).toFixed(2) + 'px');
+    stage.style.setProperty('--fx-ty', (fx.y * 4).toFixed(2) + 'px');
   }
+  function pointerFrame() {
+    state.fx.raf = null;
+    if (document.hidden) return;
+    var fx = state.fx;
+    var dx = fx.tx - fx.x;
+    var dy = fx.ty - fx.y;
+    fx.x += dx * FX_LERP;
+    fx.y += dy * FX_LERP;
+    if (Math.abs(dx) < 0.0008 && Math.abs(dy) < 0.0008) {
+      fx.x = fx.tx;
+      fx.y = fx.ty;
+      writePointerFrame();
+      return;
+    }
+    writePointerFrame();
+    state.fx.raf = requestAnimationFrame(pointerFrame);
+  }
+  function kickPointer() {
+    if (!state.fx.active || document.hidden) return;
+    if (!state.fx.raf) state.fx.raf = requestAnimationFrame(pointerFrame);
+  }
+  function onPointerMove(e) {
+    var fx = state.fx;
+    if (!fx.active) return;
+    fx.tx = clampPointer((e.clientX / window.innerWidth) * 2 - 1);
+    fx.ty = clampPointer((e.clientY / window.innerHeight) * 2 - 1);
+    kickPointer();
+    if (fx.idleTimer) clearTimeout(fx.idleTimer);
+    fx.idleTimer = setTimeout(function () {
+      fx.tx = 0;
+      fx.ty = 0;
+      kickPointer();
+    }, FX_IDLE_MS);
+  }
+  function onOrientation(e) {
+    var fx = state.fx;
+    if (!fx.active) return;
+    var beta = Number(e.beta);
+    var gamma = Number(e.gamma);
+    if (!isFinite(beta) || !isFinite(gamma)) return;
+    if (beta === 0 && gamma === 0) return;
+    fx.gyroSeen = true;
+    fx.tx = clampPointer(gamma / 30);
+    fx.ty = clampPointer(beta / 30);
+    kickPointer();
+  }
+  function bindGyro() {
+    var fx = state.fx;
+    if (!fx.active || fx.gyroBound || fx.gyroDenied) return;
+    fx.gyroBound = true;
+    fx.gyroSeen = false;
+    window.addEventListener('deviceorientation', onOrientation, { passive: true });
+    fx.gyroTimer = setTimeout(function () {
+      if (fx.gyroSeen) return;
+      /* 两秒内没有有效数据：静默降级为静态，不留监听 */
+      window.removeEventListener('deviceorientation', onOrientation);
+      fx.gyroBound = false;
+    }, 2000);
+  }
+  function requestGyroPermission(dot) {
+    dot.style.display = 'none';
+    try {
+      Promise.resolve(window.DeviceOrientationEvent.requestPermission()).then(function (result) {
+        if (result === 'granted') bindGyro();
+        else state.fx.gyroDenied = true;
+      }).catch(function () { state.fx.gyroDenied = true; });
+    } catch (e) {
+      state.fx.gyroDenied = true;
+    }
+  }
+  function initGyro() {
+    if (typeof window.DeviceOrientationEvent === 'undefined') return;
+    if (typeof window.DeviceOrientationEvent.requestPermission === 'function') {
+      var dot = $('fx-gyro-dot');
+      if (!dot) return;
+      dot.style.display = 'block';
+      dot.addEventListener('click', function () { requestGyroPermission(dot); }, { once: true });
+      return;
+    }
+    bindGyro();
+  }
+  function initParallax() {
+    if (reduceMotion()) return; /* 减弱动效：连事件都不绑 */
+    var coarse = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+    var fine = window.matchMedia ? window.matchMedia('(pointer: fine)').matches : false;
+    state.fx.active = true;
+    if (coarse && !fine) { initGyro(); return; } /* 触摸设备只用陀螺仪，有鼠标才用鼠标 */
+    window.addEventListener('mousemove', onPointerMove, { passive: true });
+  }
+
+  /* 卡片局部高光仍跟随卡片内坐标；位移全部来自上面的单一指针源 */
   function bindCardEffects() {
+    if (reduceMotion()) return;
     if (!window.matchMedia || window.matchMedia('(pointer: coarse)').matches) return;
     Array.prototype.forEach.call(document.querySelectorAll('#view-dashboard .dash-action'), function (card) {
       card.addEventListener('mousemove', function (e) {
         if (reduceMotion()) return;
         var r = card.getBoundingClientRect();
         if (!r.width || !r.height) return;
-        var nx = ((e.clientX - r.left) / r.width) * 2 - 1;
-        var ny = ((e.clientY - r.top) / r.height) * 2 - 1;
-        card.style.setProperty('--fx-tx', (nx * 4).toFixed(2) + 'px');
-        card.style.setProperty('--fx-ty', (ny * 2).toFixed(2) + 'px');
-        card.style.setProperty('--fx-rx', (-ny * 2).toFixed(2) + 'deg');
-        card.style.setProperty('--fx-ry', (nx * 2).toFixed(2) + 'deg');
         card.style.setProperty('--fx-mx', (((e.clientX - r.left) / r.width) * 100).toFixed(1) + '%');
         card.style.setProperty('--fx-my', (((e.clientY - r.top) / r.height) * 100).toFixed(1) + '%');
       });
-      card.addEventListener('mouseleave', function () { resetCard(card); });
+      card.addEventListener('mouseleave', function () {
+        card.style.removeProperty('--fx-mx');
+        card.style.removeProperty('--fx-my');
+      });
     });
   }
   function bindVisibilityPause() {
     var apply = function () {
-      document.body.classList.toggle('fx-paused', !!document.hidden);
-      if (!document.hidden) startCountLoop();
+      var hidden = !!document.hidden;
+      document.body.classList.toggle('fx-paused', hidden);
+      if (hidden) {
+        if (state.fx.raf) {
+          cancelAnimationFrame(state.fx.raf);
+          state.fx.raf = null;
+        }
+        return;
+      }
+      startCountLoop();
+      kickPointer();
     };
     document.addEventListener('visibilitychange', apply);
     apply();
@@ -463,6 +583,7 @@
     });
     window.addEventListener('beforeunload', stopMatchPolling);
     window.addEventListener('pagehide', stopMatchPolling);
+    initParallax();
     bindCardEffects();
     bindVisibilityPause();
   }
