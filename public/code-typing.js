@@ -26,6 +26,8 @@
     var errorSet = {};
     var lastValue = '';
     var rafId = null;
+    var selectionRafId = null;
+    var rootEl = null;
     var input;
     var ghost;
     var stage;
@@ -44,9 +46,9 @@
       var root = document.createElement('div');
       root.id = 'code-typing';
       root.className = 'code-editor';
+      rootEl = root;
       root.innerHTML =
         '<div class="code-editor-head">' +
-          '<span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>' +
           '<span class="code-file"></span><span class="code-lang">代码</span>' +
           '<span class="code-stats">' +
             '<span>进度 <b data-code-stat="progress">0%</b></span>' +
@@ -105,6 +107,11 @@
       input.addEventListener('keyup', scheduleCaret);
       input.addEventListener('click', scheduleCaret);
       input.addEventListener('focus', scheduleCaret);
+      input.addEventListener('select', scheduleSelection);
+      input.addEventListener('keyup', scheduleSelection);
+      input.addEventListener('mouseup', scheduleSelection);
+      input.addEventListener('click', scheduleSelection);
+      document.addEventListener('selectionchange', onSelectionChange);
     }
 
     function prevent(e) {
@@ -164,7 +171,7 @@
           else cls = 'char ch-bad ch-typed wrong';
           if (shown === ' ') shown = '\u00b7';
           else shown = escapeChar(shown);
-          html += '<span class="' + cls + '">' + shown + '</span>';
+          html += '<span class="' + cls + '" data-index="' + i + '">' + shown + '</span>';
         }
         ghost.innerHTML = html;
         var lines = text.split('\n').length;
@@ -178,6 +185,7 @@
         statsEls.errors.textContent = s.errors;
         statsEls.time.textContent = (s.elapsedMs / 1000).toFixed(1);
         scheduleCaret();
+        scheduleSelection();
         if (!finished && value.length >= text.length && text.length > 0) finish();
         emit(s);
       } catch (e) {
@@ -343,6 +351,29 @@
       rafId = requestAnimationFrame(ensureCaretVisible);
     }
 
+    // 低透明度选区在 Chromium 双击时仍会盖住 ghost 文字，改为自绘选区
+    function updateSelectionHighlight() {
+      selectionRafId = null;
+      if (!input || !ghost || destroyed) return;
+      var start = input.selectionStart || 0;
+      var end = input.selectionEnd || 0;
+      if (rootEl) rootEl.classList.toggle('selecting', end > start);
+      var chars = ghost.querySelectorAll('.char');
+      for (var i = 0; i < chars.length; i++) {
+        var idx = Number(chars[i].getAttribute('data-index'));
+        chars[i].classList.toggle('sel', idx >= start && idx < end);
+      }
+    }
+
+    function scheduleSelection() {
+      if (selectionRafId || destroyed) return;
+      selectionRafId = requestAnimationFrame(updateSelectionHighlight);
+    }
+
+    function onSelectionChange() {
+      if (document.activeElement === input) scheduleSelection();
+    }
+
     function restore(typedCount) {
       try {
         var n = Math.max(0, Math.min(text.length, Number(typedCount) || 0));
@@ -374,6 +405,8 @@
       if (destroyed) return;
       destroyed = true;
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      if (selectionRafId) { cancelAnimationFrame(selectionRafId); selectionRafId = null; }
+      document.removeEventListener('selectionchange', onSelectionChange);
       try {
         if (container) {
           container.innerHTML = '';
