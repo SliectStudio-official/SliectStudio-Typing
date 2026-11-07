@@ -1,9 +1,13 @@
 let articles = [];
 let categories = [];
+let codeCategoryIds = [];
+let codeLanguagesAll = [];
 let leaderboardData = [];
 let currentUser = null;
 let currentFilter = '';
 let weeklyChart = null;
+let adminMode = 'normal';
+try { if (localStorage.getItem('adminMode') === 'code') adminMode = 'code'; } catch (e) {}
 
 const adminContent = document.querySelector('.admin-layout') || document.body;
 const adminUsername = document.getElementById('admin-username');
@@ -36,6 +40,7 @@ const editArticleError = document.getElementById('edit-article-error');
 const editArticleCancel = document.getElementById('edit-article-cancel');
 const editArticleSave = document.getElementById('edit-article-save');
 let editingArticleId = null;
+let editingArticleIsCode = false;
 
 const crawlUrl = document.getElementById('crawl-url');
 const crawlBtn = document.getElementById('crawl-btn');
@@ -1230,6 +1235,91 @@ databaseNextPage.addEventListener('click', () => {
   loadDatabaseTable();
 });
 
+function isCodeCategoryClient(id) {
+  return codeCategoryIds.indexOf(String(id)) >= 0;
+}
+
+function isCodeArticleClient(article) {
+  return !!(article && article.category_id != null && isCodeCategoryClient(article.category_id));
+}
+
+function categoryArticleCount(id) {
+  const row = codeLanguagesAll.find(r => String(r.id) === String(id));
+  return row && row.articleCount != null ? Number(row.articleCount) : null;
+}
+
+async function fetchCodeLanguages() {
+  const res = await fetch('/api/admin/code-languages', { headers: apiHeaders() });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || '加载语言分类失败');
+  }
+  const data = await res.json();
+  codeLanguagesAll = Array.isArray(data.all) ? data.all : [];
+  codeCategoryIds = (Array.isArray(data.selected) ? data.selected : []).map(String);
+  renderCodeLanguagePanel();
+  return data;
+}
+
+function renderCodeLanguagePanel() {
+  const list = document.getElementById('code-lang-list');
+  if (!list) return;
+  const empty = document.getElementById('code-lang-list-empty');
+  list.innerHTML = '';
+  if (codeLanguagesAll.length === 0) {
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  codeLanguagesAll.forEach(c => {
+    const selected = isCodeCategoryClient(c.id);
+    const count = Number(c.articleCount) || 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><span class="code-lang-name">' + escapeHtml(c.name) + '</span></td>' +
+      '<td>' + count + '</td>' +
+      '<td><button type="button" class="admin-switch" role="switch" aria-checked="' + (selected ? 'true' : 'false') + '" aria-label="把 ' + escapeHtml(c.name) + ' 设为代码语言" data-id="' + c.id + '"' + (codeLanguageBusy ? ' disabled' : '') + '></button></td>' +
+      '<td>' + (selected && count > 0 ? '<span class="code-lang-warning">该分类下的 ' + count + ' 篇文章会被当作代码素材</span>' : '') + '</td>';
+    tr.querySelector('.admin-switch').addEventListener('click', function() {
+      toggleCodeLanguage(c);
+    });
+    list.appendChild(tr);
+  });
+}
+
+let codeLanguageBusy = false;
+async function toggleCodeLanguage(category) {
+  if (codeLanguageBusy) return;
+  const id = String(category.id);
+  const selected = isCodeCategoryClient(id);
+  const next = codeCategoryIds.filter(x => x !== id);
+  if (!selected) next.push(id);
+  codeLanguageBusy = true;
+  renderCodeLanguagePanel();
+  try {
+    const res = await fetch('/api/admin/code-languages', {
+      method: 'PUT',
+      headers: apiHeaders(),
+      body: JSON.stringify({ ids: next.map(Number) })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '保存失败');
+    codeCategoryIds = (Array.isArray(data.selected) ? data.selected : []).map(String);
+    const msg = document.getElementById('code-lang-msg');
+    if (msg) msg.textContent = '已生效，练习页与匹配的分流会在下次进入时使用新设置';
+    adminToast('已更新代码语言分类', 'success');
+    renderCategories();
+    renderCategorySelects();
+    if (articles.length) fetchArticles();
+  } catch (e) {
+    adminToast(e.message || '保存代码语言分类失败', 'error');
+  } finally {
+    codeLanguageBusy = false;
+    renderCodeLanguagePanel();
+  }
+}
+
 async function fetchCategories() {
   const res = await fetch('/api/categories');
   categories = await res.json();
@@ -1239,17 +1329,22 @@ async function fetchCategories() {
 
 function renderCategories() {
   categoryList.innerHTML = '';
-  if (categories.length === 0) {
+  const normalCategories = categories.filter(c => !isCodeCategoryClient(c.id));
+  if (normalCategories.length === 0) {
     categoryEmpty.style.display = 'block';
     return;
   }
   categoryEmpty.style.display = 'none';
 
-  categories.forEach(c => {
+  normalCategories.forEach(c => {
     const div = document.createElement('div');
     div.className = 'category-item';
+    const count = categoryArticleCount(c.id);
+    const emptyNote = (c.name === '代码' && count === 0)
+      ? '<span class="category-empty-note">（空分类，可删除）</span>'
+      : '';
     div.innerHTML =
-      '<span class="name">' + escapeHtml(c.name) + '</span>' +
+      '<span class="name">' + escapeHtml(c.name) + emptyNote + '</span>' +
       '<div class="actions">' +
         '<button class="btn-dark-utility edit-cat-btn" data-id="' + c.id + '" data-name="' + escapeHtml(c.name) + '">编辑</button>' +
         '<button class="btn-dark-utility del-cat-btn" data-id="' + c.id + '">删除</button>' +
@@ -1287,7 +1382,7 @@ function renderCategorySelects() {
   crawlSaveCategory.innerHTML = '<option value="">-- 选择分类 --</option>';
   lbFilter.innerHTML = '<option value="">全部文章</option>';
 
-  categories.forEach(c => {
+  categories.filter(c => !isCodeCategoryClient(c.id)).forEach(c => {
     const opt1 = document.createElement('option');
     opt1.value = c.id;
     opt1.textContent = c.name;
@@ -1357,7 +1452,8 @@ async function fetchArticles() {
 
   const url = '/api/articles?' + params.toString();
   const res = await fetch(url, { headers: apiHeaders() });
-  articles = await res.json();
+  const list = await res.json();
+  articles = (Array.isArray(list) ? list : []).filter(a => !isCodeArticleClient(a));
   renderArticles();
 }
 
@@ -1703,18 +1799,21 @@ addArticleBtn.addEventListener('click', async () => {
 
 function openEditModal(article) {
   editingArticleId = article.id;
+  editingArticleIsCode = isCodeArticleClient(article);
   editTitle.value = article.title;
   editContent.value = article.content;
   editArticleError.textContent = '';
 
   editCategorySelect.innerHTML = '<option value="">-- 请选择分类 --</option>';
-  categories.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.name;
-    if (c.id === article.category_id) opt.selected = true;
-    editCategorySelect.appendChild(opt);
-  });
+  categories
+    .filter(c => editingArticleIsCode ? isCodeCategoryClient(c.id) : !isCodeCategoryClient(c.id))
+    .forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      if (c.id === article.category_id) opt.selected = true;
+      editCategorySelect.appendChild(opt);
+    });
 
   editDifficultySelect.value = article.difficulty || '0';
 
@@ -2087,6 +2186,28 @@ confirmOk.addEventListener('click', async () => {
 
 function escapeHtml(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function adminToast(message, type) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + (type || 'info');
+  const icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.textContent = type === 'success' ? '✓' : (type === 'error' ? '!' : 'i');
+  const text = document.createElement('span');
+  text.textContent = message;
+  const progress = document.createElement('span');
+  progress.className = 'toast-progress';
+  el.appendChild(icon);
+  el.appendChild(text);
+  el.appendChild(progress);
+  container.appendChild(el);
+  setTimeout(function () {
+    el.classList.add('toast-exit');
+    setTimeout(function () { el.remove(); }, 260);
+  }, 3000);
 }
 
 async function loadVersion() {
@@ -2590,9 +2711,47 @@ const sectionLoaders = {
   },
   races: () => loadRaceRooms(),
   backup: () => loadBackups(),
-  crawler: () => Promise.resolve()
+  crawler: () => Promise.resolve(),
+  'code-articles': () => Promise.resolve(),
+  'code-langs': async () => {
+    await fetchCodeLanguages();
+    if (categories.length) {
+      renderCategories();
+      renderCategorySelects();
+    }
+  },
+  'code-lb': () => Promise.resolve()
 };
 const loadedSections = new Set();
+
+const ADMIN_CODE_SECTIONS = new Set(['code-articles', 'code-langs', 'code-lb']);
+
+function isCodeSection(section) {
+  return ADMIN_CODE_SECTIONS.has(section);
+}
+
+function defaultSectionForMode(mode) {
+  return mode === 'code' ? 'code-articles' : 'overview';
+}
+
+function applyAdminMode(mode) {
+  adminMode = mode === 'code' ? 'code' : 'normal';
+  document.body.classList.toggle('admin-mode-code', adminMode === 'code');
+  document.body.classList.toggle('admin-mode-normal', adminMode === 'normal');
+  const normalRadio = document.getElementById('admin-mode-normal');
+  const codeRadio = document.getElementById('admin-mode-code');
+  if (normalRadio) normalRadio.checked = adminMode === 'normal';
+  if (codeRadio) codeRadio.checked = adminMode === 'code';
+}
+
+async function switchAdminMode(mode) {
+  applyAdminMode(mode);
+  try { localStorage.setItem('adminMode', adminMode); } catch (e) {}
+  const target = defaultSectionForMode(adminMode);
+  activateSection(target);
+  history.replaceState(null, null, '#' + target);
+  await loadSectionData(target);
+}
 
 async function loadSectionData(section) {
   // 比赛房间是实时内存数据，每次切回该区块都重新拉取
@@ -2625,6 +2784,8 @@ async function init() {
     loadVersion();
     const authed = await checkAuth();
     if (!authed) return;
+    // 代码分类先就绪，普通文章/分类过滤才能正确排除代码素材
+    await fetchCodeLanguages().catch(() => {});
     // 首屏只加载概览和分类，其余 section 按需加载
     await Promise.all([
       loadDashboard().catch(() => {}),
@@ -2655,19 +2816,28 @@ document.querySelectorAll('.admin-sidebar .nav-menu a').forEach(link => {
   });
 });
 
+document.getElementById('admin-mode-normal').addEventListener('change', function () {
+  if (this.checked) switchAdminMode('normal');
+});
+document.getElementById('admin-mode-code').addEventListener('change', function () {
+  if (this.checked) switchAdminMode('code');
+});
+
 async function showSectionFromHash() {
-  let hash = location.hash.slice(1) || 'overview';
+  let hash = location.hash.slice(1);
   // 处理 hash 以 "section-" 开头的情况（如 #section-overview → overview）
   if (hash.indexOf('section-') === 0) {
     hash = hash.slice(8);
   }
   let link = document.querySelector('.admin-sidebar .nav-menu a[data-section="' + hash + '"]');
-  // fallback: 找不到匹配的链接时默认激活 overview
+  // fallback: 找不到匹配的链接时按当前模式进入默认区块
   if (!link) {
-    hash = 'overview';
-    link = document.querySelector('.admin-sidebar .nav-menu a[data-section="overview"]');
+    hash = defaultSectionForMode(adminMode);
+    link = document.querySelector('.admin-sidebar .nav-menu a[data-section="' + hash + '"]');
   }
   if (link) {
+    applyAdminMode(isCodeSection(hash) ? 'code' : 'normal');
+    try { localStorage.setItem('adminMode', adminMode); } catch (e) {}
     activateSection(hash);
     await loadSectionData(hash);
   }

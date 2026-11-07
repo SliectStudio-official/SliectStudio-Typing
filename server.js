@@ -2856,6 +2856,45 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
   }
 });
 
+app.get('/api/admin/code-languages', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const all = await db.all(
+      'SELECT c.id, c.name, COUNT(a.id) AS articleCount FROM categories c LEFT JOIN articles a ON a.category_id = c.id GROUP BY c.id, c.name ORDER BY c.id'
+    );
+    const selected = await getCodeCategoryIds();
+    res.json({ all, selected });
+  } catch (e) {
+    res.status(500).json({ error: '获取代码语言分类失败' });
+  }
+});
+
+app.put('/api/admin/code-languages', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const ids = req.body && req.body.ids;
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: 'ids 必须是非负整数数组' });
+    }
+    if (ids.length > 20) {
+      return res.status(400).json({ error: '最多选择 20 个分类' });
+    }
+    if (ids.some(id => !Number.isInteger(id) || id < 0)) {
+      return res.status(400).json({ error: 'ids 必须是非负整数数组' });
+    }
+    const unique = Array.from(new Set(ids));
+    if (unique.length) {
+      const placeholders = unique.map(() => '?').join(',');
+      const rows = await db.all('SELECT id FROM categories WHERE id IN (' + placeholders + ')', ...unique);
+      if (rows.length !== unique.length) {
+        return res.status(400).json({ error: '分类不存在' });
+      }
+    }
+    await setCodeCategoryIds(unique);
+    res.json({ selected: await getCodeCategoryIds() });
+  } catch (e) {
+    res.status(500).json({ error: '保存代码语言分类失败' });
+  }
+});
+
 app.post('/api/admin/backup/create', authMiddleware, adminMiddleware, acquireBackupTask, async (req, res) => {
   try {
     const body = req.body || {};

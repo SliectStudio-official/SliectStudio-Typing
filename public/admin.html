@@ -76,7 +76,7 @@
     }
   </style>
 </head>
-<body data-page="admin">
+<body data-page="admin" class="admin-mode-normal">
   <div id="site-nav"></div>
 
   <div class="sub-nav">
@@ -105,11 +105,22 @@
           <li><a href="#database" data-section="database"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"></path></svg></span> 数据库管理</a></li>
           <li><a href="#races" data-section="races"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"></path><path d="M12 17v4"></path><path d="M7 4h10v5a5 5 0 0 1-10 0z"></path><path d="M7 6H5a2 2 0 0 0 0 4h2"></path><path d="M17 6h2a2 2 0 0 1 0 4h-2"></path></svg></span> 比赛房间</a></li>
           <li><a href="#backup" data-section="backup"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"></path><path d="M1 3h22v5H1z"></path><path d="M10 12h4"></path></svg></span> 备份与恢复</a></li>
+          <li class="admin-code-nav"><a href="#code-articles" data-section="code-articles"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><path d="m10 12-2 2 2 2"></path><path d="m14 12 2 2-2 2"></path></svg></span> 代码素材</a></li>
+          <li class="admin-code-nav"><a href="#code-langs" data-section="code-langs"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg></span> 语言分类</a></li>
+          <li class="admin-code-nav"><a href="#code-lb" data-section="code-lb"><span class="nav-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path></svg></span> 代码榜</a></li>
         </ul>
       </div>
     </aside>
 
     <main class="admin-main">
+      <div class="admin-mode-tabs-wrap">
+        <div class="segmented-control" id="admin-mode-tabs" aria-label="管理模式">
+          <input type="radio" name="admin-mode" value="normal" id="admin-mode-normal" checked>
+          <label for="admin-mode-normal">普通模式管理</label>
+          <input type="radio" name="admin-mode" value="code" id="admin-mode-code">
+          <label for="admin-mode-code">代码模式管理</label>
+        </div>
+      </div>
       <div class="section-card admin-section" id="section-overview">
         <div class="section-card-title">管理概览</div>
         <div class="dashboard-stats">
@@ -547,6 +558,28 @@
           </div>
           <p class="note">仅支持本系统生成的 .zip 备份，最大 100 MB。恢复会先自动备份当前数据库，重启服务后生效。</p>
         </div>
+      </div>
+      <div class="section-card admin-section admin-code-only" id="section-code-articles">
+        <div class="section-card-title">代码素材管理</div>
+      </div>
+
+      <div class="section-card admin-section admin-code-only" id="section-code-langs">
+        <div class="section-card-title">语言分类</div>
+        <p class="note" style="margin-bottom:12px">勾选哪些分类算代码语言；代码素材、代码房间与代码榜都按这里的分流。改动保存后立即生效，练习页与匹配的分流会在下次进入时使用新设置。</p>
+        <div class="database-table-wrap">
+          <table class="database-table">
+            <thead>
+              <tr><th>分类</th><th>文章数</th><th>算代码语言</th><th>提示</th></tr>
+            </thead>
+            <tbody id="code-lang-list"></tbody>
+          </table>
+        </div>
+        <div class="empty-msg" id="code-lang-list-empty">暂无分类</div>
+        <p class="note" id="code-lang-msg"></p>
+      </div>
+
+      <div class="section-card admin-section admin-code-only" id="section-code-lb">
+        <div class="section-card-title">代码榜管理</div>
       </div>
     </main>
   </div>
