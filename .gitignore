@@ -43,3 +43,6 @@ Typing-*.zip
 Thumbs.db
 __pycache__/
 *.msi
+
+# 临时产物（建盘约定）
+tmp/
