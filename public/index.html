@@ -43,6 +43,15 @@
   <div class="container">
     <div class="section-card">
       <div class="section-card-title">选择文章</div>
+      <div class="practice-kind-row">
+        <div class="segmented-control" id="practice-kind-control">
+          <input type="radio" name="practice-kind" value="normal" id="kind-normal" checked>
+          <label for="kind-normal">普通文章</label>
+          <input type="radio" name="practice-kind" value="code" id="kind-code">
+          <label for="kind-code">代码模式</label>
+        </div>
+        <span class="note" id="practice-kind-hint"></span>
+      </div>
       <div class="filter-row">
         <div class="filter-group">
           <label for="category-filter">分类筛选</label>
@@ -141,6 +150,7 @@
     <div class="section-card" id="result-card" style="display:none">
       <div class="result-panel">
         <div class="result-title">练习完成</div>
+        <div class="result-kind-note" id="result-code-note" style="display:none">代码模式</div>
         <div class="result-stats">
           <div class="result-stat">
             <div class="label">速度</div>
@@ -184,6 +194,7 @@
           <button class="lb-tab" data-period="week">本周</button>
           <button class="lb-tab" data-period="today">今日</button>
           <button class="lb-tab" data-period="guest">游客榜</button>
+          <button class="lb-tab" data-period="code">代码榜</button>
         </div>
         <div class="lb-filter-row">
           <select id="lb-category-filter" class="custom-select">
@@ -286,6 +297,7 @@
   <script src="nav.js"></script>
   <script src="announcement-bar.js"></script>
   <script src="typing-engine.js"></script>
+  <script src="code-typing.js"></script>
   <script src="custom-select.js" defer></script>
   <script src="script.js" defer></script>
 </body>

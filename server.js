@@ -1128,6 +1128,7 @@ async function createMatchedRoom(first, second, article, candidates) {
   const room = {
     code, raceId: null, hostUserId: first.userId, hostNickname, status: 'reveal',
     articleId: article.id, articleTitle: article.title, content: article.content, charCount: article.content.length,
+    articleCategory: article.category_name || '',
     maxPlayers: 2, isPublic: false, passwordHash: null,
     createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
@@ -1191,19 +1192,39 @@ async function attemptMatch() {
       return { hint: '房间已满，请稍后再试', roomFull: true };
     }
     matchRoomFullLogged = false;
-    const first = matchQueue[0];
-    const second = matchQueue[1];
+    // 只在 allowCode 相同的两人之间配对；一端想打代码、一端不想时继续各自等待
+    let first = null;
+    let second = null;
+    for (let i = 0; i < matchQueue.length && !first; i++) {
+      for (let j = i + 1; j < matchQueue.length; j++) {
+        if (!!matchQueue[i].allowCode === !!matchQueue[j].allowCode) {
+          first = matchQueue[i];
+          second = matchQueue[j];
+          break;
+        }
+      }
+    }
     if (!first || !second || first.userId === second.userId) return null;
-    const rows = await db.all("SELECT id, title, content FROM articles WHERE status = 'approved'");
+    const allowCode = first.allowCode === true;
+    const rows = await db.all("SELECT a.id, a.title, a.content, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.status = 'approved'");
     // 只收适合比赛的 100–800 字正文；200–400 优先，其余 100–800 稳定排在后面
-    const pool = rows
-      .filter(function (row) { return row.content && row.content.length >= 100 && row.content.length <= 800; })
+    let pool = rows
+      .filter(function (row) {
+        if (!row.content || row.content.length < 100 || row.content.length > 800) return false;
+        if (!allowCode && row.category_name === '代码') return false;
+        return true;
+      })
       .map(function (row, index) {
         var len = row.content.length;
         return { row: row, index: index, rank: len >= 200 && len <= 400 ? 0 : 1 };
       })
       .sort(function (a, b) { return a.rank - b.rank || a.index - b.index; })
       .map(function (item) { return item.row; });
+    if (allowCode) {
+      // 双方都勾选“允许代码”时优先配代码素材；没有可用代码素材再退回普通池
+      const codePool = pool.filter(function (row) { return row.category_name === '代码'; });
+      if (codePool.length) pool = codePool;
+    }
     if (!pool.length) {
       console.warn('[匹配] 候选不足 三篇→0 篇');
       return { hint: '暂无可用文章，请稍后再试' };
@@ -1228,7 +1249,7 @@ async function attemptMatch() {
       const idx = matchQueue.findIndex(function (item) { return item.userId === entry.userId; });
       if (idx >= 0) matchQueue.splice(idx, 1);
     });
-    console.log('[匹配] 配对成功', { code: room.code, first: first.userId, second: second.userId });
+    console.log('[匹配] 配对成功', { code: room.code, first: first.userId, second: second.userId, allowCode: allowCode });
     return { matched: room.code };
   } finally {
     matchAttempting = false;
@@ -1369,6 +1390,7 @@ function buildSnapshot(room, player, spectator, options) {
       remainMs: remainMs,
       reveal: revealView,
       dissolveRule: dissolveRule(room),
+      articleCategory: room.articleCategory || '',
       mySeat: player ? 'player' : (spectator ? 'spectator' : null),
       spectatorTotal: spectatorTotal,
       serverNow: nowMs
@@ -1690,7 +1712,7 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     if (!Number.isInteger(aid)) {
       return res.status(400).json({ error: '请选择文章' });
     }
-    const article = await db.get('SELECT id, title, content FROM articles WHERE id = ?', aid);
+    const article = await db.get('SELECT a.id, a.title, a.content, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', aid);
     if (!article) {
       return res.status(400).json({ error: '文章不存在' });
     }
@@ -1710,6 +1732,7 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     const room = {
       code, raceId: null, hostUserId: req.user.id, hostNickname, status: 'waiting',
       articleId: aid, articleTitle: article.title, content: article.content, charCount: article.content.length,
+      articleCategory: article.category_name || '',
       maxPlayers: mp, isPublic: isPublic !== false, passwordHash: bcrypt.hashSync(password, 10),
       createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
       cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
@@ -1752,7 +1775,11 @@ app.post('/api/race/match/join', authMiddleware, async (req, res) => {
     if (findRoomBySpectator(req.user.id, true)) {
       return res.status(400).json({ error: '你已在其他比赛房间中' });
     }
+    const allowCode = !!(req.body && req.body.allowCode === true);
     let entry = findMatchEntry(req.user.id);
+    if (entry) {
+      entry.allowCode = allowCode;
+    }
     if (!entry) {
       if (matchQueue.length >= MATCH_QUEUE_LIMIT) {
         return res.status(400).json({ error: '队列已满，请稍后再试' });
@@ -1762,7 +1789,8 @@ app.post('/api/race/match/join', authMiddleware, async (req, res) => {
         userId: req.user.id,
         username: user ? user.username : req.user.username,
         nickname: user ? (user.nickname || user.username) : req.user.username,
-        joinedAt: Date.now()
+        joinedAt: Date.now(),
+        allowCode: allowCode
       };
       matchQueue.push(entry);
     }
@@ -1776,7 +1804,8 @@ app.post('/api/race/match/join', authMiddleware, async (req, res) => {
         userId: req.user.id,
         username: user ? user.username : req.user.username,
         nickname: user ? (user.nickname || user.username) : req.user.username,
-        joinedAt: Date.now()
+        joinedAt: Date.now(),
+        allowCode: allowCode
       };
       if (matchQueue.length < MATCH_QUEUE_LIMIT) matchQueue.push(entry);
     }
@@ -3474,8 +3503,18 @@ app.get('/api/leaderboard', async (req, res) => {
   try {
     const articleId = req.query.article_id;
     const period = req.query.period || 'all';
-    const categoryId = req.query.category_id;
+    let categoryId = req.query.category_id;
     const guest = req.query.guest === 'true';
+    const categoryParam = req.query.category;
+    let codeOnly = false;
+    const codeCategory = await db.get("SELECT id FROM categories WHERE name = ?", '代码');
+    if (categoryParam !== undefined) {
+      if (categoryParam === 'code') codeOnly = true;
+      else if (/^\d+$/.test(String(categoryParam))) {
+        categoryId = String(categoryParam);
+        if (codeCategory && String(categoryId) === String(codeCategory.id)) codeOnly = true;
+      } else return res.status(400).json({ error: '分类参数不合法' });
+    }
 
     let whereClauses = [];
     let params = [];
@@ -3491,6 +3530,15 @@ app.get('/api/leaderboard', async (req, res) => {
       whereClauses.push(`s.created_at >= ${daysAgo(7, db)}`);
     }
 
+    if (codeOnly) {
+      whereClauses.push('c.name = ?');
+      params.push('代码');
+    } else {
+      // 总榜与游客榜默认排除代码文章成绩；代码榜必须显式 category=code
+      whereClauses.push("(c.name IS NULL OR c.name <> ?)");
+      params.push('代码');
+    }
+
     if (categoryId) {
       whereClauses.push('a.category_id = ?');
       params.push(categoryId);
@@ -3498,13 +3546,13 @@ app.get('/api/leaderboard', async (req, res) => {
 
     if (guest) {
       whereClauses.push('s.user_id IS NULL');
-    } else {
+    } else if (!codeOnly) {
       whereClauses.push('s.user_id IS NOT NULL');
     }
 
     const whereStr = whereClauses.length > 0 ? 'WHERE ' + whereClauses.join(' AND ') : '';
     const scores = await db.all(
-      `SELECT s.*, a.title as article_title, u.avatar, COALESCE(s.nickname, u.nickname) AS nickname FROM scores s LEFT JOIN articles a ON s.article_id = a.id LEFT JOIN users u ON s.user_id = u.id ${whereStr} ORDER BY s.speed DESC, s.accuracy DESC LIMIT 500`,
+      `SELECT s.*, a.title as article_title, c.name as category_name, u.avatar, COALESCE(s.nickname, u.nickname) AS nickname FROM scores s LEFT JOIN articles a ON s.article_id = a.id LEFT JOIN categories c ON a.category_id = c.id LEFT JOIN users u ON s.user_id = u.id ${whereStr} ORDER BY s.speed DESC, s.accuracy DESC LIMIT 500`,
       ...params
     );
 

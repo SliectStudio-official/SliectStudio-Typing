@@ -21,7 +21,8 @@
     quickMatchPollInFlight: false,
     dissolveNeeded: null,
     bootList: false, bootRestore: false, bootRoomPending: false, pageLoadingDone: false,
-    renderBroken: false, lastRenderError: null, emptyTypingTicks: 0, layoutTimer: null
+    renderBroken: false, lastRenderError: null, emptyTypingTicks: 0, layoutTimer: null,
+    codeAvailable: false
   };
 
   function finishPageLoading(roomReady) {
@@ -102,19 +103,41 @@
 
   function loadArticles() {
     api('/api/articles?limit=100').then(function (list) {
-      var arr = Array.isArray(list) ? list : (list && list.articles) || [];
+      var arr = (Array.isArray(list) ? list : (list && list.articles) || [])
+        .filter(function (a) { return !a.status || a.status === 'approved'; });
       var sel = $('create-article');
       sel.innerHTML = '';
-      arr.filter(function (a) { return !a.status || a.status === 'approved'; }).forEach(function (a) {
-        var o = document.createElement('option');
-        o.value = a.id;
-        o.textContent = a.title + '（' + (a.content ? a.content.length : (a.charCount || '?')) + ' 字）';
-        sel.appendChild(o);
+      var groups = {};
+      var order = [];
+      arr.forEach(function (a) {
+        var cat = a.category_name || '未分类';
+        if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+        groups[cat].push(a);
+      });
+      order.forEach(function (cat) {
+        var group = document.createElement('optgroup');
+        group.label = cat;
+        groups[cat].forEach(function (a) {
+          var o = document.createElement('option');
+          o.value = a.id;
+          var text = a.title + '（' + (a.content ? a.content.length : (a.charCount || a.content_length || '?')) + ' 字）';
+          if (cat === '代码') text += '（代码）';
+          o.textContent = text;
+          group.appendChild(o);
+        });
+        sel.appendChild(group);
       });
       if (!sel.options.length) {
         var o = document.createElement('option');
         o.value = ''; o.textContent = '没有可用文章';
         sel.appendChild(o);
+      }
+      state.codeAvailable = arr.some(function (a) { return a.category_name === '代码'; });
+      var wrap = $('match-allow-code-wrap');
+      if (wrap) wrap.style.display = state.codeAvailable ? 'inline-flex' : 'none';
+      if (!state.codeAvailable) {
+        var cb = $('match-allow-code');
+        if (cb) cb.checked = false;
       }
     }).catch(function () {});
   }
@@ -259,7 +282,8 @@
   function startQuickMatch() {
     if (state.quickMatchActive) { cancelQuickMatch(); return; }
     if (!state.token) { toast('请先登录后再快速匹配'); return; }
-    api('/api/race/match/join', { method: 'POST', body: {} }).then(function (data) {
+    var allowCode = !!(state.codeAvailable && $('match-allow-code') && $('match-allow-code').checked);
+    api('/api/race/match/join', { method: 'POST', body: { allowCode: allowCode } }).then(function (data) {
       if (data && data.status === 'matched' && data.code) {
         clearQuickMatchFlags();
         enterRoom(data.code);
@@ -560,7 +584,8 @@
     var isHost = isHostSnap(snap);
     var cap = spectatorCapacity(race);
     var me = snap.me;
-    $('room-article').textContent = race.articleTitle + ' · ' + race.charCount + ' 字 · 上限 ' + race.maxPlayers + ' 人';
+    $('room-article').textContent = race.articleTitle + ' · ' + race.charCount + ' 字 · 上限 ' + race.maxPlayers + ' 人' +
+      (race.articleCategory === '代码' ? ' · 代码' : '');
     var remainEl = $('room-remain');
     if (remainEl) {
       remainEl.textContent = remainText(race.remainMs);
@@ -911,7 +936,7 @@
   function updateCombo() {
     var el = document.getElementById('race-combo');
     if (!el) return;
-    var chars = document.querySelectorAll('#race-typing .typing-line-text .char');
+    var chars = document.querySelectorAll('#race-typing .char');
     var streak = 0;
     for (var i = 0; i < chars.length; i++) {
       if (chars[i].classList.contains('correct')) streak += 1;
@@ -966,6 +991,12 @@
     hideCountdownOverlay();
     $('race-article').textContent = snap.race.articleTitle;
     $('race-meta').textContent = snap.race.charCount + ' 字';
+    var hint = $('race-typing-hint');
+    if (hint) {
+      hint.textContent = isCodeRace(snap)
+        ? 'Tab 补齐缩进，Enter 换行；禁止粘贴'
+        : '点击下方输入框开始打字，输完一行自动翻到下一行';
+    }
     ensureTypingMounted(snap);
     renderDuel(snap);
     updateOvertake(snap);
@@ -989,6 +1020,26 @@
       '<div>正确率 ' + accuracy + '%</div>';
   }
 
+  function isCodeRace(snap) {
+    return !!(snap && snap.race && snap.race.articleCategory === '代码');
+  }
+
+  function raceEngineChange(st) {
+    if (state.snap && state.snap.me) {
+      renderMine(state.snap, st.typed, st.accuracy);
+      updateCombo();
+      updateSprint(state.snap);
+    }
+  }
+
+  function raceEngineFinish(st) {
+    if (state.finished) return;
+    state.finished = true;
+    api('/api/race/finish', { method: 'POST', body: { accuracy: st.accuracy } })
+      .then(function (r) { toast('完赛：第 ' + r.rank + ' 名'); tick(); })
+      .catch(function (e) { toast(e.message); });
+  }
+
   function mountEngine(snap, enable) {
     if (!state.engine) {
       var text = snap.race.content || state.raceContent;
@@ -996,24 +1047,23 @@
         state.needContent = true;
         return;
       }
-      state.engine = window.TypingEngine.create($('race-typing'), {
-        text: text,
-        enabled: false,
-        onChange: function (st) {
-          if (state.snap && state.snap.me) {
-            renderMine(state.snap, st.typed, st.accuracy);
-            updateCombo();
-            updateSprint(state.snap);
-          }
-        },
-        onFinish: function (st) {
-          if (state.finished) return;
-          state.finished = true;
-          api('/api/race/finish', { method: 'POST', body: { accuracy: st.accuracy } })
-            .then(function (r) { toast('完赛：第 ' + r.rank + ' 名'); tick(); })
-            .catch(function (e) { toast(e.message); });
-        }
-      });
+      var host = $('race-typing');
+      if (isCodeRace(snap) && window.CodeTyping) {
+        state.engine = window.CodeTyping.create(host, {
+          text: text,
+          label: snap.race.articleTitle,
+          enabled: false,
+          onChange: raceEngineChange,
+          onFinish: raceEngineFinish
+        });
+      } else {
+        state.engine = window.TypingEngine.create(host, {
+          text: text,
+          enabled: false,
+          onChange: raceEngineChange,
+          onFinish: raceEngineFinish
+        });
+      }
       state.engineReady = true;
       if (snap.me && snap.me.progress > 0 && state.engine.restore) {
         state.engine.restore(snap.me.progress);

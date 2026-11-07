@@ -30,6 +30,12 @@ let currentSegmentIndex = 0;
 let segmentInputs = [];
 let segmentInputValues = [];
 
+let practiceKind = 'normal';
+let codeTyping = null;
+let codeArticles = [];
+let codeCategoryId = null;
+let codeStatsCache = { typed: 0, correct: 0, wrong: 0 };
+
 const RENDER_BUFFER_BEFORE = 50;
 const RENDER_BUFFER_AFTER = 100;
 const VIRTUAL_THRESHOLD = 200;
@@ -52,6 +58,10 @@ const articleSelect = document.getElementById('article-select');
 const categoryFilter = document.getElementById('category-filter');
 const difficultyFilter = document.getElementById('difficulty-filter');
 const articleInfo = document.getElementById('article-info');
+const practiceKindRadios = document.querySelectorAll('input[name="practice-kind"]');
+const practiceKindHint = document.getElementById('practice-kind-hint');
+const kindCodeRadio = document.getElementById('kind-code');
+const resultCodeNote = document.getElementById('result-code-note');
 const startBtn = document.getElementById('start-btn');
 const resetBtn = document.getElementById('reset-btn');
 const statsCard = document.getElementById('stats-card');
@@ -331,6 +341,8 @@ function renderCategoryFilter() {
 function renderLbCategoryFilter() {
   lbCategoryFilter.innerHTML = '<option value="">全部分类</option>';
   categories.forEach(c => {
+    // 代码分类走独立「代码榜」，不再混进总榜分类筛选
+    if (c.name === '代码') return;
     const opt = document.createElement('option');
     opt.value = c.id;
     opt.textContent = c.name;
@@ -446,12 +458,112 @@ function calculateRecommendedTime(text, difficulty) {
   return time;
 }
 
+function getCodeCategoryId() {
+  const cat = categories.find(c => c.name === '代码');
+  if (cat) return String(cat.id);
+  const article = articles.find(a => a.category_name === '代码' && a.category_id != null);
+  return article ? String(article.category_id) : null;
+}
+
+function isCodeModeBlocked() {
+  return window.innerWidth <= 767 ||
+    ((navigator.maxTouchPoints || 0) > 0 &&
+      !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches));
+}
+
+async function loadCodeArticles() {
+  codeCategoryId = getCodeCategoryId();
+  if (!codeCategoryId) {
+    codeArticles = [];
+    return false;
+  }
+  try {
+    const res = await fetch('/api/articles?brief=1&category_id=' + encodeURIComponent(codeCategoryId));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const list = await readJson(res);
+    codeArticles = (Array.isArray(list) ? list : []).filter(a => !a.status || a.status === 'approved');
+  } catch (e) {
+    // 离线时退回当前文章列表中的代码分类条目
+    codeArticles = articles.filter(a => String(a.category_id) === codeCategoryId && (!a.status || a.status === 'approved'));
+    console.error('[代码模式] 加载代码文章失败', e);
+  }
+  return codeArticles.length > 0;
+}
+
+function updateCodeModeAvailability() {
+  if (!kindCodeRadio) return;
+  const blocked = isCodeModeBlocked();
+  kindCodeRadio.disabled = blocked;
+  if (blocked) {
+    practiceKindHint.textContent = '代码模式请在电脑上练';
+    if (practiceKind === 'code') setPracticeKind('normal', true);
+  } else if (practiceKindHint.textContent === '代码模式请在电脑上练') {
+    practiceKindHint.textContent = '';
+  }
+}
+
+async function setPracticeKind(kind, fromAvailability) {
+  if (kind === 'code') {
+    if (isCodeModeBlocked()) {
+      practiceKindHint.textContent = '代码模式请在电脑上练';
+      if (kindCodeRadio) kindCodeRadio.checked = false;
+      const normal = document.getElementById('kind-normal');
+      if (normal) normal.checked = true;
+      return;
+    }
+    const ok = await loadCodeArticles();
+    if (!ok) {
+      practiceKind = 'normal';
+      const normal = document.getElementById('kind-normal');
+      if (normal) normal.checked = true;
+      articleInfo.textContent = '还没有代码素材';
+      practiceKindHint.textContent = '还没有代码素材';
+      currentArticle = null;
+      originalText = '';
+      resetPractice();
+      renderArticleSelect();
+      return;
+    }
+    practiceKind = 'code';
+    currentArticle = null;
+    originalText = '';
+    articleSelect.value = '';
+    articleInfo.textContent = '代码模式：请在下方选择代码素材';
+    if (categoryFilter) categoryFilter.disabled = true;
+    if (difficultyFilter) difficultyFilter.disabled = true;
+    resetPractice();
+    renderArticleSelect();
+    updateSpeechToggle();
+    return;
+  }
+  practiceKind = 'normal';
+  const normalRadio = document.getElementById('kind-normal');
+  if (normalRadio) normalRadio.checked = true;
+  currentArticle = null;
+  originalText = '';
+  articleSelect.value = '';
+  articleInfo.textContent = '';
+  if (categoryFilter) categoryFilter.disabled = false;
+  if (difficultyFilter) difficultyFilter.disabled = false;
+  if (practiceKindHint && practiceKindHint.textContent === '还没有代码素材') practiceKindHint.textContent = '';
+  resetPractice();
+  renderArticleSelect();
+  updateSpeechToggle();
+}
+
+practiceKindRadios.forEach(radio => {
+  radio.addEventListener('change', () => {
+    if (radio.checked) setPracticeKind(radio.value);
+  });
+});
+
 function renderArticleSelect() {
   const offlineSuffix = isOfflineArticles ? '（离线）' : '';
   articleSelect.innerHTML = '<option value="">-- 请选择 --</option>';
   const list = [];
+  const sourceArticles = practiceKind === 'code' ? codeArticles : articles;
 
-  articles.forEach(a => {
+  sourceArticles.forEach(a => {
     const catName = a.category_name || '未分类';
     const diffLabel = getDifficultyLabel(a.difficulty);
     const suffix = diffLabel ? ' [' + diffLabel + ']' : '';
@@ -505,7 +617,8 @@ articleSelect.addEventListener('change', async () => {
     hideTypingArea();
     return;
   }
-  const briefArticle = articles.find(a => String(a.id) === String(id));
+  const sourceArticles = practiceKind === 'code' ? codeArticles : articles;
+  const briefArticle = sourceArticles.find(a => String(a.id) === String(id));
   if (!briefArticle) return;
 
   // 离线缓存文章通常包含完整 content；在线 brief 列表需要按需拉取详情
@@ -519,13 +632,13 @@ articleSelect.addEventListener('change', async () => {
     }
     article = detail;
     // 更新本地缓存，避免再次选择时重复请求
-    const idx = articles.findIndex(a => String(a.id) === String(id));
-    if (idx >= 0) articles[idx] = detail;
+    const idx = sourceArticles.findIndex(a => String(a.id) === String(id));
+    if (idx >= 0) sourceArticles[idx] = detail;
   }
 
   currentArticle = article;
   originalText = currentArticle.content;
-  const catName = currentArticle.category_name || '未分类';
+  const catName = practiceKind === 'code' ? '代码' : (currentArticle.category_name || '未分类');
   const diffLabel = getDifficultyLabel(currentArticle.difficulty);
   const diffStr = diffLabel ? ' | 难度：' + diffLabel : '';
   // 根据文章字数和难度动态计算推荐时间
@@ -568,6 +681,10 @@ resetBtn.addEventListener('click', () => {
 });
 
 function startPractice() {
+  if (practiceKind === 'code') {
+    startCodePractice();
+    return;
+  }
   if (currentArticle) {
     try {
       localStorage.setItem('lastPractice', JSON.stringify({
@@ -613,7 +730,115 @@ function startPractice() {
   updateStatsFromCache();
 }
 
+function startCodePractice() {
+  if (!currentArticle || !originalText) {
+    alert('请先选择一篇代码素材');
+    return;
+  }
+  if (!window.CodeTyping) {
+    alert('代码模式组件未加载，请刷新重试');
+    return;
+  }
+  isStarted = true;
+  isFinished = false;
+  startTime = Date.now();
+  charStates = [];
+  segments = [];
+  segmentOffsets = [];
+  segmentInputs = [];
+  segmentInputValues = [];
+  prevInputLen = 0;
+  prevInputValue = '';
+  cachedCorrect = 0;
+  cachedWrong = 0;
+  codeStatsCache = { typed: 0, correct: 0, wrong: 0 };
+  typingCard.style.display = 'block';
+  statsCard.style.display = 'block';
+  resultCard.style.display = 'none';
+  resultCodeNote.style.display = 'none';
+  startBtn.disabled = true;
+  resetBtn.disabled = false;
+  try {
+    codeTyping = window.CodeTyping.create(typingPages, {
+      text: originalText,
+      label: currentArticle.title || '代码',
+      enabled: true,
+      onChange: handleCodeChange,
+      onFinish: finishCodePractice
+    });
+  } catch (e) {
+    console.error('[代码模式] 启动失败', e);
+    resetPractice();
+    alert('代码模式启动失败，请刷新重试');
+    return;
+  }
+  if (mode === 'timed') {
+    timerRow.style.display = 'block';
+    textProgressWrap.style.display = 'none';
+    timeLimit = Math.max(10, Math.min(600, parseInt(timeLimitInput.value) || 90));
+    startTimer();
+  } else {
+    timerRow.style.display = 'none';
+    textProgressWrap.style.display = 'block';
+    textProgress.style.width = '0%';
+  }
+  updateStatsFromCache(true);
+}
+
+function handleCodeChange(st) {
+  if (!isStarted || isFinished) return;
+  codeStatsCache = { typed: st.typed, correct: st.correct, wrong: st.wrong };
+  prevInputLen = st.typed;
+  cachedCorrect = st.correct;
+  cachedWrong = st.wrong;
+  updateStatsFromCache(true);
+  if (mode === 'full') {
+    const pct = Math.min(100, ((st.value || '').length / Math.max(1, originalText.length)) * 100);
+    textProgress.style.width = pct + '%';
+  }
+}
+
+function finishCodePractice(st) {
+  if (isFinished) return;
+  const s = st || (codeTyping ? codeTyping.state() : { typed: 0, correct: 0, wrong: 0 });
+  isFinished = true;
+  isStarted = false;
+  prevInputLen = s.typed;
+  cachedCorrect = s.correct;
+  cachedWrong = s.wrong;
+  if (codeTyping) codeTyping.enable(false);
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+  updateStatsFromCache(true);
+  const elapsed = startTime ? (Date.now() - startTime) / 1000 : 0;
+  const minutes = elapsed / 60;
+  const speed = minutes > 0 ? Math.round(cachedCorrect / minutes) : 0;
+  const accuracy = prevInputLen > 0 ? Math.round((cachedCorrect / prevInputLen) * 100) : 100;
+  resultSpeed.textContent = speed + ' 字/分';
+  resultAccuracy.textContent = accuracy + '%';
+  resultTime.textContent = Math.round(elapsed) + '秒';
+  resultCodeNote.style.display = 'block';
+  resultCard.style.display = 'block';
+  statsCard.style.display = 'none';
+  typingCard.style.display = 'none';
+  startBtn.disabled = false;
+  if (currentUser) nicknameInput.value = currentUser.username;
+  if (mode === 'full') textProgress.style.width = '100%';
+}
+
 function resetPractice() {
+  if (codeTyping) {
+    try { codeTyping.destroy(); } catch (e) { console.error('[代码模式] 销毁失败', e); }
+    codeTyping = null;
+  }
+  codeStatsCache = { typed: 0, correct: 0, wrong: 0 };
+  resultCodeNote.style.display = 'none';
   isStarted = false;
   isFinished = false;
   startTime = null;
@@ -944,8 +1169,13 @@ function updateStatsFromCache(force = false) {
 }
 
 function finishPractice() {
+  if (practiceKind === 'code') {
+    finishCodePractice();
+    return;
+  }
   isFinished = true;
   isStarted = false;
+  resultCodeNote.style.display = 'none';
   segmentInputs.forEach(input => { input.disabled = true; });
 
   if (rafId) {
@@ -1123,7 +1353,7 @@ privateArticleSelect.addEventListener('change', () => {
 });
 
 function updateSpeechToggle() {
-  if (!originalText) {
+  if (!originalText || practiceKind === 'code') {
     speechToggle.style.display = 'none';
     speechEnabled = false;
     speechToggle.classList.remove('active');
@@ -1208,13 +1438,16 @@ document.addEventListener('keydown', (e) => {
 async function fetchLeaderboard() {
   try {
     let url;
-    if (currentLbPeriod === 'guest') {
+    if (currentLbPeriod === 'code') {
+      url = '/api/leaderboard?category=code';
+    } else if (currentLbPeriod === 'guest') {
       url = '/api/leaderboard?guest=true';
     } else {
       const params = ['period=' + currentLbPeriod];
       if (currentLbCategory) params.push('category_id=' + currentLbCategory);
       url = '/api/leaderboard?' + params.join('&');
     }
+    if (lbCategoryFilter) lbCategoryFilter.parentNode.style.display = currentLbPeriod === 'code' ? 'none' : '';
     const res = await fetch(url);
     const data = await readJson(res);
     renderLeaderboard(data);
@@ -1229,7 +1462,7 @@ function renderLeaderboard(records) {
   lbTbody.innerHTML = '';
   if (records.length === 0) {
     lbEmpty.style.display = 'block';
-    lbEmpty.textContent = '暂无记录';
+    lbEmpty.textContent = currentLbPeriod === 'code' ? '还没有代码成绩' : '暂无记录';
     return;
   }
   lbEmpty.style.display = 'none';
@@ -1243,13 +1476,16 @@ function renderLeaderboard(records) {
     const guestBadge = r.user_id ? '' : '<span class="guest-badge">游客</span>';
     const nickname = escapeHtml(r.nickname || '');
     const article = escapeHtml(r.article_title || '');
+    const sourceBadge = currentLbPeriod === 'code'
+      ? '<span class="lb-source-badge">' + ((r.source === 'race' || r.source === 'race_guest') ? '比赛' : '练习') + '</span>'
+      : '';
     tr.innerHTML =
       '<td class="lb-rank lb-col-rank">' + (idx + 1) + '</td>' +
       '<td class="lb-col-name" title="' + nickname + '">' + avatarHtml +
         '<span class="lb-name-text">' + nickname + '</span>' + guestBadge + '</td>' +
       '<td class="lb-col-speed">' + Math.round(Number(r.speed) || 0) + ' 字/分</td>' +
       '<td class="lb-col-acc">' + r.accuracy + '%</td>' +
-      '<td class="lb-col-article" title="' + article + '">' + article + '</td>' +
+      '<td class="lb-col-article" title="' + article + '">' + article + sourceBadge + '</td>' +
       '<td class="lb-col-date">' + dateStr + '</td>';
     lbTbody.appendChild(tr);
   });
@@ -1438,6 +1674,8 @@ async function init() {
   }
 }
 
+updateCodeModeAvailability();
+window.addEventListener('resize', updateCodeModeAvailability);
 init();
 // 安全网：5秒后强制移除加载遮罩，防止因任何异常导致页面永久卡在加载状态
 setTimeout(hideLoadingOverlay, 5000);
