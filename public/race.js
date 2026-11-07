@@ -1114,7 +1114,7 @@
       if (el) el.style.display = 'none';
     });
     var main = document.querySelector('#view-race .race-main');
-    if (main) main.classList.remove('race-fx-sprint');
+    if (main) main.classList.remove('race-sprint-active');
     if (state.fxOvertakeTimer) { clearTimeout(state.fxOvertakeTimer); state.fxOvertakeTimer = null; }
     state.combo = 0;
     state.comboAnnounced = 0;
@@ -1195,14 +1195,14 @@
     var main = document.querySelector('#view-race .race-main');
     var label = document.getElementById('race-sprint');
     if (!main || !label || !snap || state.isSpectator || !snap.me) {
-      if (main) main.classList.remove('race-fx-sprint');
+      if (main) main.classList.remove('race-sprint-active');
       if (label) label.style.display = 'none';
       return;
     }
     var st = state.engine ? state.engine.state() : null;
     var active = snap.race.status === 'racing' && !state.finished && !snap.me.finishedAt &&
       st && snap.race.charCount > 0 && (st.typed / snap.race.charCount) >= 0.9;
-    main.classList.toggle('race-fx-sprint', !!active);
+    main.classList.toggle('race-sprint-active', !!active);
     label.style.display = active ? 'inline-flex' : 'none';
   }
 

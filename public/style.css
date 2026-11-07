@@ -5055,14 +5055,14 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 }
 .race-fx-combo.pop { animation: raceFxPop 180ms var(--ease-out); }
 @keyframes raceFxPop { 0% { transform: scale(.82); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
-.race-fx-sprint {
+.race-main > .race-fx-sprint {
   position: absolute; top: 12px; right: 14px; z-index: 2;
   display: none; padding: 3px 10px;
   border: 1px solid var(--primary); border-radius: 999px;
   background: var(--primary-lightest); color: var(--ink);
   font-size: 12px; font-weight: 700;
 }
-.race-main.race-fx-sprint {
+.race-main.race-sprint-active {
   border-color: var(--primary);
   box-shadow: inset 0 0 0 1px var(--primary), 0 0 0 1px var(--primary);
   transition: border-color 150ms var(--ease-out), box-shadow 150ms var(--ease-out);
@@ -5070,13 +5070,13 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
 @media (max-width: 480px) {
   .race-fx-duel { padding: 5px 8px; }
   .race-fx-duel-me, .race-fx-duel-opp { max-width: 38%; }
-  .race-fx-sprint { width: 9px; height: 9px; padding: 0; font-size: 0; border-radius: 50%; top: 15px; right: 15px; }
+  .race-main > .race-fx-sprint { width: 9px; height: 9px; padding: 0; font-size: 0; border-radius: 50%; top: 15px; right: 15px; }
   .race-fx-combo { top: 32px; right: 15px; font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .race-fx-duel-fill { transition: none; }
   .race-fx-overtake.show, .race-fx-combo.pop { animation: none; opacity: 1; }
-  .race-main.race-fx-sprint { transition: none; }
+  .race-main.race-sprint-active { transition: none; }
 }
 .race-result-cards { display: flex; flex-direction: column; gap: 8px; }
 .race-result-card {
