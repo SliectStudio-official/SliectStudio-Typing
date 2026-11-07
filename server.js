@@ -388,7 +388,7 @@ const RACE_OFFLINE_RACING_MS = 60 * 1000;
 const RACE_OFFLINE_COUNTDOWN_MS = 30 * 1000;
 const RACE_OFFLINE_WAITING_MS = 120 * 1000;
 const RACE_DISSOLVE_MS = 30 * 1000;
-const RACE_VOTE_ONLINE_MS = 45 * 1000;
+const RACE_VOTE_ONLINE_MS = 120 * 1000;
 const RACE_MATCH_ROOM_TTL_MS = 60 * 60 * 1000;
 const RACE_MANUAL_DEFAULT_DURATION_MINUTES = 60;
 const RACE_MANUAL_DURATION_OPTIONS = [30, 60, 120, 180];
@@ -1938,6 +1938,11 @@ app.post('/api/race/dissolve/start', authMiddleware, async (req, res) => {
     if (hostPlayer) hostPlayer.lastSeen = now;
     room.hostLastSeen = now;
     expireDissolveIfNeeded(room, now);
+    const offlineNicknames = Array.from(room.players.values())
+      .filter(function (p) { return now - (p.lastSeen || 0) > RACE_VOTE_ONLINE_MS; })
+      .map(function (p) { return p.nickname; });
+    const startRule = dissolveRule(room, now);
+    console.warn('[解散] start', { code: room.code, rule: startRule, offline: offlineNicknames });
     if (room.dissolve) {
       const activeRule = syncDissolveRule(room, now);
       const activeAgreed = dissolveAgreed(room);
@@ -1945,17 +1950,17 @@ app.post('/api/race/dissolve/start', authMiddleware, async (req, res) => {
         const reason = activeRule.mode === 'direct' ? 'dissolve_direct' : 'vote_dissolved';
         room.dissolve = null;
         await cancelRoom(room, reason, null);
-        return res.json({ result: 'cancelled', reason: reason });
+        return res.json({ result: 'cancelled', reason: reason, rule: activeRule, offlineNicknames: offlineNicknames });
       }
       return res.json({
         result: 'voting', mode: activeRule.mode, needed: activeRule.needed, online: activeRule.online,
         agreed: activeAgreed, total: activeRule.total, expiresAt: room.dissolve.expiresAt
       });
     }
-    const rule = dissolveRule(room, now);
+    const rule = startRule;
     if (rule.mode === 'direct') {
       await cancelRoom(room, 'dissolve_direct', req.user.id);
-      return res.json({ result: 'cancelled', reason: 'dissolve_direct' });
+      return res.json({ result: 'cancelled', reason: 'dissolve_direct', rule: rule, offlineNicknames: offlineNicknames });
     }
     const voters = new Map();
     if (hostPlayer) voters.set(hostKey, 'agree');

@@ -405,7 +405,7 @@
   }
 
   function tick() {
-    if (state.tickInFlight) return;
+    if (state.tickInFlight) return Promise.resolve(null);
     state.tickInFlight = true;
     if (state.pollTimer) { clearTimeout(state.pollTimer); state.pollTimer = null; }
     var body = {};
@@ -413,7 +413,7 @@
     if (!state.isSpectator && state.engine && state.snap && state.snap.race.status === 'racing') {
       body.progress = state.engine.state().typed;
     }
-    api('/api/race/tick', { method: 'POST', body: body }).then(function (snap) {
+    return api('/api/race/tick', { method: 'POST', body: body }).then(function (snap) {
       state.tickFailures = 0;
       if (state.reconnectShown) {
         setReconnectBanner(false);
@@ -1469,7 +1469,7 @@
     time_limit: '比赛超时，已结束',
     duration_limit: '房间到达最长时长，已结束',
     opponent_left: '对手已退出，你获胜',
-    dissolve_direct: '房主已解散本局',
+    dissolve_direct: '对手已掉线，房间已解散',
     vote_dissolved: '解散投票已通过，本局结束',
     admin: '管理员已解散房间'
   };
@@ -1482,6 +1482,25 @@
     if (online <= 1) return { mode: 'direct', needed: 1, online: online, total: total };
     if (total <= 3) return { mode: 'vote', needed: online, online: online, total: total };
     return { mode: 'vote', needed: Math.floor(online / 2) + 1, online: online, total: total };
+  }
+
+  function offlineDissolveInfo(snap) {
+    var players = snap && snap.players ? snap.players : [];
+    var offline = players.filter(function (p) { return p.offline; });
+    var lastSeen = offline.length ? offline[0].lastSeen : null;
+    var seconds = null;
+    if (lastSeen != null && snap.race && snap.race.serverNow) {
+      seconds = Math.max(0, Math.round((snap.race.serverNow - lastSeen) / 1000));
+    }
+    return { count: offline.length, seconds: seconds };
+  }
+  function directDissolveText(snap) {
+    var info = offlineDissolveInfo(snap);
+    if (info.count > 0) {
+      return '对手已掉线' + (info.seconds != null ? '（最近心跳 ' + info.seconds + ' 秒前）' : '') + '，确认后将<strong>立即解散</strong>本局';
+    }
+    var rule = dissolveRuleSnap(snap);
+    return '当前在线 ' + rule.online + ' 人 / 共 ' + rule.total + ' 人，确认后将<strong>立即解散</strong>本局';
   }
 
   function exitConfig(snap) {
@@ -1518,7 +1537,7 @@
       if (rule.mode === 'direct') {
         return {
           label: '解散房间', confirm: '解散房间', title: '解散房间',
-          text: '当前在线 ' + rule.online + ' 人 / 共 ' + rule.total + ' 人，确认后<strong>立即解散本局</strong>，不再发起投票。',
+          text: directDissolveText(snap),
           action: 'dissolveDirect', danger: true
         };
       }
@@ -1584,8 +1603,14 @@
     $('btn-exit-race').classList.toggle('race-btn-danger', !!cfg.danger);
   }
   var exitReturnFocus = null;
-  function openExitDialog() {
+  async function openExitDialog() {
     var cfg = exitConfig(state.snap);
+    if (cfg.action === 'dissolveDirect') {
+      await tick();
+      if (!state.snap) return;
+      cfg = exitConfig(state.snap);
+      if (cfg.action !== 'dissolveDirect') { openDissolveDialog(); return; }
+    }
     $('race-exit-title').textContent = cfg.title;
     $('race-exit-text').innerHTML = cfg.text;
     $('race-exit-confirm').textContent = cfg.confirm;
@@ -1620,6 +1645,8 @@
     if (!notice || !notice.at || notice.at === state.lastDissolveNoticeAt) return;
     state.lastDissolveNoticeAt = notice.at;
     if (notice.type === 'expired') toast('解散投票未通过（' + notice.agreed + '/' + notice.total + '）');
+    else if (notice.reason === 'host_withdraw') toast('房主已撤回解散投票');
+    else if (notice.reason === 'host_leave') toast('房主已离开，解散投票已取消');
     else toast('解散投票已取消');
   }
   function dissolveCardHtml(snap, d, seat, isHost) {
@@ -1709,13 +1736,14 @@
       .catch(function (e) { toast(e.message); });
   }
   var dissolveReturnFocus = null;
-  function openDissolveDialog() {
+  async function openDissolveDialog() {
+    await tick();
     var snap = state.snap;
     if (!snap) return;
     var rule = dissolveRuleSnap(snap);
     var confirmBtn = $('race-dissolve-confirm');
     if (rule.mode === 'direct') {
-      $('race-dissolve-text').innerHTML = '当前在线 ' + rule.online + ' 人 / 共 ' + rule.total + ' 人，确认后<strong>立即解散本局</strong>，不再发起投票。';
+      $('race-dissolve-text').innerHTML = directDissolveText(snap);
       if (confirmBtn) confirmBtn.textContent = '立即解散';
     } else {
       var modeText = rule.needed === rule.online ? '全票' : '超过半数';
@@ -1736,7 +1764,9 @@
   function requestDissolveStart() {
     api('/api/race/dissolve/start', { method: 'POST', body: {} })
       .then(function (r) {
-        if (r && r.result === 'cancelled') toast('房间已解散');
+        if (r && r.result === 'cancelled') {
+          toast(r.reason === 'dissolve_direct' ? '对手已掉线，房间已解散' : '房间已解散');
+        }
         tick();
       })
       .catch(function (e) { toast(e.message); });
