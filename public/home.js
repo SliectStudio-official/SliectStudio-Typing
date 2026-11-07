@@ -342,6 +342,43 @@
     var slot = $('home-announce-slot');
     if (bar && slot && bar.parentNode !== slot) slot.appendChild(bar);
   }
+  var announceObserver = null;
+  function announcementVisible() {
+    var bar = $('announcement-bar');
+    if (!bar) return false;
+    if (bar.style.display === 'none') return false;
+    return getComputedStyle(bar).display !== 'none';
+  }
+  function syncTopbarState() {
+    document.body.classList.toggle('topbar-collapsed', !announcementVisible());
+  }
+  function collapseTopbarImmediately() {
+    var topbar = $('home-topbar');
+    document.body.classList.add('topbar-collapsed');
+    if (!topbar) return;
+    // 手动关闭公告时同帧归零；其它路径仍走 160ms 收展过渡
+    topbar.style.transition = 'none';
+    topbar.style.height = '0px';
+    requestAnimationFrame(function () {
+      setTimeout(function () {
+        topbar.style.transition = '';
+        topbar.style.height = '';
+      }, 0);
+    });
+  }
+  function observeAnnouncementBar() {
+    var bar = $('announcement-bar');
+    if (!bar) return;
+    if (announceObserver) announceObserver.disconnect();
+    announceObserver = new MutationObserver(syncTopbarState);
+    announceObserver.observe(bar, {
+      attributes: true,
+      attributeFilter: ['style', 'class'],
+      childList: true,
+      subtree: true
+    });
+    syncTopbarState();
+  }
   function renderNotify(items, error) {
     var list = $('home-notify-list');
     if (!list) return;
@@ -523,7 +560,14 @@
   }
   function bind() {
     mountAnnouncement();
-    setTimeout(mountAnnouncement, 200);
+    observeAnnouncementBar();
+    setTimeout(function () {
+      mountAnnouncement();
+      observeAnnouncementBar();
+      syncTopbarState();
+    }, 200);
+    var annClose = $('announcement-close');
+    if (annClose) annClose.addEventListener('click', collapseTopbarImmediately);
     var cont = $('dash-continue');
     if (cont) cont.addEventListener('click', goPractice);
     var quick = $('dash-quick');

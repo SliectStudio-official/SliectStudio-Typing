@@ -5435,7 +5435,28 @@ body.is-matching #view-dashboard .fx-scan {
   padding: 0 16px;
   background: rgba(8,10,16,.55);
   border-bottom: 1px solid rgba(255,255,255,.10);
+  overflow: hidden;
+  transition: height 160ms ease, background-color 160ms ease, border-bottom-width 160ms ease;
 }
+.home-page.topbar-collapsed .home-topbar {
+  height: 0;
+  background: transparent;
+  border-bottom-width: 0;
+  pointer-events: none;
+}
+.home-page.topbar-collapsed .home-bell,
+.home-page.topbar-collapsed .home-login {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 101;
+  pointer-events: auto;
+  background: rgba(20,22,28,.62);
+  border-color: rgba(255,255,255,.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.home-page.topbar-collapsed .home-login { right: 48px; }
 .home-page .home-announce-slot { display: flex; flex: 1; min-width: 0; align-items: center; }
 .home-page .home-announce-slot .announcement-bar {
   position: static !important; top: auto; z-index: auto;
@@ -5476,6 +5497,7 @@ body.is-matching #view-dashboard .fx-scan {
   scrollbar-width: thin;
   scrollbar-color: rgba(255,255,255,.28) transparent;
 }
+.home-page.topbar-collapsed .home-notify-panel { top: 46px; }
 .home-page .home-notify-panel::-webkit-scrollbar { width: 8px; }
 .home-page .home-notify-panel::-webkit-scrollbar-track { background: transparent; }
 .home-page .home-notify-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,.28); border-radius: 8px; }
