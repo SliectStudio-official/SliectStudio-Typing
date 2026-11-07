@@ -1,6 +1,5 @@
 /* P29 全站首屏加载遮罩：同步注入，各页初始化后调用 done()。
- * style.css 是规范样式；本文件额外注入一份等价 critical 样式，
- * 因为 index/profile/admin 的 style.css 是非阻塞加载，首帧不能先闪出裸页面。 */
+ * 样式统一定义在 page-loading.css，五个页面在 head 中同步引入。 */
 (function () {
   'use strict';
 
@@ -12,28 +11,6 @@
     finished: false,
     failed: false
   };
-
-  var CRITICAL_CSS = [
-    '.page-loading-overlay{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--canvas,#f5f4ed);transition:opacity .3s ease,visibility .3s ease}',
-    '.page-loading-overlay.hidden{opacity:0;visibility:hidden;pointer-events:none}',
-    '.page-loading-spinner{width:40px;height:40px;border:3px solid var(--hairline,#e8e6dc);border-top-color:var(--primary,#c96442);border-radius:50%;animation:page-loading-spin .8s linear infinite}',
-    '@keyframes page-loading-spin{to{transform:rotate(360deg)}}',
-    '.page-loading-text{font-family:var(--font-body,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans","Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif);font-size:14px;color:var(--muted,#87867f)}',
-    '.page-loading-overlay.is-error .page-loading-text{color:var(--semantic-error,#b53333)}',
-    'body.loading .container,body.loading nav,body.loading .sub-nav{filter:blur(4px);pointer-events:none}',
-    'body.loading{overflow:hidden}',
-    'body.home-page .page-loading-overlay{background:#05070d}',
-    'body.home-page .page-loading-text{color:rgba(255,255,255,.55)}',
-    'body.home-page .page-loading-spinner{border-color:rgba(255,255,255,.16);border-top-color:var(--primary,#c96442)}'
-  ].join('');
-
-  function injectCriticalStyle() {
-    if (document.getElementById('page-loading-critical')) return;
-    var style = document.createElement('style');
-    style.id = 'page-loading-critical';
-    style.textContent = CRITICAL_CSS;
-    (document.head || document.documentElement).appendChild(style);
-  }
 
   function addBodyLoading() {
     if (document.body) document.body.classList.add('loading');
@@ -87,7 +64,6 @@
     state.failTimer = setTimeout(done, 5000);
   }
 
-  injectCriticalStyle();
   ensureOverlay();
   if (document.body) addBodyLoading();
   else document.addEventListener('DOMContentLoaded', addBodyLoading);

@@ -9,6 +9,7 @@ const CRITICAL_ASSETS = [
   '/custom-select.js',
   '/loading-indicator.js',
   '/page-loading.js',
+  '/page-loading.css',
   '/race.html',
   '/icons/icon.svg'
 ];
@@ -28,6 +29,8 @@ function getCacheName() {
         if (!precacheAssets.includes('/index.html')) precacheAssets.push('/index.html');
         if (!precacheAssets.includes('/home.html')) precacheAssets.push('/home.html');
         if (!precacheAssets.includes('/race.html')) precacheAssets.push('/race.html');
+        if (!precacheAssets.includes('/page-loading.css')) precacheAssets.push('/page-loading.css');
+        if (!precacheAssets.includes('/icons/icon.svg')) precacheAssets.push('/icons/icon.svg');
         return 'typing-' + data.version;
       } catch (e) {
         cacheNamePromise = null;
