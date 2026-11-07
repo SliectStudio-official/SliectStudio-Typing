@@ -22,7 +22,8 @@
     dissolveNeeded: null,
     bootList: false, bootRestore: false, bootRoomPending: false, pageLoadingDone: false,
     renderBroken: false, lastRenderError: null, emptyTypingTicks: 0, layoutTimer: null,
-    codeAvailable: false, articleCategoryMap: {}, lastList: null,
+    codeAvailable: false, codeCategoryIds: [], codeCategories: [], raceArticles: [],
+    roomKind: 'normal', allowCode: false, articleCategoryMap: {}, lastList: null,
     lobbyStatsSeq: 0, copyTimer: null
   };
 
@@ -106,55 +107,115 @@
     return String(title == null ? '' : title) + '\u0000' + String(len == null ? '' : len);
   }
 
+  function isCodeCategoryClient(id) {
+    return state.codeCategoryIds.indexOf(String(id)) >= 0;
+  }
+
+  function isCodeArticleClient(article) {
+    return !!(article && article.category_id != null && isCodeCategoryClient(article.category_id));
+  }
+
+  function loadCodeCategories() {
+    return api('/api/code-categories').then(function (data) {
+      state.codeCategoryIds = (data && Array.isArray(data.ids) ? data.ids : []).map(String);
+      state.codeCategories = data && Array.isArray(data.categories) ? data.categories : [];
+    }).catch(function (e) {
+      state.codeCategoryIds = [];
+      state.codeCategories = [];
+      console.warn('[代码分类] 加载失败', e.message);
+    });
+  }
+
+  function updateMatchSwitchVisibility() {
+    var wrap = $('match-allow-code-wrap');
+    if (!wrap) return;
+    var visible = state.codeCategoryIds.length > 0 && state.codeAvailable;
+    wrap.style.display = visible ? 'flex' : 'none';
+    if (!visible) {
+      state.allowCode = false;
+      var sw = $('match-allow-code');
+      if (sw) sw.setAttribute('aria-checked', 'false');
+    }
+  }
+
+  function updateRoomKindAvailability() {
+    var control = $('room-kind-control');
+    var codeTab = $('room-kind-code');
+    if (!control || !codeTab) return;
+    var hasCode = state.raceArticles.some(isCodeArticleClient);
+    control.style.display = hasCode ? 'inline-flex' : 'none';
+    if (!hasCode) {
+      state.roomKind = 'normal';
+      var normal = $('room-kind-normal');
+      if (normal) normal.checked = true;
+    }
+  }
+
+  function renderCreateArticleOptions() {
+    var sel = $('create-article');
+    if (!sel) return;
+    var arr = state.raceArticles.filter(function (a) {
+      return state.roomKind === 'code' ? isCodeArticleClient(a) : !isCodeArticleClient(a);
+    });
+    sel.innerHTML = '';
+    var groups = {};
+    var order = [];
+    arr.forEach(function (a) {
+      var cat = a.category_name || '未分类';
+      if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+      groups[cat].push(a);
+    });
+    order.forEach(function (cat) {
+      var group = document.createElement('optgroup');
+      group.label = cat;
+      groups[cat].forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = a.id;
+        var len = a.content ? a.content.length : (a.charCount != null ? a.charCount : a.content_length);
+        o.textContent = a.title + '（' + (len == null ? '?' : len) + ' 字）';
+        group.appendChild(o);
+      });
+      sel.appendChild(group);
+    });
+    if (!sel.options.length) {
+      var o = document.createElement('option');
+      o.value = '';
+      o.textContent = state.roomKind === 'code' ? '没有可用代码素材' : '没有可用文章';
+      sel.appendChild(o);
+    }
+  }
+
   function loadArticles() {
     api('/api/articles?limit=100').then(function (list) {
-      var arr = (Array.isArray(list) ? list : (list && list.articles) || [])
+      state.raceArticles = (Array.isArray(list) ? list : (list && list.articles) || [])
         .filter(function (a) { return !a.status || a.status === 'approved'; });
       var catMap = {};
-      arr.forEach(function (a) {
+      state.raceArticles.forEach(function (a) {
         var len = a.content ? a.content.length : (a.charCount != null ? a.charCount : a.content_length);
         var key = articleKey(a.title, len);
         if (!a.category_name) return;
-        if (!catMap[key]) catMap[key] = a.category_name;
-        else if (catMap[key] !== a.category_name) catMap[key] = '__ambiguous__';
+        var meta = { name: a.category_name, categoryId: a.category_id, isCode: isCodeArticleClient(a) };
+        if (!catMap[key]) catMap[key] = meta;
+        else if (catMap[key].name !== meta.name || catMap[key].isCode !== meta.isCode) catMap[key] = null;
       });
       state.articleCategoryMap = catMap;
-      var sel = $('create-article');
-      sel.innerHTML = '';
-      var groups = {};
-      var order = [];
-      arr.forEach(function (a) {
-        var cat = a.category_name || '未分类';
-        if (!groups[cat]) { groups[cat] = []; order.push(cat); }
-        groups[cat].push(a);
-      });
-      order.forEach(function (cat) {
-        var group = document.createElement('optgroup');
-        group.label = cat;
-        groups[cat].forEach(function (a) {
-          var o = document.createElement('option');
-          o.value = a.id;
-          var text = a.title + '（' + (a.content ? a.content.length : (a.charCount || a.content_length || '?')) + ' 字）';
-          if (cat === '代码') text += '（代码）';
-          o.textContent = text;
-          group.appendChild(o);
-        });
-        sel.appendChild(group);
-      });
-      if (!sel.options.length) {
-        var o = document.createElement('option');
-        o.value = ''; o.textContent = '没有可用文章';
-        sel.appendChild(o);
-      }
-      state.codeAvailable = arr.some(function (a) { return a.category_name === '代码'; });
-      var wrap = $('match-allow-code-wrap');
-      if (wrap) wrap.style.display = state.codeAvailable ? 'inline-flex' : 'none';
-      if (!state.codeAvailable) {
-        var cb = $('match-allow-code');
-        if (cb) cb.checked = false;
-      }
+      state.codeAvailable = state.raceArticles.some(isCodeArticleClient);
+      updateRoomKindAvailability();
+      updateMatchSwitchVisibility();
+      renderCreateArticleOptions();
       if (state.lastList) renderList(state.lastList);
     }).catch(function () {});
+  }
+
+  function setRoomKind(kind) {
+    state.roomKind = kind === 'code' ? 'code' : 'normal';
+    var codeTab = $('room-kind-code');
+    var normalTab = $('room-kind-normal');
+    if (codeTab) codeTab.checked = state.roomKind === 'code';
+    if (normalTab) normalTab.checked = state.roomKind !== 'code';
+    var sel = $('create-article');
+    if (sel) sel.value = '';
+    renderCreateArticleOptions();
   }
 
   function hideLobbyStats() {
@@ -299,10 +360,11 @@
     if (!myCode) myCode = state.code;
     list.forEach(function (r) {
       var isMine = !!(myCode && String(r.code) === String(myCode));
-      var directCategory = r.articleCategory || r.category_name || '';
-      var mappedCategory = directCategory || (state.articleCategoryMap || {})[articleKey(r.articleTitle, r.charCount)];
-      var isCode = mappedCategory === '代码';
-      var codeTag = isCode ? '<span class="race-room-cat">代码</span>' : '';
+      var mapped = (state.articleCategoryMap || {})[articleKey(r.articleTitle, r.charCount)];
+      var categoryName = r.articleCategory || (mapped && mapped.name) || r.category_name || '';
+      var isCode = !!r.isCode || !!(mapped && mapped.isCode);
+      var categoryLabel = categoryName ? (isCode ? '代码 · ' + categoryName : categoryName) : '';
+      var codeTag = categoryLabel ? '<span class="race-room-cat">' + esc(categoryLabel) + '</span>' : '';
       var mineTag = isMine ? '<span class="race-room-mine-tag">你在房间中</span>' : '';
       var row = document.createElement('div');
       row.className = 'race-room-row' + (isMine ? ' race-room-mine' : '');
@@ -446,7 +508,7 @@
   function startQuickMatch() {
     if (state.quickMatchActive) { cancelQuickMatch(); return; }
     if (!state.token) { toast('请先登录后再快速匹配'); return; }
-    var allowCode = !!(state.codeAvailable && $('match-allow-code') && $('match-allow-code').checked);
+    var allowCode = !!(state.codeCategoryIds.length && state.allowCode);
     api('/api/race/match/join', { method: 'POST', body: { allowCode: allowCode } }).then(function (data) {
       if (data && data.status === 'matched' && data.code) {
         clearQuickMatchFlags();
@@ -505,10 +567,17 @@
     if (!validateCreateMax(true)) return;
     var password = $('create-password').value.trim();
     if (!/^\d{4}$/.test(password)) { toast('密码必须是 4 位数字'); return; }
+    var createArticleId = Number($('create-article').value);
+    var createMeta = state.raceArticles.find(function (a) { return Number(a.id) === createArticleId; });
+    var wantCode = state.roomKind === 'code';
+    if (!createMeta || isCodeArticleClient(createMeta) !== wantCode) {
+      toast('请重新选择文章');
+      return;
+    }
     api('/api/race/create', {
       method: 'POST',
       body: {
-        articleId: Number($('create-article').value), password: password,
+        articleId: createArticleId, password: password,
         maxPlayers: Number($('create-max').value), isPublic: $('create-public').checked,
         durationMinutes: Number($('create-duration') ? $('create-duration').value : 60)
       }
@@ -749,7 +818,7 @@
     var cap = spectatorCapacity(race);
     var me = snap.me;
     $('room-article').textContent = race.articleTitle + ' · ' + race.charCount + ' 字 · 上限 ' + race.maxPlayers + ' 人' +
-      (race.articleCategory === '代码' ? ' · 代码' : '');
+      (race.isCode ? ' · 代码 · ' + (race.articleCategory || '') : '');
     var remainEl = $('room-remain');
     if (remainEl) {
       remainEl.textContent = remainText(race.remainMs);
@@ -1185,7 +1254,7 @@
   }
 
   function isCodeRace(snap) {
-    return !!(snap && snap.race && snap.race.articleCategory === '代码');
+    return !!(snap && snap.race && snap.race.isCode);
   }
 
   function raceEngineChange(st) {
@@ -2204,6 +2273,21 @@
     $('btn-refresh-list').onclick = function () { refreshList(); };
     $('btn-copy-code').onclick = copyRoomCode;
     $('lobby-my-stats-start').onclick = scrollToCreateCard;
+    $('room-kind-normal').addEventListener('change', function () { if (this.checked) setRoomKind('normal'); });
+    $('room-kind-code').addEventListener('change', function () { if (this.checked) setRoomKind('code'); });
+    var allowSwitch = $('match-allow-code');
+    if (allowSwitch) {
+      allowSwitch.addEventListener('click', function () {
+        state.allowCode = allowSwitch.getAttribute('aria-checked') !== 'true';
+        allowSwitch.setAttribute('aria-checked', state.allowCode ? 'true' : 'false');
+      });
+      allowSwitch.addEventListener('keydown', function (e) {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          allowSwitch.click();
+        }
+      });
+    }
     window.addEventListener('race-match-cancel-local', function () {
       if (state.quickMatchActive) {
         setQuickMatching(false);
@@ -2328,7 +2412,7 @@
   updateQuickMatchVisibility();
   initQuickMatch();
   showView('lobby');
-  loadArticles();
+  loadCodeCategories().then(loadArticles, loadArticles);
   restoreRace();
   recalcRaceLayout();
 })();

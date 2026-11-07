@@ -40,12 +40,21 @@
         <div class="section-card-title">快速匹配</div>
         <p class="race-hint" id="quick-match-hint">随机文章 1v1，凑齐两人自动开始；匹配状态显示在屏幕底部。</p>
         <button class="race-btn race-btn-primary" id="btn-quick-match" style="display:none">快速匹配</button>
-        <label class="race-checkbox" id="match-allow-code-wrap" style="display:none"><input type="checkbox" id="match-allow-code"> 允许匹配代码文章</label>
+        <div class="race-match-switch-row" id="match-allow-code-wrap" style="display:none">
+          <button type="button" class="race-switch" id="match-allow-code" role="switch" aria-checked="false" aria-label="允许匹配代码素材"><span class="race-switch-knob"></span></button>
+          <span class="race-switch-copy"><span>允许匹配代码素材</span><small>双方都允许才会配上代码局</small></span>
+        </div>
       </div>
 
       <div class="race-grid">
         <div class="section-card" id="create-room-card">
           <div class="section-card-title">创建房间</div>
+          <div class="segmented-control room-kind-control" id="room-kind-control" style="display:none">
+            <input type="radio" name="room-kind" value="normal" id="room-kind-normal" checked>
+            <label for="room-kind-normal">普通房间</label>
+            <input type="radio" name="room-kind" value="code" id="room-kind-code">
+            <label for="room-kind-code">代码房间</label>
+          </div>
           <p class="race-hint" id="create-hint">登录后可创建房间；未登录也能用房间码+密码加入别人的比赛。</p>
           <div class="race-form">
             <label>文章

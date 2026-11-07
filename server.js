@@ -1128,7 +1128,7 @@ async function createMatchedRoom(first, second, article, candidates) {
   const room = {
     code, raceId: null, hostUserId: first.userId, hostNickname, status: 'reveal',
     articleId: article.id, articleTitle: article.title, content: article.content, charCount: article.content.length,
-    articleCategory: article.category_name || '',
+    articleCategory: article.category_name || '', isCode: !!article.isCode,
     maxPlayers: 2, isPublic: false, passwordHash: null,
     createdAt: now, startsAt, finishedAt: null, cancelledReason: null, cancelledBy: null,
     cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
@@ -1206,12 +1206,13 @@ async function attemptMatch() {
     }
     if (!first || !second || first.userId === second.userId) return null;
     const allowCode = first.allowCode === true;
-    const rows = await db.all("SELECT a.id, a.title, a.content, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.status = 'approved'");
+    const codeIds = await getCodeCategoryIds();
+    const rows = await db.all("SELECT a.id, a.title, a.content, a.category_id, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.status = 'approved'");
     // 只收适合比赛的 100–800 字正文；200–400 优先，其余 100–800 稳定排在后面
     let pool = rows
       .filter(function (row) {
         if (!row.content || row.content.length < 100 || row.content.length > 800) return false;
-        if (!allowCode && row.category_name === '代码') return false;
+        if (!allowCode && codeIds.indexOf(Number(row.category_id)) >= 0) return false;
         return true;
       })
       .map(function (row, index) {
@@ -1222,9 +1223,10 @@ async function attemptMatch() {
       .map(function (item) { return item.row; });
     if (allowCode) {
       // 双方都勾选“允许代码”时优先配代码素材；没有可用代码素材再退回普通池
-      const codePool = pool.filter(function (row) { return row.category_name === '代码'; });
+      const codePool = pool.filter(function (row) { return codeIds.indexOf(Number(row.category_id)) >= 0; });
       if (codePool.length) pool = codePool;
     }
+    pool.forEach(function (row) { row.isCode = codeIds.indexOf(Number(row.category_id)) >= 0; });
     if (!pool.length) {
       console.warn('[匹配] 候选不足 三篇→0 篇');
       return { hint: '暂无可用文章，请稍后再试' };
@@ -1277,6 +1279,46 @@ async function setSetting(key, value) {
   } else {
     await db.run('INSERT INTO settings (`key`, value) VALUES (?, ?) ON CONFLICT(`key`) DO UPDATE SET value = excluded.value', key, value);
   }
+}
+
+let codeCategoryIdsCache = null;
+async function getCodeCategoryIds() {
+  if (codeCategoryIdsCache !== null) return codeCategoryIdsCache;
+  try {
+    const row = await db.get("SELECT value FROM settings WHERE `key` = 'code_category_ids'");
+    let ids = [];
+    if (row && row.value) {
+      try {
+        const parsed = JSON.parse(row.value);
+        if (Array.isArray(parsed)) {
+          ids = parsed.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+        } else {
+          console.warn('[代码分类] code_category_ids 不是数组，按空数组处理');
+        }
+      } catch (e) {
+        console.warn('[代码分类] code_category_ids JSON 非法，按空数组处理');
+      }
+    } else {
+      console.warn('[代码分类] settings.code_category_ids 缺失，按空数组处理');
+    }
+    codeCategoryIdsCache = ids;
+    return ids;
+  } catch (e) {
+    console.error('[代码分类] 读取 code_category_ids 失败', e.message);
+    return [];
+  }
+}
+async function setCodeCategoryIds(ids) {
+  const list = (Array.isArray(ids) ? ids : []).map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+  await setSetting('code_category_ids', JSON.stringify(list));
+  codeCategoryIdsCache = null;
+}
+async function isCodeCategoryId(id) {
+  return (await getCodeCategoryIds()).indexOf(Number(id)) >= 0;
+}
+async function isCodeArticle(article) {
+  if (!article) return false;
+  return isCodeCategoryId(article.category_id);
 }
 
 function checkJoinLock(key) {
@@ -1391,6 +1433,7 @@ function buildSnapshot(room, player, spectator, options) {
       reveal: revealView,
       dissolveRule: dissolveRule(room),
       articleCategory: room.articleCategory || '',
+      isCode: !!room.isCode,
       mySeat: player ? 'player' : (spectator ? 'spectator' : null),
       spectatorTotal: spectatorTotal,
       serverNow: nowMs
@@ -1712,10 +1755,11 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     if (!Number.isInteger(aid)) {
       return res.status(400).json({ error: '请选择文章' });
     }
-    const article = await db.get('SELECT a.id, a.title, a.content, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', aid);
+    const article = await db.get('SELECT a.id, a.title, a.content, a.category_id, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.id = ?', aid);
     if (!article) {
       return res.status(400).json({ error: '文章不存在' });
     }
+    const articleIsCode = await isCodeArticle(article);
     let code = null;
     for (let i = 0; i < 10; i++) {
       const candidate = generateRoomCode();
@@ -1732,7 +1776,7 @@ app.post('/api/race/create', authMiddleware, async (req, res) => {
     const room = {
       code, raceId: null, hostUserId: req.user.id, hostNickname, status: 'waiting',
       articleId: aid, articleTitle: article.title, content: article.content, charCount: article.content.length,
-      articleCategory: article.category_name || '',
+      articleCategory: article.category_name || '', isCode: articleIsCode,
       maxPlayers: mp, isPublic: isPublic !== false, passwordHash: bcrypt.hashSync(password, 10),
       createdAt: now, startsAt: null, finishedAt: null, cancelledReason: null, cancelledBy: null,
       cancelledAt: null, hostLastSeen: now, finishedCount: 0, players: new Map(),
@@ -2620,6 +2664,7 @@ app.get('/api/race/list', async (req, res) => {
       .slice(0, 20)
       .map(r => ({
         code: r.code, hostNickname: r.hostNickname, articleTitle: r.articleTitle,
+        articleCategory: r.articleCategory || '', isCode: !!r.isCode,
         charCount: r.charCount, playerCount: r.players.size, maxPlayers: r.maxPlayers,
         spectatorEnabled: !!r.spectatorEnabled, spectatorMode: r.spectatorMode || 'free',
         spectatorSeats: r.spectatorSeats || spectatorCap(r.maxPlayers),
@@ -3209,6 +3254,18 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
+app.get('/api/code-categories', async (req, res) => {
+  try {
+    const ids = await getCodeCategoryIds();
+    const categories = ids.length
+      ? await db.all('SELECT id, name FROM categories WHERE id IN (' + ids.map(() => '?').join(',') + ') ORDER BY id', ...ids)
+      : [];
+    res.json({ ids, categories });
+  } catch (e) {
+    res.status(500).json({ error: '获取代码分类失败' });
+  }
+});
+
 app.post('/api/categories', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { name } = req.body;
@@ -3506,13 +3563,13 @@ app.get('/api/leaderboard', async (req, res) => {
     let categoryId = req.query.category_id;
     const guest = req.query.guest === 'true';
     const categoryParam = req.query.category;
+    const codeIds = await getCodeCategoryIds();
     let codeOnly = false;
-    const codeCategory = await db.get("SELECT id FROM categories WHERE name = ?", '代码');
     if (categoryParam !== undefined) {
       if (categoryParam === 'code') codeOnly = true;
       else if (/^\d+$/.test(String(categoryParam))) {
         categoryId = String(categoryParam);
-        if (codeCategory && String(categoryId) === String(codeCategory.id)) codeOnly = true;
+        if (codeIds.indexOf(Number(categoryId)) >= 0) codeOnly = true;
       } else return res.status(400).json({ error: '分类参数不合法' });
     }
 
@@ -3531,12 +3588,16 @@ app.get('/api/leaderboard', async (req, res) => {
     }
 
     if (codeOnly) {
-      whereClauses.push('c.name = ?');
-      params.push('代码');
-    } else {
-      // 总榜与游客榜默认排除代码文章成绩；代码榜必须显式 category=code
-      whereClauses.push("(c.name IS NULL OR c.name <> ?)");
-      params.push('代码');
+      if (codeIds.length) {
+        whereClauses.push('a.category_id IN (' + codeIds.map(() => '?').join(',') + ')');
+        params.push(...codeIds);
+      } else {
+        whereClauses.push('1=0');
+      }
+    } else if (codeIds.length) {
+      // 总榜与游客榜默认排除 code_category_ids 里的分类；代码榜必须显式 category=code
+      whereClauses.push('(a.category_id IS NULL OR a.category_id NOT IN (' + codeIds.map(() => '?').join(',') + '))');
+      params.push(...codeIds);
     }
 
     if (categoryId) {

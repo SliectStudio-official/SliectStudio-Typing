@@ -33,7 +33,9 @@ let segmentInputValues = [];
 let practiceKind = 'normal';
 let codeTyping = null;
 let codeArticles = [];
-let codeCategoryId = null;
+let codeCategoryIds = [];
+let codeCategories = [];
+let allArticles = [];
 let codeStatsCache = { typed: 0, correct: 0, wrong: 0 };
 
 const RENDER_BUFFER_BEFORE = 50;
@@ -56,6 +58,7 @@ async function readJson(res, url) {
 
 const articleSelect = document.getElementById('article-select');
 const categoryFilter = document.getElementById('category-filter');
+const categoryFilterLabel = document.getElementById('category-filter-label');
 const difficultyFilter = document.getElementById('difficulty-filter');
 const articleInfo = document.getElementById('article-info');
 const practiceKindRadios = document.querySelectorAll('input[name="practice-kind"]');
@@ -328,21 +331,74 @@ async function fetchCategories() {
   renderSubmitCategorySelect();
 }
 
+async function fetchCodeCategories() {
+  try {
+    const res = await fetch('/api/code-categories');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await readJson(res);
+    codeCategoryIds = (Array.isArray(data.ids) ? data.ids : []).map(id => String(id));
+    codeCategories = Array.isArray(data.categories) ? data.categories : [];
+  } catch (e) {
+    codeCategoryIds = [];
+    codeCategories = [];
+    console.warn('[代码分类] 加载代码分类失败', e.message);
+  }
+  renderCategoryFilter();
+  renderLbCategoryFilter();
+}
+
+function isCodeCategoryIdClient(id) {
+  return codeCategoryIds.indexOf(String(id)) >= 0;
+}
+
+function isCodeArticleClient(article) {
+  return !!(article && article.category_id != null && isCodeCategoryIdClient(article.category_id));
+}
+
 function renderCategoryFilter() {
-  categoryFilter.innerHTML = '<option value="">全部分类</option>';
-  categories.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.name;
-    categoryFilter.appendChild(opt);
-  });
+  const previous = categoryFilter.value;
+  categoryFilter.innerHTML = '';
+  if (practiceKind === 'code') {
+    if (categoryFilterLabel) categoryFilterLabel.textContent = '语言';
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = '全部语言';
+    categoryFilter.appendChild(all);
+    codeCategories.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      categoryFilter.appendChild(opt);
+    });
+  } else {
+    if (categoryFilterLabel) categoryFilterLabel.textContent = '分类筛选';
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = '全部分类';
+    categoryFilter.appendChild(all);
+    const present = new Set((allArticles.length ? allArticles : articles)
+      .filter(a => !a.status || a.status === 'approved')
+      .map(a => String(a.category_id)));
+    categories.forEach(c => {
+      if (!present.has(String(c.id)) || isCodeCategoryIdClient(c.id)) return;
+      const opt = document.createElement('option');
+      opt.value = c.id;
+      opt.textContent = c.name;
+      categoryFilter.appendChild(opt);
+    });
+  }
+  if (previous && [...categoryFilter.options].some(o => o.value === previous)) {
+    categoryFilter.value = previous;
+  } else {
+    categoryFilter.value = '';
+  }
 }
 
 function renderLbCategoryFilter() {
   lbCategoryFilter.innerHTML = '<option value="">全部分类</option>';
   categories.forEach(c => {
     // 代码分类走独立「代码榜」，不再混进总榜分类筛选
-    if (c.name === '代码') return;
+    if (isCodeCategoryIdClient(c.id)) return;
     const opt = document.createElement('option');
     opt.value = c.id;
     opt.textContent = c.name;
@@ -360,13 +416,20 @@ function renderSubmitCategorySelect() {
   });
 }
 
-categoryFilter.addEventListener('change', () => {
+function onPracticeFilterChange() {
+  if (practiceKind === 'code') {
+    currentArticle = null;
+    originalText = '';
+    articleInfo.textContent = '';
+    resetPractice();
+    renderArticleSelect();
+    return;
+  }
   fetchArticles(categoryFilter.value, difficultyFilter.value);
-});
+}
 
-difficultyFilter.addEventListener('change', () => {
-  fetchArticles(categoryFilter.value, difficultyFilter.value);
-});
+categoryFilter.addEventListener('change', onPracticeFilterChange);
+difficultyFilter.addEventListener('change', onPracticeFilterChange);
 
 function hideLoadingOverlay() {
   if (window.PageLoading) {
@@ -412,6 +475,7 @@ async function fetchArticles(categoryId, difficulty) {
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     articles = await readJson(res);
+    if (!categoryId && !difficulty) allArticles = articles;
     isOfflineArticles = false;
     // 在线时触发 SW 同步离线文章缓存，确保 IndexedDB 与数据库一致
     const ctrl = await getSWController();
@@ -419,8 +483,10 @@ async function fetchArticles(categoryId, difficulty) {
   } catch (e) {
     // 后端不可达，回退到 SW 缓存的离线文章
     await loadOfflineArticlesFromSW(categoryId, difficulty);
+    if (!categoryId && !difficulty) allArticles = articles;
   } finally {
     renderArticleSelect();
+    if (!categoryId && !difficulty && practiceKind === 'normal') renderCategoryFilter();
   }
 }
 
@@ -458,13 +524,6 @@ function calculateRecommendedTime(text, difficulty) {
   return time;
 }
 
-function getCodeCategoryId() {
-  const cat = categories.find(c => c.name === '代码');
-  if (cat) return String(cat.id);
-  const article = articles.find(a => a.category_name === '代码' && a.category_id != null);
-  return article ? String(article.category_id) : null;
-}
-
 function isCodeModeBlocked() {
   return window.innerWidth <= 767 ||
     ((navigator.maxTouchPoints || 0) > 0 &&
@@ -472,19 +531,20 @@ function isCodeModeBlocked() {
 }
 
 async function loadCodeArticles() {
-  codeCategoryId = getCodeCategoryId();
-  if (!codeCategoryId) {
+  if (!codeCategoryIds.length) {
     codeArticles = [];
     return false;
   }
   try {
-    const res = await fetch('/api/articles?brief=1&category_id=' + encodeURIComponent(codeCategoryId));
+    const res = await fetch('/api/articles?brief=1');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const list = await readJson(res);
-    codeArticles = (Array.isArray(list) ? list : []).filter(a => !a.status || a.status === 'approved');
+    codeArticles = (Array.isArray(list) ? list : [])
+      .filter(a => (!a.status || a.status === 'approved') && isCodeArticleClient(a));
   } catch (e) {
-    // 离线时退回当前文章列表中的代码分类条目
-    codeArticles = articles.filter(a => String(a.category_id) === codeCategoryId && (!a.status || a.status === 'approved'));
+    // 离线时退回当前文章列表中的代码条目
+    codeArticles = (allArticles.length ? allArticles : articles)
+      .filter(a => (!a.status || a.status === 'approved') && isCodeArticleClient(a));
     console.error('[代码模式] 加载代码文章失败', e);
   }
   return codeArticles.length > 0;
@@ -529,9 +589,10 @@ async function setPracticeKind(kind, fromAvailability) {
     originalText = '';
     articleSelect.value = '';
     articleInfo.textContent = '代码模式：请在下方选择代码素材';
-    if (categoryFilter) categoryFilter.disabled = true;
-    if (difficultyFilter) difficultyFilter.disabled = true;
+    if (categoryFilter) { categoryFilter.disabled = false; categoryFilter.value = ''; }
+    if (difficultyFilter) { difficultyFilter.disabled = false; difficultyFilter.value = ''; }
     resetPractice();
+    renderCategoryFilter();
     renderArticleSelect();
     updateSpeechToggle();
     return;
@@ -543,10 +604,11 @@ async function setPracticeKind(kind, fromAvailability) {
   originalText = '';
   articleSelect.value = '';
   articleInfo.textContent = '';
-  if (categoryFilter) categoryFilter.disabled = false;
-  if (difficultyFilter) difficultyFilter.disabled = false;
+  if (categoryFilter) { categoryFilter.disabled = false; categoryFilter.value = ''; }
+  if (difficultyFilter) { difficultyFilter.disabled = false; difficultyFilter.value = ''; }
   if (practiceKindHint && practiceKindHint.textContent === '还没有代码素材') practiceKindHint.textContent = '';
   resetPractice();
+  renderCategoryFilter();
   renderArticleSelect();
   updateSpeechToggle();
 }
@@ -561,7 +623,17 @@ function renderArticleSelect() {
   const offlineSuffix = isOfflineArticles ? '（离线）' : '';
   articleSelect.innerHTML = '<option value="">-- 请选择 --</option>';
   const list = [];
-  const sourceArticles = practiceKind === 'code' ? codeArticles : articles;
+  let sourceArticles = practiceKind === 'code' ? codeArticles : articles;
+  if (practiceKind === 'code') {
+    const lang = categoryFilter.value;
+    const diff = difficultyFilter.value;
+    sourceArticles = sourceArticles.filter(a =>
+      (!lang || String(a.category_id) === lang) &&
+      (!diff || String(a.difficulty) === diff));
+    if (!sourceArticles.length) articleInfo.textContent = '该语言下还没有素材';
+  } else {
+    sourceArticles = sourceArticles.filter(a => !isCodeArticleClient(a));
+  }
 
   sourceArticles.forEach(a => {
     const catName = a.category_name || '未分类';
@@ -1660,6 +1732,7 @@ async function init() {
     if (isBootstrapping) return;
     await checkAuth().catch(() => {});
     await fetchCategories().catch(() => {});
+    await fetchCodeCategories().catch(() => {});
     // 分类返回后即可移除 loading，文章列表在后台继续加载
     hideLoadingOverlay();
     applyPageIntent();
