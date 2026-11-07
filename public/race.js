@@ -1585,6 +1585,10 @@
     stopRevealAnimation();
     state.revealKey = null;
   }
+  function setRevealSubtitle(text) {
+    var el = $('race-reveal-sub');
+    if (el) el.textContent = text;
+  }
   function renderReveal(snap) {
     var reveal = snap && snap.race && snap.race.reveal;
     if (!reveal || !Array.isArray(reveal.candidates) || !reveal.candidates.length) return;
@@ -1596,6 +1600,7 @@
     state.revealKey = key;
     stage.className = 'race-reveal-stage';
     stage.innerHTML = '';
+    setRevealSubtitle('系统正在为你抽取文章');
     var reduced = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
     var cards = [];
     reveal.candidates.forEach(function (c) {
@@ -1611,10 +1616,13 @@
     });
     var winner = cards.filter(function (el) { return Number(el.dataset.articleId) === Number(reveal.resolvedArticleId); })[0];
     if (!winner) return;
+    var winnerCandidate = reveal.candidates.filter(function (c) { return Number(c.articleId) === Number(reveal.resolvedArticleId); })[0];
+    var winnerTitle = winnerCandidate ? winnerCandidate.title : '';
     if (cards.length === 1) stage.classList.add('is-single');
     if (reduced) {
       stage.classList.add('is-gathered', 'is-reduced');
       winner.classList.add('is-winner');
+      setRevealSubtitle((cards.length === 1 ? '已选中：' : '已抽中：') + winnerTitle);
       return;
     }
     if (cards.length === 1) {
@@ -1622,6 +1630,7 @@
       state.revealTimers.push(setTimeout(function () {
         stage.classList.add('is-gathered');
         winner.classList.add('is-winner');
+        setRevealSubtitle('已选中：' + winnerTitle);
       }, 0));
       return;
     }
@@ -1645,6 +1654,7 @@
       var shift = stageRect.left + stageRect.width / 2 - (winnerRect.left + winnerRect.width / 2);
       winner.style.setProperty('--reveal-shift', shift.toFixed(1) + 'px');
       winner.classList.add('is-winner');
+      setRevealSubtitle('已抽中：' + winnerTitle);
       cards.forEach(function (el) { if (el !== winner) el.classList.add('is-out'); });
     }, 1200));
     state.revealTimers.push(setTimeout(function () { stage.classList.add('is-leaving'); }, 1500));
