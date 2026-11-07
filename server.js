@@ -171,6 +171,17 @@ app.use(compression({
   }
 }));
 app.use(express.json({ limit: '1mb' }));
+
+// P41：部分客户端安全软件会重置 PUT/DELETE；管理页写请求改用 POST + 覆盖头
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.headers['x-http-method-override']) {
+    const override = String(req.headers['x-http-method-override']).toUpperCase();
+    if (override === 'PUT' || override === 'PATCH' || override === 'DELETE') {
+      req.method = override;
+    }
+  }
+  next();
+});
 app.get(HTML_PAGES, async (req, res, next) => {
   // 首次引导只在这四个页面入口判定一次，其余页面不做额外查询
   if (BOOTSTRAP_REDIRECT_PAGES.has(req.path) || req.path === '/setup.html') {

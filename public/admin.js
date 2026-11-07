@@ -275,7 +275,7 @@ dbTestBtn.addEventListener('click', async () => {
   dbTestBtn.textContent = '测试中...';
   dbConfigMsg.textContent = '';
   try {
-    const res = await fetch('/api/admin/db-config/test', {
+    const res = await apiWrite('/api/admin/db-config/test', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ type: currentDbType, mysql: getMysqlConfigFromForm() })
@@ -302,8 +302,8 @@ dbSaveConfigBtn.addEventListener('click', async () => {
   dbSaveConfigBtn.textContent = '保存中...';
   dbConfigMsg.textContent = '';
   try {
-    const res = await fetch('/api/admin/db-config', {
-      method: 'PUT',
+    const res = await apiWrite('/api/admin/db-config', {
+      method: METHOD_PUT,
       headers: apiHeaders(),
       body: JSON.stringify({ type: currentDbType, mysql: getMysqlConfigFromForm() })
     });
@@ -365,6 +365,22 @@ function apiHeaders() {
   const h = { 'Content-Type': 'application/json' };
   if (token) h['Authorization'] = 'Bearer ' + token;
   return h;
+}
+
+const METHOD_PUT = 'PUT';
+const METHOD_PATCH = 'PATCH';
+const METHOD_DELETE = 'DELETE';
+
+async function apiWrite(url, options) {
+  const opts = Object.assign({}, options || {});
+  const original = String(opts.method || 'POST').toUpperCase();
+  const headers = Object.assign({}, opts.headers || {});
+  if (original === 'PUT' || original === 'PATCH' || original === 'DELETE') {
+    headers['x-http-method-override'] = original;
+    opts.method = 'POST';
+  }
+  opts.headers = headers;
+  return fetch(url, opts);
 }
 
 async function getSWController() {
@@ -611,8 +627,8 @@ function renderPendingArticles(list) {
 
     div.querySelector('.approve-btn').addEventListener('click', async function() {
       try {
-        const res = await fetch('/api/articles/' + this.dataset.id + '/review', {
-          method: 'PUT',
+        const res = await apiWrite('/api/articles/' + this.dataset.id + '/review', {
+          method: METHOD_PUT,
           headers: apiHeaders(),
           body: JSON.stringify({ status: 'approved' })
         });
@@ -632,8 +648,8 @@ function renderPendingArticles(list) {
       const reason = prompt('请输入拒绝原因（可选）：');
       if (reason === null) return;
       try {
-        const res = await fetch('/api/articles/' + this.dataset.id + '/review', {
-          method: 'PUT',
+        const res = await apiWrite('/api/articles/' + this.dataset.id + '/review', {
+          method: METHOD_PUT,
           headers: apiHeaders(),
           body: JSON.stringify({ status: 'rejected', review_msg: reason })
         });
@@ -742,8 +758,8 @@ async function loadAnnouncements() {
       btn.addEventListener('click', async () => {
         if (!confirm('确定删除该公告？')) return;
         try {
-          const res = await fetch('/api/admin/announcements/' + btn.dataset.id, {
-            method: 'DELETE',
+          const res = await apiWrite('/api/admin/announcements/' + btn.dataset.id, {
+            method: METHOD_DELETE,
             headers: apiHeaders()
           });
           if (res.ok) {
@@ -779,10 +795,10 @@ saveAnnouncementBtn.addEventListener('click', async () => {
   };
   const editId = announcementEditId.value;
   const url = editId ? '/api/admin/announcements/' + editId : '/api/admin/announcements';
-  const method = editId ? 'PUT' : 'POST';
+  const method = editId ? METHOD_PUT : 'POST';
 
   try {
-    const res = await fetch(url, {
+    const res = await apiWrite(url, {
       method: method,
       headers: apiHeaders(),
       body: JSON.stringify(body)
@@ -882,8 +898,8 @@ async function loadUsers() {
           }
           if (newPassword.trim()) body.password = newPassword.trim();
           if (roleValue) body.role = roleValue;
-          const updateRes = await fetch('/api/admin/users/' + id, {
-            method: 'PUT',
+          const updateRes = await apiWrite('/api/admin/users/' + id, {
+            method: METHOD_PUT,
             headers: apiHeaders(),
             body: JSON.stringify(body)
           });
@@ -901,8 +917,8 @@ async function loadUsers() {
       btn.addEventListener('click', async () => {
         if (!confirm('确定删除该用户？此操作不可恢复！')) return;
         try {
-          const res = await fetch('/api/admin/users/' + btn.dataset.id, {
-            method: 'DELETE',
+          const res = await apiWrite('/api/admin/users/' + btn.dataset.id, {
+            method: METHOD_DELETE,
             headers: apiHeaders()
           });
           if (res.ok) {
@@ -939,8 +955,8 @@ saveAdminInfoBtn.addEventListener('click', async () => {
   }
 
   try {
-    const res = await fetch('/api/auth/me', {
-      method: 'PUT',
+    const res = await apiWrite('/api/auth/me', {
+      method: METHOD_PUT,
       headers: apiHeaders(),
       body: JSON.stringify(body)
     });
@@ -984,8 +1000,8 @@ saveSensitiveWordsBtn.addEventListener('click', async () => {
   const words = raw.split('\n').map(function(w) { return w.trim(); }).filter(function(w) { return w.length > 0; });
 
   try {
-    const res = await fetch('/api/admin/sensitive-words', {
-      method: 'PUT',
+    const res = await apiWrite('/api/admin/sensitive-words', {
+      method: METHOD_PUT,
       headers: apiHeaders(),
       body: JSON.stringify({ words: words })
     });
@@ -1169,8 +1185,8 @@ async function updateDatabaseRowField(row, columnName, value) {
   if (!currentDatabaseData || !currentDatabaseData.primaryKey) return false;
   const pk = currentDatabaseData.primaryKey;
   try {
-    const res = await fetch('/api/admin/db/' + encodeURIComponent(currentDatabaseTable) + '/' + encodeURIComponent(row[pk]), {
-      method: 'PUT',
+    const res = await apiWrite('/api/admin/db/' + encodeURIComponent(currentDatabaseTable) + '/' + encodeURIComponent(row[pk]), {
+      method: METHOD_PUT,
       headers: apiHeaders(),
       body: JSON.stringify({ [columnName]: value })
     });
@@ -1228,8 +1244,8 @@ async function deleteDatabaseRow(row) {
   if (!confirm('确定删除 ' + currentDatabaseTable + ' 中主键为 ' + row[pk] + ' 的记录吗？')) return;
 
   try {
-    const res = await fetch('/api/admin/db/' + encodeURIComponent(currentDatabaseTable) + '/' + encodeURIComponent(row[pk]), {
-      method: 'DELETE',
+    const res = await apiWrite('/api/admin/db/' + encodeURIComponent(currentDatabaseTable) + '/' + encodeURIComponent(row[pk]), {
+      method: METHOD_DELETE,
       headers: apiHeaders()
     });
     const data = await res.json();
@@ -1273,7 +1289,7 @@ databaseAddRowBtn.addEventListener('click', async () => {
   databaseAddRowBtn.disabled = true;
   databaseAddRowBtn.textContent = '新增中...';
   try {
-    const res = await fetch('/api/admin/db/' + encodeURIComponent(currentDatabaseTable), {
+    const res = await apiWrite('/api/admin/db/' + encodeURIComponent(currentDatabaseTable), {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify(payload)
@@ -1374,8 +1390,8 @@ async function toggleCodeLanguage(category) {
   codeLanguageBusy = true;
   renderCodeLanguagePanel();
   try {
-    const res = await fetch('/api/admin/code-languages', {
-      method: 'PUT',
+    const res = await apiWrite('/api/admin/code-languages', {
+      method: METHOD_PUT,
       headers: apiHeaders(),
       body: JSON.stringify({ ids: next.map(Number) })
     });
@@ -1456,8 +1472,8 @@ function renderCategories() {
     div.querySelector('.edit-cat-btn').addEventListener('click', async function() {
       const newName = prompt('编辑分类名称', this.dataset.name);
       if (newName && newName.trim()) {
-        await fetch('/api/categories/' + this.dataset.id, {
-          method: 'PUT',
+        await apiWrite('/api/categories/' + this.dataset.id, {
+          method: METHOD_PUT,
           headers: apiHeaders(),
           body: JSON.stringify({ name: newName.trim() })
         });
@@ -1467,8 +1483,8 @@ function renderCategories() {
 
     div.querySelector('.del-cat-btn').addEventListener('click', async function() {
       if (confirm('确定删除该分类吗？')) {
-        await fetch('/api/categories/' + this.dataset.id, {
-          method: 'DELETE',
+        await apiWrite('/api/categories/' + this.dataset.id, {
+          method: METHOD_DELETE,
           headers: apiHeaders()
         });
         await fetchCategories();
@@ -1515,7 +1531,7 @@ addCategoryBtn.addEventListener('click', async () => {
     return;
   }
   try {
-    const res = await fetch('/api/categories', {
+    const res = await apiWrite('/api/categories', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ name })
@@ -1593,8 +1609,8 @@ function renderArticles() {
       const id = this.dataset.id;
       const newOffline = this.dataset.offline === '0' ? 1 : 0;
       try {
-        const res = await fetch('/api/articles/' + id + '/offline', {
-          method: 'PUT',
+        const res = await apiWrite('/api/articles/' + id + '/offline', {
+          method: METHOD_PUT,
           headers: apiHeaders(),
           body: JSON.stringify({ is_offline: newOffline })
         });
@@ -1629,7 +1645,7 @@ function renderArticles() {
     });
     div.querySelector('.delete-btn').addEventListener('click', async function() {
       if (confirm('确定删除文章"' + a.title + '"吗？')) {
-        await fetch('/api/articles/' + this.dataset.id, { method: 'DELETE', headers: apiHeaders() });
+        await apiWrite('/api/articles/' + this.dataset.id, { method: METHOD_DELETE, headers: apiHeaders() });
         await fetchArticles();
         await fetchLeaderboard(currentFilter);
       }
@@ -1738,8 +1754,8 @@ async function toggleOfflineArticle(id) {
   if (!article) return;
   const newOffline = article.is_offline ? 0 : 1;
   try {
-    const res = await fetch('/api/articles/' + id + '/offline', {
-      method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: newOffline })
+    const res = await apiWrite('/api/articles/' + id + '/offline', {
+      method: METHOD_PUT, headers: apiHeaders(), body: JSON.stringify({ is_offline: newOffline })
     });
     if (!res.ok) { const err = await res.json().catch(() => ({})); alert(err.error || '操作失败'); return; }
     if (newOffline === 1) {
@@ -1768,8 +1784,8 @@ async function batchAddOffline() {
   try {
     for (const id of ids) {
       const article = allOfflineArticles.find(a => a.id === id);
-      await fetch('/api/articles/' + id + '/offline', {
-        method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: 1 })
+      await apiWrite('/api/articles/' + id + '/offline', {
+        method: METHOD_PUT, headers: apiHeaders(), body: JSON.stringify({ is_offline: 1 })
       });
       const fullArticle = article && article.content ? article : await fetchArticleDetail(id);
       if (fullArticle) await sendCacheArticleSW(fullArticle, 'global');
@@ -1796,8 +1812,8 @@ async function batchRemoveOffline() {
   offlineBatchRemove.textContent = '处理中...';
   try {
     for (const id of ids) {
-      await fetch('/api/articles/' + id + '/offline', {
-        method: 'PUT', headers: apiHeaders(), body: JSON.stringify({ is_offline: 0 })
+      await apiWrite('/api/articles/' + id + '/offline', {
+        method: METHOD_PUT, headers: apiHeaders(), body: JSON.stringify({ is_offline: 0 })
       });
       await sendDeleteCachedArticleSW(id, 'global');
     }
@@ -1886,7 +1902,7 @@ addArticleBtn.addEventListener('click', async () => {
   }
 
   try {
-    const res = await fetch('/api/articles', {
+    const res = await apiWrite('/api/articles', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ title, content, category_id: parseInt(category_id), source: '手动添加' })
@@ -1967,8 +1983,8 @@ editArticleSave.addEventListener('click', async () => {
   if (isCodeContent) warnIfTab(editContent.value);
 
   try {
-    const res = await fetch('/api/articles/' + editingArticleId, {
-      method: 'PUT',
+    const res = await apiWrite('/api/articles/' + editingArticleId, {
+      method: METHOD_PUT,
       headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, content, category_id: parseInt(category_id), difficulty_override })
     });
@@ -2065,8 +2081,8 @@ async function toggleCodeArticleStatus(article) {
   try {
     const detail = await fetchArticleDetail(article.id);
     if (!detail) throw new Error('文章详情加载失败');
-    const res = await fetch('/api/articles/' + article.id, {
-      method: 'PUT',
+    const res = await apiWrite('/api/articles/' + article.id, {
+      method: METHOD_PUT,
       headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: detail.title,
@@ -2090,7 +2106,7 @@ async function deleteCodeArticle(article) {
   if (!confirm('确定删除代码素材「' + article.title + '」吗？其成绩也会一并删除。')) return;
   codeArticleMsg.textContent = '';
   try {
-    const res = await fetch('/api/articles/' + article.id, { method: 'DELETE', headers: apiHeaders() });
+    const res = await apiWrite('/api/articles/' + article.id, { method: METHOD_DELETE, headers: apiHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '删除失败');
     adminToast('已删除代码素材', 'success');
@@ -2143,7 +2159,7 @@ function renderCodeLeaderboard() {
     tr.querySelector('.code-lb-delete').addEventListener('click', async function() {
       if (!confirm('确定删除该代码榜记录吗？')) return;
       try {
-        const res = await fetch('/api/leaderboard/' + r.id, { method: 'DELETE', headers: apiHeaders() });
+        const res = await apiWrite('/api/leaderboard/' + r.id, { method: METHOD_DELETE, headers: apiHeaders() });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '删除失败');
         adminToast('已删除记录', 'success');
@@ -2168,7 +2184,7 @@ codeAddArticleBtn.addEventListener('click', async () => {
   warnIfTab(content);
   codeAddMsg.textContent = '';
   try {
-    const res = await fetch('/api/articles', {
+    const res = await apiWrite('/api/articles', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ title, content, category_id: parseInt(categoryId, 10), source: '代码素材' })
@@ -2176,8 +2192,8 @@ codeAddArticleBtn.addEventListener('click', async () => {
     const created = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(created.error || '添加失败');
     if (Number.isInteger(difficulty) && difficulty >= 1 && difficulty <= 3) {
-      const putRes = await fetch('/api/articles/' + created.id, {
-        method: 'PUT',
+      const putRes = await apiWrite('/api/articles/' + created.id, {
+        method: METHOD_PUT,
         headers: { ...apiHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content, category_id: parseInt(categoryId, 10), difficulty_override: difficulty })
       });
@@ -2227,7 +2243,7 @@ async function fetchArticleByUrl(targetUrl) {
   crawlSaveMsg.textContent = '抓取中，请稍候...';
   crawlSaveMsg.style.color = 'var(--text-muted, #888)';
   try {
-    const res = await fetch('/api/crawl', {
+    const res = await apiWrite('/api/crawl', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ url: targetUrl })
@@ -2266,7 +2282,7 @@ crawlSearchBtn.addEventListener('click', async () => {
   crawlSearchResults.innerHTML = '<p class="note">正在检索互联网文章...</p>';
 
   try {
-    const res = await fetch('/api/crawl/search', {
+    const res = await apiWrite('/api/crawl/search', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({ keyword: kw })
@@ -2394,7 +2410,7 @@ crawlSaveBtn.addEventListener('click', async () => {
   crawlSaveBtn.textContent = '保存中...';
 
   try {
-    const res = await fetch('/api/crawl/save', {
+    const res = await apiWrite('/api/crawl/save', {
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({
@@ -2483,7 +2499,7 @@ function renderLeaderboardManage() {
 
     div.querySelector('button').addEventListener('click', async function() {
       if (confirm('确定删除该记录吗？')) {
-        await fetch('/api/leaderboard/' + this.dataset.id, { method: 'DELETE', headers: apiHeaders() });
+        await apiWrite('/api/leaderboard/' + this.dataset.id, { method: METHOD_DELETE, headers: apiHeaders() });
         await fetchLeaderboard(currentFilter);
       }
     });
@@ -2500,7 +2516,7 @@ function openConfirmModal(message, okText, action) {
 
 clearLbBtn.addEventListener('click', () => {
   openConfirmModal('确定要清空整个排行榜吗？此操作不可恢复！', '确认清空', async () => {
-    await fetch('/api/leaderboard', { method: 'DELETE', headers: apiHeaders() });
+    await apiWrite('/api/leaderboard', { method: METHOD_DELETE, headers: apiHeaders() });
     await fetchLeaderboard(currentFilter);
     if (loadedSections.has('code-lb')) fetchCodeLeaderboard();
     adminToast('排行榜已清空', 'success');
@@ -2513,7 +2529,7 @@ document.getElementById('code-lb-refresh').addEventListener('click', () => {
 
 document.getElementById('clear-code-lb-btn').addEventListener('click', () => {
   openConfirmModal('只清空代码榜，不影响总榜。确定吗？', '确认清空代码榜', async () => {
-    const res = await fetch('/api/leaderboard?category=code', { method: 'DELETE', headers: apiHeaders() });
+    const res = await apiWrite('/api/leaderboard?category=code', { method: METHOD_DELETE, headers: apiHeaders() });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || '清空失败');
     await fetchCodeLeaderboard();
@@ -2784,8 +2800,8 @@ async function saveRaceSettings() {
     return;
   }
   try {
-    const res = await fetch('/api/admin/race-settings', {
-      method: 'PUT', headers: apiHeaders(),
+    const res = await apiWrite('/api/admin/race-settings', {
+      method: METHOD_PUT, headers: apiHeaders(),
       body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked), maxTotalPlayers: maxTotalPlayers, maxDurationMinutes: maxDurationMinutes })
     });
     const data = await res.json().catch(() => null);
@@ -2805,7 +2821,7 @@ async function saveRaceSettings() {
 async function cancelRaceRoom(code) {
   if (!confirm('确定解散房间 ' + code + '？房间内所有参与者会被移出。')) return;
   try {
-    const res = await fetch('/api/admin/races/' + encodeURIComponent(code) + '/cancel', { method: 'POST', headers: apiHeaders() });
+    const res = await apiWrite('/api/admin/races/' + encodeURIComponent(code) + '/cancel', { method: 'POST', headers: apiHeaders() });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
     await loadRaceRooms();
@@ -2865,7 +2881,7 @@ async function kickRaceMember(code, player) {
   if (!confirm('把 ' + player.nickname + ' 移出房间？')) return;
   const payload = player.isGuest ? { guestId: player.guestId } : { userId: player.userId };
   try {
-    const res = await fetch('/api/admin/races/' + encodeURIComponent(code) + '/kick', {
+    const res = await apiWrite('/api/admin/races/' + encodeURIComponent(code) + '/kick', {
       method: 'POST', headers: apiHeaders(), body: JSON.stringify(payload)
     });
     const data = await res.json().catch(() => null);
@@ -2897,7 +2913,7 @@ function setBackupNote(el, text, isError) {
   el.style.color = isError ? 'var(--semantic-error)' : '';
 }
 async function backupRequest(url, options) {
-  const res = await fetch(url, options || {});
+  const res = await apiWrite(url, options || {});
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
   return data;
@@ -3093,7 +3109,7 @@ if (backupListBody) backupListBody.addEventListener('click', function (e) {
       else if (action === 'restore') await restoreFromBackup(name);
       else if (action === 'delete') {
         if (!confirm('确定删除备份 ' + name + '？此操作不可恢复。')) return;
-        await backupRequest('/api/admin/backup/' + encodeURIComponent(name), { method: 'DELETE', headers: apiHeaders() });
+        await backupRequest('/api/admin/backup/' + encodeURIComponent(name), { method: METHOD_DELETE, headers: apiHeaders() });
         setBackupNote(backupListMsg, '已删除 ' + name);
         await loadBackups();
       }
