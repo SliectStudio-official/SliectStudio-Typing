@@ -390,8 +390,12 @@
       el.className = 'home-notify-item';
       if (item.link) el.href = item.link;
       el.innerHTML = '<div class="home-notify-item-title">' + esc(item.title || '通知') + '</div>' +
-        '<div class="home-notify-item-body">' + esc(item.body || '') + '</div>' +
         '<div class="home-notify-item-time">' + esc(item.time || '') + '</div>';
+      var bodyEl = document.createElement('div');
+      bodyEl.className = 'home-notify-item-body';
+      if (window.AnnounceText) window.AnnounceText.render(bodyEl, item.body || '');
+      else bodyEl.textContent = item.body || '';
+      el.insertBefore(bodyEl, el.querySelector('.home-notify-item-time'));
       list.appendChild(el);
     });
   }

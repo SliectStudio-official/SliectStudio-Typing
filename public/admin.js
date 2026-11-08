@@ -193,6 +193,7 @@ const announcementMsg = document.getElementById('announcement-msg');
 const announcementList = document.getElementById('announcement-list');
 const announcementEmpty = document.getElementById('announcement-empty');
 const announcementPreview = document.getElementById('announcement-preview');
+const insertLinkBtn = document.getElementById('announcement-insert-link');
 const previewBar = document.getElementById('preview-bar');
 const previewBadge = document.getElementById('preview-badge');
 const previewTitle = document.getElementById('preview-title');
@@ -721,13 +722,18 @@ async function loadAnnouncements() {
       div.innerHTML =
         '<div class="info" style="flex:1">' +
           '<div class="title" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">' + badge + escapeHtml(item.title || '(无标题)') + (item.is_active ? '' : ' <span style="color:var(--muted);font-size:12px">[已停用]</span>') + '</div>' +
-          '<div class="preview">' + escapeHtml(item.content) + '</div>' +
+          '<div class="preview"></div>' +
           timeRange +
         '</div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0">' +
           '<button class="btn-secondary edit-announcement-btn" data-id="' + item.id + '" style="font-size:12px;padding:4px 10px">编辑</button>' +
           '<button class="btn-secondary delete-announcement-btn" data-id="' + item.id + '" style="font-size:12px;padding:4px 10px;color:var(--semantic-error)">删除</button>' +
         '</div>';
+      const previewEl = div.querySelector('.preview');
+      if (previewEl) {
+        if (window.AnnounceText) window.AnnounceText.render(previewEl, item.content || '');
+        else previewEl.textContent = item.content || '';
+      }
       announcementList.appendChild(div);
     });
 
@@ -833,11 +839,48 @@ previewAnnouncementBtn.addEventListener('click', () => {
   previewBadge.textContent = LEVEL_LABELS[level] || '通知';
   previewTitle.textContent = announcementTitleInput.value.trim();
   previewTitle.style.display = announcementTitleInput.value.trim() ? '' : 'none';
-  previewText.textContent = content;
+  if (window.AnnounceText) window.AnnounceText.render(previewText, content);
+  else previewText.textContent = content;
   announcementPreview.style.display = '';
 });
 
 cancelAnnouncementBtn.addEventListener('click', resetAnnouncementForm);
+
+function showAnnouncementEditorMsg(text, isError) {
+  announcementMsg.textContent = text;
+  announcementMsg.style.color = isError ? 'var(--semantic-error)' : 'var(--semantic-success)';
+  setTimeout(() => {
+    if (announcementMsg.textContent === text) announcementMsg.textContent = '';
+  }, 3000);
+}
+
+if (insertLinkBtn) insertLinkBtn.addEventListener('click', () => {
+  const start = announcementContent.selectionStart;
+  const end = announcementContent.selectionEnd;
+  const selected = announcementContent.value.slice(start, end);
+  if (!selected) {
+    showAnnouncementEditorMsg('请先在公告内容里选中要变成链接的文字', true);
+    return;
+  }
+  const input = window.prompt('请输入链接地址（http://、https:// 或以 / 开头的站内路径）', 'https://');
+  if (input === null) return;
+  const url = input.trim();
+  if (!/^https?:\/\//.test(url) && !/^\/[^\s]*$/.test(url)) {
+    showAnnouncementEditorMsg('链接必须以 http:// 或 https:// 开头，或以 / 开头的站内路径', true);
+    return;
+  }
+  const replacement = '[' + selected + '](' + url + ')';
+  if (typeof announcementContent.setRangeText === 'function') {
+    announcementContent.setRangeText(replacement, start, end, 'end');
+  } else {
+    announcementContent.value = announcementContent.value.slice(0, start) + replacement + announcementContent.value.slice(end);
+  }
+  const cursor = start + replacement.length;
+  announcementContent.selectionStart = cursor;
+  announcementContent.selectionEnd = cursor;
+  announcementContent.focus();
+  announcementMsg.textContent = '';
+});
 
 async function loadUsers() {
   try {

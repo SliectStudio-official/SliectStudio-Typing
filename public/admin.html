@@ -353,6 +353,10 @@
           <div class="filter-group" style="margin-bottom:12px">
             <label for="announcement-content">公告内容 *</label>
             <textarea id="announcement-content" placeholder="输入公告内容" style="min-height:60px"></textarea>
+            <div style="margin-top:8px">
+              <button type="button" class="admin-btn btn-secondary" id="announcement-insert-link">插入链接</button>
+            </div>
+            <div class="admin-hint" id="announcement-link-hint" style="font-size:12px;color:var(--muted);margin-top:6px">支持链接写法：[点这里](https://example.com)，点击后在新标签打开</div>
           </div>
           <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
             <div class="filter-group">
@@ -719,6 +723,7 @@
   <div class="toast-container" id="toast-container"></div>
 
   <footer class="site-footer" id="site-footer">Loading...</footer>
+  <script src="announce-text.js"></script>
   <script src="nav.js"></script>
   <script src="custom-select.js" defer></script>
   <script src="admin.js" defer></script>

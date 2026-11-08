@@ -261,8 +261,12 @@
       if (item.link) el.href = item.link;
       el.innerHTML =
         '<div class="notify-item-title">' + esc(item.title) + '</div>' +
-        '<div class="notify-item-body">' + esc(item.body) + '</div>' +
         '<div class="notify-item-time">' + esc(item.time) + '</div>';
+      var bodyEl = document.createElement('div');
+      bodyEl.className = 'notify-item-body';
+      if (window.AnnounceText) window.AnnounceText.render(bodyEl, item.body || '');
+      else bodyEl.textContent = item.body || '';
+      el.insertBefore(bodyEl, el.querySelector('.notify-item-time'));
       el.addEventListener('click', function () { markNotifyRead([item.id]); });
       list.appendChild(el);
     });

@@ -65,7 +65,10 @@
         var close = document.getElementById('announcement-close');
         if (badge) badge.textContent = LEVEL_LABELS[data.level] || '通知';
         if (title) { title.textContent = data.title || ''; title.style.display = data.title ? '' : 'none'; }
-        if (text) text.textContent = data.content || '';
+        if (text) {
+          if (window.AnnounceText) window.AnnounceText.render(text, data.content || '');
+          else text.textContent = data.content || '';
+        }
         if (close) close.style.display = data.allow_close === 0 || data.allow_close === false ? 'none' : '';
         bar.style.display = 'flex';
       })
