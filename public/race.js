@@ -1465,6 +1465,28 @@
   function miniEscape(s) {
     return esc(miniChar(s));
   }
+  function miniWindowSize(el, fontSizePx) {
+    if (!el) return { front: 20, back: 30 };
+    var width = el.clientWidth;
+    if (!width) return { front: 20, back: 30 };
+    var fontSize = Number(fontSizePx) || 14;
+    var visible = Math.round((width - 24) / (fontSize * 0.6));
+    if (!Number.isFinite(visible) || visible < 20) visible = 20;
+    var front = Math.max(1, Math.floor(visible * 0.35));
+    var back = Math.max(1, visible - front);
+    return { front: front, back: back };
+  }
+  function applyMiniWindowSizes() {
+    var els = document.querySelectorAll('#view-spectate .race-mini-line[data-mini-key]');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (!el || el.style.display === 'none') continue;
+      var fontSize = parseFloat(getComputedStyle(el).fontSize) || 14;
+      var size = miniWindowSize(el, fontSize);
+      el.setAttribute('data-mini-front', String(size.front));
+      el.setAttribute('data-mini-back', String(size.back));
+    }
+  }
   function miniWindow(content, pos, front, back) {
     var p = Math.max(0, Math.min(Number(pos) || 0, content.length));
     var start = Math.max(0, p - front);
@@ -1537,8 +1559,8 @@
       if (!p) return;
       var completed = !!p.finishedAt;
       var target = completed ? contentNow.length : Math.min(p.progress || 0, contentNow.length || 0);
-      var front = parseInt(el.getAttribute('data-mini-front'), 10) || 6;
-      var back = parseInt(el.getAttribute('data-mini-back'), 10) || 6;
+      var front = parseInt(el.getAttribute('data-mini-front'), 10) || 20;
+      var back = parseInt(el.getAttribute('data-mini-back'), 10) || 30;
       el.style.display = 'block';
       if (!contentNow) {
         setMiniContent(el, '', target, front, back, completed, p.rank);
@@ -1706,8 +1728,6 @@
       if (showMini && focus) {
         focusMini.style.display = 'block';
         focusMini.setAttribute('data-mini-key', miniKey(focus));
-        focusMini.setAttribute('data-mini-front', window.innerWidth <= 480 ? '6' : '12');
-        focusMini.setAttribute('data-mini-back', window.innerWidth <= 480 ? '6' : '12');
       }
     } else {
       $('spec-focus-name').textContent = '—';
@@ -1731,8 +1751,6 @@
         var mini = document.createElement('div');
         mini.className = 'race-mini-line';
         mini.setAttribute('data-mini-key', miniKey(p));
-        mini.setAttribute('data-mini-front', '6');
-        mini.setAttribute('data-mini-back', '6');
         row.appendChild(mini);
       }
       row.onclick = function () { state.focusNick = p.nickname; renderSpectate(snap); };
@@ -1757,7 +1775,10 @@
       board.appendChild(row);
     });
     if (!snap.players.length) board.innerHTML = '<div class="race-empty">还没有选手</div>';
-    if (showMini) applyMiniBars(snap, content);
+    if (showMini) {
+      applyMiniWindowSizes();
+      applyMiniBars(snap, content);
+    }
 
     var cap = spectatorCapacity(r);
     var audience = '<div class="race-spectate-live-head">观战 ' + (r.spectatorEnabled ? ((r.spectatorCount || 0) + '/' + cap) : '已关闭') + '</div>' +

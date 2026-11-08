@@ -4777,6 +4777,10 @@ button:focus-visible,
 }
 
 /* ===== 观战（导播台） ===== */
+/* P46：站内容器默认 1060px，大屏下观战条无法继续变宽；1600px 以上给比赛页更多可用宽度 */
+@media (min-width: 1600px) {
+  body[data-page="race"] .container { max-width: 1320px; }
+}
 .race-board { display: flex; flex-direction: column; gap: 8px; }
 .race-board-row {
   display: grid; grid-template-columns: 34px minmax(90px, 1.1fr) minmax(90px, 2fr) 52px minmax(96px, 1fr);
@@ -5020,19 +5024,20 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
   display: block;
   min-width: 0;
   max-width: 100%;
-  padding: 1px 8px;
+  padding: 6px 10px;
   margin-top: 6px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-strong);
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.2;
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 32px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: clip;
 }
-.race-mini-focus { font-size: 14px; }
+.race-mini-focus { font-size: 16px; line-height: 1.6; min-height: 38px; padding: 8px 12px; }
 .race-mini-clip { display: block; min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: clip; }
 .race-mini-before { color: var(--ink); }
 .race-mini-after { color: var(--body); }
@@ -5042,15 +5047,22 @@ body.race-match-open { padding-bottom: var(--race-match-bar-h, 54px); }
   padding-left: 1px;
   border-left: 2px solid var(--primary);
   color: var(--ink);
+  vertical-align: middle;
+  line-height: inherit;
   animation: raceMiniCaret 1.1s steps(1, end) infinite;
 }
 @keyframes raceMiniCaret { 50% { opacity: .2; } }
 .race-mini-status { margin-left: 8px; color: var(--body); font-size: 11px; }
 .race-mini-done { opacity: .72; }
 .race-mini-loading { color: var(--body); }
-.race-board-row .race-mini-line { grid-column: 1 / -1; }
+#view-spectate .race-stage,
+#view-spectate .race-stage > *,
+#view-spectate .race-board,
+#view-spectate .race-board-row,
+#view-spectate .race-side-block { min-width: 0; }
+.race-board-row .race-mini-line { grid-column: 1 / -1; max-width: none; margin: 4px -14px 2px; }
 @media (max-width: 480px) {
-  .race-board-row .race-mini-line { display: none; }
+  .race-board-row .race-mini-line { display: block; font-size: 12.5px; padding: 4px 8px; min-height: 26px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .race-mini-caret { animation: none; }
