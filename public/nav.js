@@ -48,6 +48,8 @@
           '<img class="avatar-img" id="avatar-img" alt="" style="display:none">' +
           '<span class="avatar-fallback" id="avatar-fallback"></span>' +
         '</button>' +
+        // 头像按钮有 overflow:hidden，徽章挂到 user-area 才不会被裁掉
+        '<span class="avatar-badge" id="avatar-badge" style="display:none"></span>' +
         '<div class="user-menu" id="user-menu" role="menu">' +
           '<div class="user-menu-head">' +
             '<span class="user-menu-name" id="display-username"></span>' +
@@ -228,13 +230,16 @@
     return count;
   }
   function renderNotifyBadge() {
-    var badge = document.getElementById('notify-badge');
-    if (!badge) return;
-    if (!localStorage.getItem('token') || notifyError) { badge.style.display = 'none'; return; }
-    var count = unreadNotifyCount();
-    if (!count) { badge.style.display = 'none'; return; }
-    badge.textContent = count > 9 ? '9+' : String(count);
-    badge.style.display = 'inline-flex';
+    var badges = [document.getElementById('notify-badge'), document.getElementById('avatar-badge')];
+    var token = localStorage.getItem('token');
+    var count = (token && !notifyError) ? unreadNotifyCount() : 0;
+    var text = count > 9 ? '9+' : String(count);
+    badges.forEach(function (badge) {
+      if (!badge) return;
+      if (!token || notifyError || !count) { badge.style.display = 'none'; return; }
+      badge.textContent = text;
+      badge.style.display = 'inline-flex';
+    });
   }
   function renderNotifyList() {
     var list = document.getElementById('notify-list');

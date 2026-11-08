@@ -722,11 +722,12 @@ async function hasAdminUser() {
   return row.count > 0;
 }
 
-async function getActiveAnnouncement() {
+async function getActiveAnnouncements(limit) {
+  const max = Math.min(20, Math.max(1, parseInt(limit, 10) || 5));
   const nl = nowLocaltime(db);
   const emptyCheck = isMySQL(db) ? '' : " OR start_time = ''";
   const emptyCheck2 = isMySQL(db) ? '' : " OR end_time = ''";
-  const row = await db.get(
+  return await db.all(
     `SELECT * FROM announcements
      WHERE is_active = 1
        AND (start_time IS NULL${emptyCheck} OR start_time <= ${nl})
@@ -739,9 +740,14 @@ async function getActiveAnnouncement() {
          ELSE 4
        END,
        created_at DESC
-     LIMIT 1`
+     LIMIT ?`,
+    max
   );
-  return row || null;
+}
+
+async function getActiveAnnouncement() {
+  const rows = await getActiveAnnouncements(1);
+  return rows[0] || null;
 }
 
 async function authMiddleware(req, res, next) {
@@ -4387,8 +4393,8 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const items = [];
-    const announcement = await getActiveAnnouncement();
-    if (announcement) {
+    const announcements = await getActiveAnnouncements(5);
+    for (const announcement of announcements) {
       items.push({
         id: 'announcement:' + announcement.id,
         type: 'announcement',
