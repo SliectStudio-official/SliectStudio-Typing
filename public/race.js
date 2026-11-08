@@ -739,7 +739,7 @@
     processDissolveNotice(snap);
     renderDissolve(snap);
     if (st !== 'reveal') stopRevealAnimation();
-    syncMatchmadeUI(!!(snap.race && snap.race.matchmade));
+    syncMatchmadeUI(!!(snap.race && snap.race.matchmade), snap);
     if (st === 'cancelled') {
       stopPolling();
       var reason = snap.race.cancelledReason;
@@ -1564,13 +1564,17 @@
     if (state.miniAnims.size) startMiniLoop();
   }
 
-  /* ---------- 匹配房不渲染观战 UI ---------- */
-  function syncMatchmadeUI(matchmade) {
-    if (!matchmade) return;
+  /* ---------- 匹配房不渲染观战 UI（只切显示，节点必须保留） ---------- */
+  function syncMatchmadeUI(matchmade, snap) {
     var panel = $('race-spectate-panel');
-    if (panel) panel.remove();
     var live = $('race-spectator-live');
-    if (live) live.remove();
+    if (panel) panel.style.display = matchmade ? 'none' : '';
+    if (live) live.style.display = matchmade ? 'none' : '';
+    if (!matchmade && snap) {
+      // 从匹配房回到自建房时，节点虽在但内容停在上一次，必须重渲染
+      renderSpectatorPanel(snap, isHostSnap(snap), mySeat(snap));
+      renderSpectatorLive(snap);
+    }
   }
 
   /* ---------- 匹配成功：系统抽文 ---------- */
@@ -1973,9 +1977,7 @@
     var hostWaitingVote = isHost && seat === 'player' && st === 'waiting' && rule.mode === 'vote';
     var canDissolve = hasRoom && isHost && !matchmade && (hostWaitingVote || st === 'countdown' || st === 'racing');
     var dissolveBtn = $('btn-dissolve-race');
-    if (!canDissolve) {
-      if (dissolveBtn) dissolveBtn.remove();
-    } else if (!dissolveBtn) {
+    if (canDissolve && !dissolveBtn) {
       dissolveBtn = document.createElement('button');
       dissolveBtn.id = 'btn-dissolve-race';
       dissolveBtn.type = 'button';
@@ -1985,8 +1987,8 @@
       if (actionsBar) actionsBar.insertBefore(dissolveBtn, $('btn-exit-race'));
     }
     if (dissolveBtn) {
-      dissolveBtn.style.display = 'inline-flex';
-      dissolveBtn.textContent = '发起解散投票';
+      dissolveBtn.style.display = canDissolve ? 'inline-flex' : 'none';
+      if (canDissolve) dissolveBtn.textContent = '发起解散投票';
     }
     var showExit = hasRoom && !(isHost && seat === 'player' && st === 'waiting' && hostWaitingVote);
     $('btn-exit-race').style.display = showExit ? 'inline-flex' : 'none';
