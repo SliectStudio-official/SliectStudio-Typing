@@ -1253,16 +1253,20 @@ async function attemptMatch() {
     const allowCode = first.allowCode === true;
     const codeIds = await getCodeCategoryIds();
     const rows = await db.all("SELECT a.id, a.title, a.content, a.category_id, c.name AS category_name FROM articles a LEFT JOIN categories c ON a.category_id = c.id WHERE a.status = 'approved'");
-    // 只收适合比赛的 100–800 字正文；200–400 优先，其余 100–800 稳定排在后面
+    // 只收当前可配置字数范围内的正文；优先区间与自定义范围求交集，交集为空则不区分优先级
+    const prefMin = Math.max(200, settings.articleMinLen);
+    const prefMax = Math.min(400, settings.articleMaxLen);
+    const hasPrefRange = prefMin <= prefMax;
     let pool = rows
       .filter(function (row) {
-        if (!row.content || row.content.length < 100 || row.content.length > 800) return false;
+        if (!row.content || row.content.length < settings.articleMinLen || row.content.length > settings.articleMaxLen) return false;
         if (!allowCode && codeIds.indexOf(Number(row.category_id)) >= 0) return false;
         return true;
       })
       .map(function (row, index) {
         var len = row.content.length;
-        return { row: row, index: index, rank: len >= 200 && len <= 400 ? 0 : 1 };
+        var rank = hasPrefRange ? (len >= prefMin && len <= prefMax ? 0 : 1) : 0;
+        return { row: row, index: index, rank: rank };
       })
       .sort(function (a, b) { return a.rank - b.rank || a.index - b.index; })
       .map(function (item) { return item.row; });
@@ -1308,6 +1312,8 @@ async function getRaceSettings() {
   const enabledRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_enabled'");
   const totalRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_total_players'");
   const durationRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_max_duration_minutes'");
+  const minLenRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_article_min_len'");
+  const maxLenRow = await db.get("SELECT value FROM settings WHERE `key` = 'race_article_max_len'");
   let maxRooms = maxRow ? parseInt(maxRow.value, 10) : 20;
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) maxRooms = 20;
   let maxTotalPlayers = totalRow ? parseInt(totalRow.value, 10) : 200;
@@ -1315,7 +1321,38 @@ async function getRaceSettings() {
   let maxDurationMinutes = durationRow ? parseInt(durationRow.value, 10) : 180;
   if (!Number.isInteger(maxDurationMinutes) || maxDurationMinutes < 1 || maxDurationMinutes > 180) maxDurationMinutes = 180;
   const enabled = enabledRow ? enabledRow.value === 'true' : true;
-  return { maxRooms, enabled, maxTotalPlayers, maxDurationMinutes };
+  let articleMinLen = minLenRow ? parseInt(minLenRow.value, 10) : 100;
+  let articleMaxLen = maxLenRow ? parseInt(maxLenRow.value, 10) : 800;
+  if (!Number.isInteger(articleMinLen) || articleMinLen < 20 || articleMinLen > 2000) articleMinLen = 100;
+  if (!Number.isInteger(articleMaxLen) || articleMaxLen < 20 || articleMaxLen > 2000) articleMaxLen = 800;
+  if (articleMinLen >= articleMaxLen) {
+    articleMinLen = 100;
+    articleMaxLen = 800;
+  }
+  return { maxRooms, enabled, maxTotalPlayers, maxDurationMinutes, articleMinLen, articleMaxLen };
+}
+
+async function getRaceArticlePool(settings) {
+  const codeIds = await getCodeCategoryIds();
+  const lenExpr = isMySQL(db) ? 'CHAR_LENGTH(content)' : 'LENGTH(content)';
+  const rows = await db.all(
+    `SELECT category_id, ${lenExpr} AS char_count FROM articles WHERE status = 'approved'`
+  );
+  let normal = 0;
+  let code = 0;
+  rows.forEach(function (row) {
+    const len = Number(row.char_count);
+    if (!Number.isFinite(len) || len < settings.articleMinLen || len > settings.articleMaxLen) return;
+    if (codeIds.indexOf(Number(row.category_id)) >= 0) code += 1;
+    else normal += 1;
+  });
+  return { normal, code };
+}
+
+async function getRaceSettingsWithPool() {
+  const settings = await getRaceSettings();
+  const pool = await getRaceArticlePool(settings);
+  return Object.assign({}, settings, { pool });
 }
 
 async function setSetting(key, value) {
@@ -2850,7 +2887,7 @@ app.post('/api/admin/races/:code/kick', authMiddleware, adminMiddleware, async (
 
 app.get('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    res.json(await getRaceSettings());
+    res.json(await getRaceSettingsWithPool());
   } catch (e) {
     res.status(500).json({ error: '获取比赛设置失败' });
   }
@@ -2863,8 +2900,30 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
     const enabledRaw = body.enabled !== undefined ? body.enabled : body.race_enabled;
     const totalRaw = body.maxTotalPlayers !== undefined ? body.maxTotalPlayers : body.race_max_total_players;
     const durationRaw = body.maxDurationMinutes !== undefined ? body.maxDurationMinutes : body.race_max_duration_minutes;
-    if (maxRaw === undefined && enabledRaw === undefined && totalRaw === undefined && durationRaw === undefined) {
+    const articleMinRaw = body.articleMinLen !== undefined ? body.articleMinLen : body.race_article_min_len;
+    const articleMaxRaw = body.articleMaxLen !== undefined ? body.articleMaxLen : body.race_article_max_len;
+    if (maxRaw === undefined && enabledRaw === undefined && totalRaw === undefined && durationRaw === undefined && articleMinRaw === undefined && articleMaxRaw === undefined) {
       return res.status(400).json({ error: '没有要更新的字段' });
+    }
+    const currentSettings = await getRaceSettings();
+    let nextArticleMin = currentSettings.articleMinLen;
+    let nextArticleMax = currentSettings.articleMaxLen;
+    if (articleMinRaw !== undefined) {
+      const n = parseInt(articleMinRaw, 10);
+      if (!Number.isInteger(n) || n < 20 || n > 2000) {
+        return res.status(400).json({ error: '文章最短字数必须在 20 到 2000 之间' });
+      }
+      nextArticleMin = n;
+    }
+    if (articleMaxRaw !== undefined) {
+      const n = parseInt(articleMaxRaw, 10);
+      if (!Number.isInteger(n) || n < 20 || n > 2000) {
+        return res.status(400).json({ error: '文章最长字数必须在 20 到 2000 之间' });
+      }
+      nextArticleMax = n;
+    }
+    if ((articleMinRaw !== undefined || articleMaxRaw !== undefined) && nextArticleMin >= nextArticleMax) {
+      return res.status(400).json({ error: '最短字数必须小于最长字数' });
     }
     if (maxRaw !== undefined) {
       const n = parseInt(maxRaw, 10);
@@ -2895,7 +2954,9 @@ app.put('/api/admin/race-settings', authMiddleware, adminMiddleware, async (req,
       }
       await setSetting('race_max_duration_minutes', String(n));
     }
-    res.json(await getRaceSettings());
+    if (articleMinRaw !== undefined) await setSetting('race_article_min_len', String(nextArticleMin));
+    if (articleMaxRaw !== undefined) await setSetting('race_article_max_len', String(nextArticleMax));
+    res.json(await getRaceSettingsWithPool());
   } catch (e) {
     res.status(500).json({ error: '保存比赛设置失败' });
   }

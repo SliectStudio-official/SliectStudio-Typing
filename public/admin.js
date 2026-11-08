@@ -2759,20 +2759,43 @@ async function loadRaceRooms() {
   }
 }
 
+function renderRacePoolHint(pool) {
+  const hint = document.getElementById('race-pool-hint');
+  if (!hint) return;
+  if (!pool) {
+    hint.textContent = '';
+    return;
+  }
+  const normal = Number(pool.normal) || 0;
+  const code = Number(pool.code) || 0;
+  if (normal + code === 0) {
+    hint.textContent = '当前范围内没有可匹配的文章，匹配会直接提示“暂无可用文章”';
+    hint.style.color = 'var(--semantic-warning)';
+  } else {
+    hint.textContent = '当前范围内：普通文章 ' + normal + ' 篇 / 代码素材 ' + code + ' 篇';
+    hint.style.color = 'var(--muted)';
+  }
+}
+
 async function loadRaceSettings() {
   try {
     const res = await fetch('/api/admin/race-settings', { headers: apiHeaders() });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200, maxDurationMinutes: data.maxDurationMinutes || 180 };
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200, maxDurationMinutes: data.maxDurationMinutes || 180, articleMinLen: data.articleMinLen || 100, articleMaxLen: data.articleMaxLen || 800 };
     const input = document.getElementById('race-max-rooms');
     const totalInput = document.getElementById('race-max-total');
     const durationInput = document.getElementById('race-max-duration');
+    const minInput = document.getElementById('race-article-min-len');
+    const maxInput = document.getElementById('race-article-max-len');
     const check = document.getElementById('race-enabled');
     if (input) input.value = raceSettingsCache.maxRooms;
     if (totalInput) totalInput.value = raceSettingsCache.maxTotalPlayers;
     if (durationInput) durationInput.value = raceSettingsCache.maxDurationMinutes;
+    if (minInput) minInput.value = raceSettingsCache.articleMinLen;
+    if (maxInput) maxInput.value = raceSettingsCache.articleMaxLen;
     if (check) check.checked = raceSettingsCache.enabled;
+    renderRacePoolHint(data.pool);
     setRaceSettingsMsg('', false);
   } catch (e) {
     setRaceSettingsMsg('读取比赛设置失败：' + e.message, true);
@@ -2783,10 +2806,14 @@ async function saveRaceSettings() {
   const input = document.getElementById('race-max-rooms');
   const totalInput = document.getElementById('race-max-total');
   const durationInput = document.getElementById('race-max-duration');
+  const minInput = document.getElementById('race-article-min-len');
+  const maxInput = document.getElementById('race-article-max-len');
   const check = document.getElementById('race-enabled');
   const maxRooms = Number(input && input.value);
   const maxTotalPlayers = Number(totalInput && totalInput.value);
   const maxDurationMinutes = Number(durationInput && durationInput.value);
+  const articleMinLen = Number(minInput && minInput.value);
+  const articleMaxLen = Number(maxInput && maxInput.value);
   if (!Number.isInteger(maxRooms) || maxRooms < 1 || maxRooms > 50) {
     setRaceSettingsMsg('房间数上限必须在 1 到 50 之间', true);
     return;
@@ -2799,18 +2826,33 @@ async function saveRaceSettings() {
     setRaceSettingsMsg('房间最长时长必须在 1 到 180 分钟之间', true);
     return;
   }
+  if (!Number.isInteger(articleMinLen) || articleMinLen < 20 || articleMinLen > 2000) {
+    setRaceSettingsMsg('文章最短字数必须在 20 到 2000 之间', true);
+    return;
+  }
+  if (!Number.isInteger(articleMaxLen) || articleMaxLen < 20 || articleMaxLen > 2000) {
+    setRaceSettingsMsg('文章最长字数必须在 20 到 2000 之间', true);
+    return;
+  }
+  if (articleMinLen >= articleMaxLen) {
+    setRaceSettingsMsg('最短字数必须小于最长字数', true);
+    return;
+  }
   try {
     const res = await apiWrite('/api/admin/race-settings', {
       method: METHOD_PUT, headers: apiHeaders(),
-      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked), maxTotalPlayers: maxTotalPlayers, maxDurationMinutes: maxDurationMinutes })
+      body: JSON.stringify({ maxRooms: maxRooms, enabled: !!(check && check.checked), maxTotalPlayers: maxTotalPlayers, maxDurationMinutes: maxDurationMinutes, articleMinLen: articleMinLen, articleMaxLen: articleMaxLen })
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200, maxDurationMinutes: data.maxDurationMinutes || 180 };
+    raceSettingsCache = { maxRooms: data.maxRooms, enabled: data.enabled !== false, maxTotalPlayers: data.maxTotalPlayers || 200, maxDurationMinutes: data.maxDurationMinutes || 180, articleMinLen: data.articleMinLen || 100, articleMaxLen: data.articleMaxLen || 800 };
     if (input) input.value = raceSettingsCache.maxRooms;
     if (totalInput) totalInput.value = raceSettingsCache.maxTotalPlayers;
     if (durationInput) durationInput.value = raceSettingsCache.maxDurationMinutes;
+    if (minInput) minInput.value = raceSettingsCache.articleMinLen;
+    if (maxInput) maxInput.value = raceSettingsCache.articleMaxLen;
     if (check) check.checked = raceSettingsCache.enabled;
+    renderRacePoolHint(data.pool);
     renderRaceSummary();
     setRaceSettingsMsg('设置已保存', false);
   } catch (e) {
