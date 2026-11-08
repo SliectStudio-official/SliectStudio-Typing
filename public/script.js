@@ -29,6 +29,7 @@ let segmentOffsets = [];
 let currentSegmentIndex = 0;
 let segmentInputs = [];
 let segmentInputValues = [];
+let segmentTotalChars = 0;
 
 let practiceKind = 'normal';
 let codeTyping = null;
@@ -510,6 +511,7 @@ function getDifficultyLabel(d) {
 }
 
 const splitTextIntoSegments = window.TypingEngine.splitTextIntoSegments;
+const lineRules = window.TypingEngine.lineRules;
 
 function calculateRecommendedTime(text, difficulty) {
   const charCount = text.length;
@@ -782,6 +784,7 @@ function startPractice() {
   segmentOffsets = split.offsets;
   segmentInputs = [];
   segmentInputValues = new Array(segments.length).fill('');
+  segmentTotalChars = segments.reduce((n, s) => n + s.length, 0);
   resultCard.style.display = 'none';
   startBtn.disabled = true;
   resetBtn.disabled = false;
@@ -819,6 +822,7 @@ function startCodePractice() {
   segmentOffsets = [];
   segmentInputs = [];
   segmentInputValues = [];
+  segmentTotalChars = 0;
   prevInputLen = 0;
   prevInputValue = '';
   cachedCorrect = 0;
@@ -924,6 +928,7 @@ function resetPractice() {
   currentSegmentIndex = 0;
   segmentInputs = [];
   segmentInputValues = [];
+  segmentTotalChars = 0;
   lastStatUpdate = 0;
   if (rafId) {
     cancelAnimationFrame(rafId);
@@ -984,20 +989,92 @@ function getSegmentStartOffset(segmentIndex) {
   return segmentOffsets[segmentIndex] || 0;
 }
 
+function segmentPage(index) {
+  const input = segmentInputs[index];
+  return input ? input.parentElement : null;
+}
+
+function syncSegmentLine(index) {
+  const filled = lineRules.filled(segmentInputValues[index], segments[index].length);
+  const page = segmentPage(index);
+  if (page) page.classList.toggle('completed', filled);
+  if (segmentInputs[index]) segmentInputs[index].classList.toggle('completed', filled);
+}
+
+function setCurrentSegment(index) {
+  currentSegmentIndex = index;
+  for (let i = 0; i < segmentInputs.length; i++) {
+    const page = segmentPage(i);
+    if (page) page.classList.toggle('active', i === index);
+  }
+  clearOtherCurrentMarks(index);
+  const len = (segmentInputValues[index] || '').length;
+  if (len < segments[index].length) {
+    charStates[getSegmentStartOffset(index) + len] = 'current';
+    renderSegmentText(index);
+  }
+}
+
+// 光标下划线只留在聚焦行，否则跳行后每行都留一条旧标记
+function clearOtherCurrentMarks(exceptIndex) {
+  for (let i = 0; i < segments.length; i++) {
+    if (i === exceptIndex) continue;
+    const len = (segmentInputValues[i] || '').length;
+    const pos = getSegmentStartOffset(i) + len;
+    if (len < segments[i].length && charStates[pos] === 'current') {
+      charStates[pos] = 'pending';
+      renderSegmentText(i);
+    }
+  }
+}
+
+function focusSegment(index, caretAtEnd) {
+  const input = segmentInputs[index];
+  if (!input || input.disabled) return;
+  setCurrentSegment(index);
+  input.focus();
+  const pos = caretAtEnd ? input.value.length : Math.min(input.selectionStart || 0, input.value.length);
+  input.setSelectionRange(pos, pos);
+  const page = segmentPage(index);
+  if (page) page.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 function focusCurrentSegment() {
   const input = segmentInputs[currentSegmentIndex];
-  if (input && !input.disabled) {
+  if (input && !input.disabled && document.activeElement !== input) {
     input.focus();
   }
 }
+
+function onSegmentKeydown(index, e) {
+  if (!isStarted || isFinished) return;
+  const input = segmentInputs[index];
+  if (e.key === 'Backspace' && index > 0 && lineRules.shouldJumpBack(input)) {
+    e.preventDefault();
+    focusSegment(index - 1, true);
+    return;
+  }
+  if (e.key === 'ArrowUp' && index > 0) {
+    e.preventDefault();
+    focusSegment(index - 1, false);
+    return;
+  }
+  if (e.key === 'ArrowDown' && index < segmentInputs.length - 1) {
+    e.preventDefault();
+    focusSegment(index + 1, false);
+  }
+}
+
+function preventSegmentClipboard(e) { e.preventDefault(); }
 
 function renderTypingPages() {
   typingPages.innerHTML = '';
   segmentInputs = [];
 
   segments.forEach((segment, index) => {
+    const filled = lineRules.filled(segmentInputValues[index], segment.length);
     const page = document.createElement('div');
-    page.className = 'typing-page' + (index === currentSegmentIndex ? ' active' : '') + (index < currentSegmentIndex ? ' completed' : '');
+    page.className = 'typing-page' + (index === currentSegmentIndex ? ' active' : '') + (filled ? ' completed' : '');
 
     const textEl = document.createElement('div');
     textEl.className = 'typing-line-text';
@@ -1006,8 +1083,8 @@ function renderTypingPages() {
 
     const input = document.createElement('input');
     input.type = 'text';
-    input.className = 'typing-line-input' + (index < currentSegmentIndex ? ' completed' : '');
-    input.disabled = index !== currentSegmentIndex || !isStarted || isFinished;
+    input.className = 'typing-line-input' + (filled ? ' completed' : '');
+    input.disabled = !isStarted || isFinished;
     input.value = segmentInputValues[index] || '';
     input.spellcheck = false;
     input.autocomplete = 'off';
@@ -1034,6 +1111,12 @@ function renderTypingPages() {
       isComposing = false;
       handleSegmentInput(index, input.value);
     });
+    input.addEventListener('focus', () => {
+      if (isStarted && !isFinished) setCurrentSegment(index);
+    });
+    input.addEventListener('keydown', (e) => onSegmentKeydown(index, e));
+    input.addEventListener('paste', preventSegmentClipboard);
+    input.addEventListener('drop', preventSegmentClipboard);
 
     page.appendChild(input);
     segmentInputs.push(input);
@@ -1105,11 +1188,9 @@ function updateSegmentStates(segmentIndex, inputValue) {
     }
   }
 
-  // 设置当前光标位置
+  // 设置当前光标位置（只在本行内，跨行提示由 setCurrentSegment 负责）
   if (inputLen < segmentLen) {
     charStates[offset + inputLen] = 'current';
-  } else if (segmentIndex < segments.length - 1) {
-    charStates[offset + segmentLen] = 'current';
   }
 
   segmentInputValues[segmentIndex] = inputValue;
@@ -1127,11 +1208,11 @@ function updateSegmentStates(segmentIndex, inputValue) {
 
 function handleSegmentInput(segmentIndex, inputValue) {
   if (!isStarted || isFinished) return;
-  if (segmentIndex !== currentSegmentIndex) return;
 
   const segment = segments[segmentIndex];
+  const prevValue = segmentInputValues[segmentIndex] || '';
 
-  // 防止输入超过本段长度（最后一行除外）
+  // 防止输入超过本段长度
   if (inputValue.length > segment.length) {
     inputValue = inputValue.slice(0, segment.length);
     segmentInputs[segmentIndex].value = inputValue;
@@ -1139,6 +1220,7 @@ function handleSegmentInput(segmentIndex, inputValue) {
 
   updateSegmentStates(segmentIndex, inputValue);
   renderSegmentText(segmentIndex);
+  syncSegmentLine(segmentIndex);
   updateStatsFromCache();
 
   // 朗读功能
@@ -1155,51 +1237,28 @@ function handleSegmentInput(segmentIndex, inputValue) {
     }
   }
 
+  const unfilled = lineRules.firstUnfilled(segmentInputValues, segments);
+
   if (mode === 'full') {
-    let pct;
-    if (segmentIndex === segments.length - 1 && inputValue.length >= segment.length) {
-      pct = 100;
-    } else {
-      pct = Math.min(100, ((getSegmentStartOffset(segmentIndex) + inputValue.length) / originalText.length) * 100);
-    }
+    // 自由跳行后不能再用 offset+本行长度：点第 3 行打 5 个字会虚报成 60%
+    const pct = unfilled < 0 ? 100 : Math.min(100, (prevInputLen / Math.max(1, segmentTotalChars)) * 100);
     textProgress.style.width = pct + '%';
   }
 
-  // 当前段完成，自动翻页
-  if (inputValue.length >= segment.length) {
-    const allCorrect = segment.split('').every((c, i) => inputValue[i] === c);
-    if (allCorrect && segmentIndex < segments.length - 1) {
-      moveToNextSegment();
-    } else if (allCorrect && segmentIndex === segments.length - 1) {
-      finishPractice();
+  if (unfilled < 0) {
+    finishPractice();
+    return;
+  }
+
+  if (lineRules.shouldAdvance(prevValue, inputValue, segment.length)) {
+    let target = lineRules.nextUnfilled(segmentInputValues, segments, segmentIndex);
+    if (target < 0) {
+      target = unfilled;
+      focusSegment(target, true);
+      window.TypingEngine.showLineHint(segmentPage(target), '还有 ' + lineRules.unfilledCount(segmentInputValues, segments) + ' 行没打完');
+    } else {
+      focusSegment(target, true);
     }
-  }
-}
-
-function moveToNextSegment() {
-  const prevInput = segmentInputs[currentSegmentIndex];
-  if (prevInput) {
-    prevInput.disabled = true;
-    prevInput.classList.add('completed');
-  }
-
-  const prevPage = typingPages.children[currentSegmentIndex];
-  if (prevPage) {
-    prevPage.classList.remove('active');
-    prevPage.classList.add('completed');
-  }
-
-  currentSegmentIndex++;
-
-  const nextInput = segmentInputs[currentSegmentIndex];
-  if (nextInput) {
-    nextInput.disabled = false;
-    const nextPage = typingPages.children[currentSegmentIndex];
-    if (nextPage) {
-      nextPage.classList.add('active');
-      nextPage.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    nextInput.focus();
   }
 }
 

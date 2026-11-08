@@ -338,6 +338,60 @@
   document.addEventListener('input', scheduleCurrentLineScroll, true);
   document.addEventListener('compositionend', scheduleCurrentLineScroll, true);
 
+  // P47：练习页 script.js 与比赛页引擎共用同一张规则表，纯判断不含 DOM 状态
+  var lineRules = {
+    filled: function (value, segLen) {
+      return String(value == null ? '' : value).length >= segLen;
+    },
+    // 只在「未满 → 填满」那一瞬跳行；已满行回改时不跳，否则选区重打会被弹走
+    shouldAdvance: function (prevValue, value, segLen) {
+      return !lineRules.filled(prevValue, segLen) && lineRules.filled(value, segLen);
+    },
+    // 有选区时按退格只删选区，不回跳
+    shouldJumpBack: function (input) {
+      return !!input && input.selectionStart === 0 && input.selectionEnd === 0;
+    },
+    firstUnfilled: function (values, segments) {
+      for (var i = 0; i < segments.length; i++) {
+        if (!lineRules.filled(values[i], segments[i].length)) return i;
+      }
+      return -1;
+    },
+    // 从 index 之后找第一个未满行；找不到返回 -1，由调用方决定回卷
+    nextUnfilled: function (values, segments, index) {
+      for (var i = index + 1; i < segments.length; i++) {
+        if (!lineRules.filled(values[i], segments[i].length)) return i;
+      }
+      return -1;
+    },
+    unfilledCount: function (values, segments) {
+      var n = 0;
+      for (var i = 0; i < segments.length; i++) {
+        if (!lineRules.filled(values[i], segments[i].length)) n++;
+      }
+      return n;
+    }
+  };
+
+  var lineHintTimer = 0;
+  function showLineHint(pageEl, text) {
+    if (!pageEl || !pageEl.appendChild) return;
+    var el = pageEl.querySelector('.typing-line-hint');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'typing-line-hint';
+      el.setAttribute('role', 'status');
+      pageEl.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('show');
+    if (lineHintTimer) clearTimeout(lineHintTimer);
+    lineHintTimer = setTimeout(function () {
+      el.classList.remove('show');
+      lineHintTimer = 0;
+    }, 2000);
+  }
+
   function create(container, options) {
     var text = options.text || '';
     var onChange = options.onChange || function () {};
@@ -352,6 +406,7 @@
     var offsets = split.offsets;
     var charStates = new Array(text.length).fill('pending');
     var inputs = [];
+    var pages = [];
     var values = [];
     var currentIndex = 0;
     var isComposing = false;
@@ -368,12 +423,78 @@
       return offsets[index] || 0;
     }
 
+    function syncLine(index) {
+      var filled = lineRules.filled(values[index], segments[index].length);
+      if (pages[index]) pages[index].classList.toggle('completed', filled);
+      if (inputs[index]) inputs[index].classList.toggle('completed', filled);
+    }
+
+    function setCurrent(index) {
+      currentIndex = index;
+      for (var i = 0; i < pages.length; i++) {
+        if (pages[i]) pages[i].classList.toggle('active', i === index);
+      }
+      clearOtherCurrentMarks(index);
+      var len = (values[index] || '').length;
+      if (len < segments[index].length) {
+        charStates[offsetOf(index) + len] = 'current';
+        renderText(index);
+      }
+      scrollLineToCurrent(container);
+    }
+
+    // 光标下划线只留在聚焦行，否则跳行后每行都留一条旧标记
+    function clearOtherCurrentMarks(exceptIndex) {
+      for (var i = 0; i < segments.length; i++) {
+        if (i === exceptIndex) continue;
+        var len = (values[i] || '').length;
+        var pos = offsetOf(i) + len;
+        if (len < segments[i].length && charStates[pos] === 'current') {
+          charStates[pos] = 'pending';
+          renderText(i);
+        }
+      }
+    }
+
+    function focusLine(index, caretAtEnd) {
+      var input = inputs[index];
+      if (!input || input.disabled) return;
+      setCurrent(index);
+      input.focus();
+      var pos = caretAtEnd ? input.value.length : Math.min(input.selectionStart || 0, input.value.length);
+      input.setSelectionRange(pos, pos);
+      var page = pages[index];
+      if (page && page.scrollIntoView) page.scrollIntoView({ block: 'nearest' });
+      scrollLineToCurrent(container);
+    }
+
+    function onLineKeydown(index, event) {
+      if (!enabled || finished) return;
+      var input = inputs[index];
+      if (event.key === 'Backspace' && index > 0 && lineRules.shouldJumpBack(input)) {
+        event.preventDefault();
+        focusLine(index - 1, true);
+        return;
+      }
+      if (event.key === 'ArrowUp' && index > 0) {
+        event.preventDefault();
+        focusLine(index - 1, false);
+        return;
+      }
+      if (event.key === 'ArrowDown' && index < inputs.length - 1) {
+        event.preventDefault();
+        focusLine(index + 1, false);
+      }
+    }
+
     function build() {
       container.innerHTML = '';
       inputs = [];
+      pages = [];
       segments.forEach(function (segment, index) {
+        var filled = lineRules.filled(values[index], segment.length);
         var page = document.createElement('div');
-        page.className = 'typing-page' + (index === currentIndex ? ' active' : '') + (index < currentIndex ? ' completed' : '');
+        page.className = 'typing-page' + (index === currentIndex ? ' active' : '') + (filled ? ' completed' : '');
 
         var textEl = document.createElement('div');
         textEl.className = 'typing-line-text';
@@ -382,14 +503,14 @@
 
         var input = document.createElement('input');
         input.type = 'text';
-        input.className = 'typing-line-input' + (index < currentIndex ? ' completed' : '');
+        input.className = 'typing-line-input' + (filled ? ' completed' : '');
         input.value = values[index] || '';
         input.spellcheck = false;
         input.autocomplete = 'off';
         input.autocapitalize = 'off';
         input.autocorrect = 'off';
         input.setAttribute('aria-label', '第 ' + (index + 1) + ' 段输入');
-        input.disabled = index !== currentIndex || !enabled || finished;
+        input.disabled = !enabled || finished;
 
         input.addEventListener('input', function () {
           if (isComposing) return;
@@ -400,14 +521,23 @@
           isComposing = false;
           handle(index, input.value);
         });
+        input.addEventListener('focus', function () {
+          if (enabled && !finished) setCurrent(index);
+        });
+        input.addEventListener('keydown', function (event) { onLineKeydown(index, event); });
+        input.addEventListener('paste', preventClipboard);
+        input.addEventListener('drop', preventClipboard);
 
         page.appendChild(input);
         inputs.push(input);
+        pages.push(page);
         container.appendChild(page);
         renderText(index);
       });
       scrollToCurrent();
     }
+
+    function preventClipboard(event) { event.preventDefault(); }
 
     function renderText(index) {
       var el = document.getElementById('race-typing-text-' + index);
@@ -446,14 +576,15 @@
     }
 
     function handle(index, value) {
-      if (!enabled || finished || index !== currentIndex) return;
+      if (!enabled || finished) return;
       var segment = segments[index];
+      var prevValue = values[index] || '';
       if (value.length > segment.length) {
         value = value.slice(0, segment.length);
         inputs[index].value = value;
       }
       var off = offsetOf(index);
-      // 重算本段状态
+      // 只重算本段状态，其它行不动
       for (var i = 0; i < segment.length; i++) charStates[off + i] = 'pending';
       for (var k = 0; k < value.length; k++) {
         charStates[off + k] = value[k] === segment[k] ? 'correct' : 'wrong';
@@ -461,13 +592,25 @@
       if (value.length < segment.length) charStates[off + value.length] = 'current';
       values[index] = value;
       renderText(index);
+      syncLine(index);
       emit();
 
-      if (value.length >= segment.length) {
-        var allCorrect = segment.split('').every(function (c, idx) { return value[idx] === c; });
-        if (allCorrect) {
-          if (index < segments.length - 1) { currentIndex = index + 1; build(); focus(); }
-          else { finished = true; emit(true); onFinish(state()); }
+      if (lineRules.firstUnfilled(values, segments) < 0) {
+        finished = true;
+        inputs.forEach(function (input) { input.disabled = true; });
+        emit(true);
+        onFinish(state());
+        return;
+      }
+
+      if (lineRules.shouldAdvance(prevValue, value, segment.length)) {
+        var target = lineRules.nextUnfilled(values, segments, index);
+        if (target < 0) {
+          target = lineRules.firstUnfilled(values, segments);
+          focusLine(target, true);
+          showLineHint(pages[target], '还有 ' + lineRules.unfilledCount(values, segments) + ' 行没打完');
+        } else {
+          focusLine(target, true);
         }
       }
     }
@@ -497,11 +640,12 @@
 
     function focus() {
       var input = inputs[currentIndex];
-      if (input && !input.disabled) input.focus();
+      // 比赛每次 tick 都会 enable(true)，已聚焦时不能再 focus，否则光标被重置
+      if (input && !input.disabled && document.activeElement !== input) input.focus();
     }
 
     function scrollToCurrent() {
-      var page = container.children[currentIndex];
+      var page = pages[currentIndex];
       if (page && page.scrollIntoView) page.scrollIntoView({ block: 'nearest' });
       scrollLineToCurrent(container);
     }
@@ -515,8 +659,8 @@
       enable: function (flag) {
         enabled = !!flag;
         if (enabled && !startedAt) startedAt = Date.now();
-        inputs.forEach(function (input, idx) {
-          input.disabled = !enabled || finished || idx !== currentIndex;
+        inputs.forEach(function (input) {
+          input.disabled = !enabled || finished;
         });
         if (enabled) focus();
       },
@@ -525,5 +669,12 @@
     };
   }
 
-  global.TypingEngine = { create: create, splitTextIntoSegments: splitTextIntoSegments, splitTextWithOffsets: splitTextWithOffsets, measureMaxLen: measureMaxLen };
+  global.TypingEngine = {
+    create: create,
+    splitTextIntoSegments: splitTextIntoSegments,
+    splitTextWithOffsets: splitTextWithOffsets,
+    measureMaxLen: measureMaxLen,
+    lineRules: lineRules,
+    showLineHint: showLineHint
+  };
 })(window);

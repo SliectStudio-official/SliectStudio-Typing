@@ -854,6 +854,8 @@ textarea {
 }
 
 .typing-page {
+  position: relative;
+  scroll-margin-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -871,7 +873,8 @@ textarea {
   box-shadow: 0 4px 16px rgba(234, 88, 12, 0.08);
 }
 
-.typing-page.completed {
+/* P47：已填满的行可点回去改，聚焦时不压灰 */
+.typing-page.completed:not(.active) {
   opacity: 0.7;
   background: var(--canvas-soft);
 }
@@ -956,6 +959,31 @@ textarea {
   border-color: var(--semantic-success);
   background: rgba(22, 163, 74, 0.06);
   color: var(--ink);
+}
+
+/* P47：回卷到未满行时的轻提示，挂在行上沿外侧，不占布局也不挡正文 */
+.typing-line-hint {
+  position: absolute;
+  top: -14px;
+  right: 16px;
+  z-index: 3;
+  padding: 2px 10px;
+  border: 1px solid rgba(234, 88, 12, 0.35);
+  border-radius: 999px;
+  background: var(--canvas);
+  color: var(--primary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s;
+}
+
+.typing-line-hint.show {
+  opacity: 1;
+  visibility: visible;
 }
 
 /* ===== P34 代码模式：VSCode 式输入框 ===== */
@@ -4660,7 +4688,8 @@ button:focus-visible,
 
 /* ===== 比赛：打字区与首页一致（复用 .typing-* 类），只做容器内收边 ===== */
 .race-typing-hint { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
-#race-typing { max-height: 62vh; overflow: auto; gap: 12px; }
+/* 顶部留白给首行的 .typing-line-hint，否则被 overflow:auto 裁掉 */
+#race-typing { max-height: 62vh; overflow: auto; gap: 12px; padding-top: 16px; }
 #race-typing .typing-page {
   background: transparent;
   border: 1px solid transparent;
