@@ -881,11 +881,25 @@ textarea {
   font-size: 22px;
   line-height: 1.6;
   color: var(--body);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: visible;
   user-select: none;
   min-height: 36px;
+}
+
+/* 只有正在打的那一段单行；超宽交给 JS 计算 scrollLeft 跟随当前字符 */
+.typing-page.active .typing-line-text {
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-overflow: clip;
+  scroll-behavior: auto;
+  scrollbar-width: none;
+}
+
+.typing-page.active .typing-line-text::-webkit-scrollbar {
+  height: 0;
 }
 
 .typing-line-text .char {

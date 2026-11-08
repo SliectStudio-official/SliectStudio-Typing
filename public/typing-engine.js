@@ -303,6 +303,41 @@
     return n;
   }
 
+  function scrollLineToCurrent(scope) {
+    var root = scope && scope.querySelector ? scope : document;
+    var page = root.querySelector('.typing-page.active');
+    if (!page) return;
+    var textEl = page.querySelector('.typing-line-text');
+    var current = textEl && textEl.querySelector('.char.current');
+    if (!textEl || !current) return;
+    var max = textEl.scrollWidth - textEl.clientWidth;
+    if (max <= 0) {
+      if (textEl.scrollLeft !== 0) textEl.scrollLeft = 0;
+      return;
+    }
+    // char 是 inline span，offsetLeft 相对 offsetParent 不可靠，用 rect 换算
+    var lineRect = textEl.getBoundingClientRect();
+    var charRect = current.getBoundingClientRect();
+    var target = textEl.scrollLeft + charRect.left - lineRect.left - textEl.clientWidth / 2 + charRect.width / 2;
+    if (!Number.isFinite(target)) return;
+    textEl.scrollLeft = Math.max(0, Math.min(max, target));
+  }
+
+  var pendingScrollFrame = 0;
+  function scheduleCurrentLineScroll(event) {
+    var target = event && event.target;
+    if (!target || !target.classList || !target.classList.contains('typing-line-input')) return;
+    if (pendingScrollFrame) return;
+    pendingScrollFrame = global.requestAnimationFrame(function () {
+      pendingScrollFrame = 0;
+      scrollLineToCurrent(document);
+    });
+  }
+
+  // 首页练习区仍由 script.js 自己渲染，这里统一兜住它的当前行跟随
+  document.addEventListener('input', scheduleCurrentLineScroll, true);
+  document.addEventListener('compositionend', scheduleCurrentLineScroll, true);
+
   function create(container, options) {
     var text = options.text || '';
     var onChange = options.onChange || function () {};
@@ -468,6 +503,7 @@
     function scrollToCurrent() {
       var page = container.children[currentIndex];
       if (page && page.scrollIntoView) page.scrollIntoView({ block: 'nearest' });
+      scrollLineToCurrent(container);
     }
 
     build();
